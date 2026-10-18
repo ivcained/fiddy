@@ -43,7 +43,7 @@ owner-network accounts with the infra habit.
 | 7 | @0xael.eth | 539854 | 1 326 | 0.1 d | RT: runs SnapMeter, "Hypersnap data is syncing with a local node" — will judge the node path on the numbers | Farcaster DM |
 | 8 | @felirami.eth | 196149 | 4 910 | 0.7 d | RT: "Making it easier to run a Hypersnap node" — adjacent tooling, will see the differences fast | Farcaster DM |
 | 9 | @boiler | 14217 | 708 | 0.6 d | RT: "Who is running either a snapchain node or a replicator?" — an open, unanswered node question | Farcaster DM (reply) |
-| 10 | @mvr | 230238 | 11 864 | 0.2 d | build a Farcaster client (Vibeshift); in the bounty thread he made the read-node/write-path point the tutorial implements | Farcaster DM |
+| 10 | @mvr | 230238 | 11 864 | 0.2 d | builds a Farcaster client (Vibeshift); in the bounty thread he made the read-node/write-path point the tutorial implements | Farcaster DM |
 | 11 | @manan | 191 | 38 281 | 2.7 d | "Building (and sometimes breaking) farcaster" — will read the protocol claims critically | Farcaster DM |
 | 12 | @borodutch | 1356 | 38 398 | 0.7 d | "sr staff agentic engineer" — runs infra for a living, warm (@ivc follows, mutual) | Farcaster DM |
 | 13 | @darrylyeo | 3854 | 7 894 | today | Farcaster dev who replied in the bounty thread; also useful as a second vouch | Farcaster DM |
