@@ -140,8 +140,13 @@ preflight_report() { # preflight_report <vcpu> <ram_mb> <disk_gb_free> <disk_lab
   printf '  %-22s %s\n' "RAM:" "${ram_gb} GB (need ${FIDDY_MIN_RAM_GB})"
   printf '  %-22s %s\n' "free disk ($disk_label):" "${disk_gb} GB (need ${FIDDY_MIN_DISK_GB})"
   if [ -n "$ports" ]; then printf '  %-22s %s\n' "ports already in use:" "$ports"; fi
+  # RAM is compared in integer GiB read from the OS, which truncates: every
+  # 16 GB-class cloud VM (GCP e2-standard-4, AWS m5.xlarge, …) reports 15.x GiB.
+  # Floor the comparison at min-1 so the standard 16 GB class passes while a
+  # genuinely smaller box (8/12 GB) still fails.
+  local ram_floor=$(( FIDDY_MIN_RAM_GB - 1 ))
   [ "$vcpu" -ge "$FIDDY_MIN_VCPU" ] 2>/dev/null || PREFLIGHT_FAILED=1
-  [ "$ram_gb" -ge "$FIDDY_MIN_RAM_GB" ] 2>/dev/null || PREFLIGHT_FAILED=1
+  [ "$ram_gb" -ge "$ram_floor" ] 2>/dev/null || PREFLIGHT_FAILED=1
   [ "$disk_gb" -ge "$FIDDY_MIN_DISK_GB" ] 2>/dev/null || PREFLIGHT_FAILED=1
   if [ -n "$ports" ]; then
     case ",$ports," in
