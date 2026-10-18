@@ -128,6 +128,12 @@ entry.
 When a vouch lands, verify it from the hub before it goes into the submission reply — the read works from this
 machine with no key, the recipe is in `VOUCHER-RECRUIT-TARGETS.md` §6.
 
+Raw data behind every number in §2: `docs/evidence/voucher-candidates-top40.json` (top 40 of the 130 ranked
+candidates: score, follower count, days since last cast, bio, last-cast text, why-chosen) and
+`docs/evidence/voucher-send-queue-verified.json` (the 22 handles re-read at send-queue time). Reproduce with the
+producers in the same directory: `fetch_network.py` (public hub → raw JSON) → `analyze_candidates.py` (rank) →
+`refine.py` (recency + reach).
+
 ## 7. While they run it
 
 Record every stumble in `docs/VOUCHER-FRICTION-LOG.md` as it happens: exact step, exact command, exact output,
