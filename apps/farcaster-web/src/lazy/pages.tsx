@@ -28,6 +28,12 @@ export const AdminReviewsPage = lazyWithPreload(() =>
   })),
 );
 
+export const AgentPage = lazyWithPreload(() =>
+  import('~/pages/agent/AgentPage').then((res) => ({
+    default: res.AgentPage,
+  })),
+);
+
 export const ApiKeysPage = lazyWithPreload(() =>
   import('~/pages/developers/ApiKeysPage').then((res) => ({
     default: res.ApiKeysPage,

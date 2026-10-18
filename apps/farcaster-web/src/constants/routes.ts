@@ -11,6 +11,7 @@ import {
   AdminFeedsComparisonPage,
   AdminLabeledCastsPage,
   AdminReviewsPage,
+  AgentPage,
   ApiKeysPage,
   AppsPage,
   ArticlePage,
@@ -893,6 +894,13 @@ const routes = {
     search: {},
     family: family('saved'),
     Component: SavedPage,
+  },
+  agent: {
+    path: `${appPathPrefix}/agent`,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: AgentPage,
   },
   savedStarterPacks: {
     path: `${appPathPrefix}/saved/starter-packs`,
