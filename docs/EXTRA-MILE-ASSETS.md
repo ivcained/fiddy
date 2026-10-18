@@ -86,7 +86,7 @@ substitutes for a review)**
 | Check | Result |
 | --- | --- |
 | Layout audit (`make_video.py probe`) | **OK** — 0 problems: no terminal line exceeds the panel width, no line longer than 44 chars, body bottom 1094 < 1370, captions ≤ 3 lines |
-| Ink-bounds audit over 6 rendered frames | text bbox x 36–1015 inside the 1080 frame; **0 ink pixels** in the top 80 px and bottom 80 px; 0 ink in the panel/caption gap (1402–1460) except the caption's own lime accent bar at 1452 |
+| Ink-bounds audit over 6 rendered frames **and 16 frames decoded back out of the mp4** (`docs/evidence/video-frame-audit.txt`) | text bbox x 36–1015 inside the 1080 frame; **0 ink pixels** in the top 80 px and bottom 80 px; 0 ink in the panel/caption gap (1402–1460) except the caption's own lime accent bar at 1452 |
 | Captions present in every frame | bright-ink counts: panel 12k–53k, caption band 17k–29k (0 only on the title card, which has no band); progress rail present 813–2000 |
 | Glyph coverage per font | every character drawn was rendered with the font that has it: Menlo (terminal, `✓`, `→`), Helvetica Neue (captions/titles), Hiragino Sans GB (the one CJK line). Zero `.notdef` boxes |
 | Container facts | `ffmpeg -i` → Duration 00:00:58.00, h264 High, yuv420p(progressive), 1080x1920, 30 fps, one stream (no audio) |
