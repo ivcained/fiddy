@@ -20,10 +20,12 @@ node_main() {
       cat <<'EOF'
 fiddy node — manage your Snapchain read node.
 
-  up [--local]   Install Docker + Snapchain on the target, start syncing,
-                 and wait until the HTTP API answers. --local runs on this
+  up [--local]   Install Docker + Snapchain on the target, start syncing, and
+                 wait until the HTTP API answers. Checks CPU / RAM / free disk
+                 first and refuses an undersized box
+                 (override: FIDDY_ALLOW_UNDERSIZED=1). --local runs on this
                  machine instead of the provisioned target.
-  status         Print sync status from /v1/info.
+  status         Read /v1/info and say plainly whether the node works.
   logs           Tail node logs (Ctrl-C to stop).
   stop | start | upgrade
                  Wrap snapchain.sh on the remote.
@@ -53,6 +55,11 @@ node_install_remote() {
   require_target
   log "target: $FIDDY_TARGET"
 
+  # Check the box can hold a read node *before* installing anything: the
+  # bootstrap pulls a ~200 GB compressed snapshot, and a small disk fails hours
+  # in rather than at the start.
+  check_node_sizing "$(node_facts_remote)" || die "could not read facts from $FIDDY_TARGET — check SSH access"
+
   log "ensuring Docker…"
   ssh_run 'command -v docker >/dev/null || { curl -fsSL https://get.docker.com | sudo bash && sudo usermod -aG docker $USER; }; docker --version'
 
@@ -69,12 +76,15 @@ node_install_remote() {
   config_set FIDDY_NODE_GRPC "$host:$SNAP_GRPC_PORT"
   echo ""
   ok "Read node syncing. Full sync takes hours; the API answers immediately."
+  node_status
   ok "Next: fiddy client up"
 }
 
 node_install_local() {
   require docker "install: https://docs.docker.com/get-docker/"
   require curl "install curl"
+  mkdir -p "$FIDDY_HOME"
+  check_node_sizing "$(node_facts_local)"
   mkdir -p "$FIDDY_HOME/snapchain"
   ( cd "$FIDDY_HOME/snapchain"
     curl -sSL https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/scripts/snapchain-bootstrap.sh | bash
@@ -91,5 +101,7 @@ node_status() {
   local host="${FIDDY_TARGET#*@}"
   local base="${FIDDY_NODE_HTTP:-http://$host:$SNAP_HTTP_PORT}"
   step "Node status ($base)"
-  curl -fsS --max-time 10 "$base/v1/info" || die "node not answering — try: fiddy node logs"
+  local body
+  body="$(curl -fsS --max-time 10 "$base/v1/info")" || die "node not answering at $base/v1/info — if the node is up, check the SSH tunnel or the firewall; logs: fiddy node logs"
+  node_info_verdict "$base" "$body"
 }

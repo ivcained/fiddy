@@ -14,16 +14,60 @@ Full tutorial (mobile + desktop, protocol concepts explained as you go):
 
 ```bash
 git clone https://github.com/ivcained/fiddy && cd fiddy
+export PATH="$PWD/bin:$PATH"       # makes `fiddy` resolve (or use `bash bin/fiddy …`)
 
-fiddy provision   # (0) compute: AWS EC2 via aws CLI, or register any server (--ssh user@host)
-fiddy node up     # (1) Snapchain read node on that compute — installs, syncs, waits for health
-fiddy client up   # (2) the Fiddy web client, reading YOUR node (SSH-tunneled by default)
+fiddy provision   # (0) compute: AWS EC2 via the aws CLI, or register any server (--ssh user@host)
+fiddy node up     # (1) Snapchain read node on that compute — sizing check, install, sync
+fiddy client up   # (2) the Fiddy web client, SSH-tunneled to your node by default
 ```
 
-Run `bin/fiddy` directly (`bash bin/fiddy …`) or put it on your `PATH`.
-`fiddy doctor` checks your local prerequisites; `fiddy node status` reports
-sync health; `fiddy client up --tunnel` is the default because node APIs
-should not be public.
+`fiddy doctor` checks your local prerequisites (and tells you whether this
+machine could host a node itself); `fiddy node status` answers "is it working?"
+in plain words instead of dumping JSON; `fiddy client up --tunnel` is the
+default because node APIs should not be public.
+
+**Before you buy anything:** a read node needs **4 vCPU, 16 GB RAM and 1.5–2 TB
+of free disk** on Ubuntu 22.04+, with ports 3381–3383 reachable. The ~200 GB
+mainnet snapshot is the *compressed* size — it decompresses to several times
+that, and block pruning is off by default, so a smaller disk fails halfway
+through a multi-hour sync. `fiddy node up` reads the box's CPU, RAM and free
+disk first and refuses to install when it cannot hold the node, printing what
+it found and what to change. On AWS list price that box is ~$285/month
+(instance ~$121 + 2 TB gp3 ~$164); a 2 TB VPS from a Hetzner/Contabo/OVH-class
+host is usually $50–80/month.
+
+## Verify it works
+
+Three checks, in the order the commands run. A brand-new node that passes all
+three is exactly as "working" as a node can be before it finishes syncing —
+full sync takes hours, and everything below answers immediately.
+
+```bash
+fiddy node status      # (1) the API answers, and what the node knows
+curl -fsS http://127.0.0.1:3381/v1/info   # (2) same thing by hand, for a tunneled node
+fiddy client up        # (3) the web client boots at https://localhost:5173/
+```
+
+(1) prints a verdict like this when the node is healthy — compare it against
+the live public read node, which needs no provisioning at all:
+
+```text
+$ fiddy node status
+Node status (https://haatz.quilibrium.com)
+✓ the node API is answering — that is what "working" means for a read node
+  version 0.13.5 · 3 shards · max height 49002434 · 914248045 messages stored
+```
+
+(2) returns the same `/v1/info` JSON: `"shardInfos"`, `"maxHeight"`,
+`"version"`. Run it minute to minute — a **rising** `maxHeight` means the node
+is still syncing, which is what you want to see. Anything HTML back means you
+pointed the CLI at a docs site rather than a node.
+
+(3) starts the client on **HTTPS with a self-signed certificate** (`https://localhost:5173/`):
+accept the browser warning, or the page will look broken — `http://` answers
+nothing. The CLI also prints which API the client's reads come from; today that
+is the public Farcaster API, not your node (see **Status** below for the
+wiring, which is in progress).
 
 **Posting is gasless.** The client issues itself an app key with a `KEY_ADD`
 message signed by your custody address — no ETH, no Optimism transaction,
@@ -32,6 +76,20 @@ already has storage: the seed never leaves your browser, and it only ever
 authorizes the app key. Read
 [the seed-phrase safety section](https://fiddy.fun/client#safety) before
 importing anything.
+
+## Status
+
+Two things are honest-must-knows before a clean run means what it says, both
+dated 2026-10-18 and both tracked in this repo:
+
+- **The web client's read path does not consume your node URL yet.** The CLI
+  writes `VITE_SNAPCHAIN_HTTP_URL` into `apps/farcaster-web/.env.local`, and
+  `fiddy client up` prints a warning when the build does not read it: until the
+  node-backed read path lands, the client's feed comes from the public
+  Farcaster API. Your node is unaffected — verify it with `fiddy node status`.
+- **`fiddy node up --local` needs the same 1.5–2 TB free** as a server, so on a
+  laptop it is a check, not a shortcut: `fiddy doctor` tells you which side of
+  the line this machine is on. Provisioning a 2 TB box is the real path.
 
 ## What you get
 
@@ -143,12 +201,16 @@ what Solana currently supports.
 Clone your fork and install the workspace:
 
 ```sh
-git clone git@github.com:YOUR_ACCOUNT/farcaster-wallet-client.git
-cd farcaster-wallet-client
-corepack enable
+git clone https://github.com/ivcained/fiddy && cd fiddy
 pnpm install --frozen-lockfile
 pnpm build:packages
 ```
+
+`pnpm` 10.8.1+ is required (declared in `package.json`). `corepack enable` was
+the old way to get it and is no longer shipped with Node 25+, so install pnpm
+directly (`npm install -g pnpm@10`). `pnpm install` resolves the whole
+workspace (~4 GB of `node_modules`) in a few minutes; `pnpm build:packages` is
+only needed when you are changing the shared packages.
 
 Configure WalletConnect:
 

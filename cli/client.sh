@@ -47,8 +47,8 @@ client_up() {
   if [ "$tunnel" = 1 ] || [ -z "$node_url" ]; then
     require_target
     log "opening SSH tunnel: 127.0.0.1:$SNAP_HTTP_PORT → $FIDDY_TARGET:$SNAP_HTTP_PORT"
-    mapfile -t opts < <(ssh_opts)
-    ssh "${opts[@]}" -N -L "$SNAP_HTTP_PORT:127.0.0.1:$SNAP_HTTP_PORT" "$FIDDY_TARGET" &
+    ssh_opts_fill
+    ssh "${FIDDY_SSH_OPTS[@]}" -N -L "$SNAP_HTTP_PORT:127.0.0.1:$SNAP_HTTP_PORT" "$FIDDY_TARGET" &
     local tunnel_pid=$!
     trap 'kill $tunnel_pid 2>/dev/null || true' EXIT
     sleep 2
@@ -65,6 +65,17 @@ client_up() {
   } > "$web_env"
   ok "wrote $web_env (node: $node_url)"
 
+  # Say out loud where the client's reads actually come from. The env var above
+  # is only useful once the web app consumes it; until then a newcomer would
+  # otherwise believe the feed they see is served by the node they just built.
+  if grep -rqs "VITE_SNAPCHAIN_HTTP_URL" "$FIDDY_REPO/apps/farcaster-web/src" 2>/dev/null; then
+    ok "the client reads through your node: $node_url"
+  else
+    warn "this build of the web client does not consume VITE_SNAPCHAIN_HTTP_URL yet: its"
+    warn "reads still go through the public Farcaster API. Your node is fine — prove it"
+    warn "independently with: fiddy node status   (see README → Status for the wiring)"
+  fi
+
   if [ ! -d "$FIDDY_REPO/node_modules" ]; then
     log "installing dependencies (first run takes a few minutes)…"
     ( cd "$FIDDY_REPO" && pnpm install )
@@ -74,6 +85,9 @@ client_up() {
   if [ "$build" = 1 ]; then
     ( cd "$FIDDY_REPO" && pnpm --filter farcaster-web build && pnpm --filter farcaster-web preview )
   else
+    log "the dev server serves HTTPS with a self-signed certificate (vite-plugin-basic-ssl)."
+    log "open the URL vite prints — https://localhost:5173/ — and accept the certificate"
+    log "warning; the http:// form of that address answers nothing."
     ( cd "$FIDDY_REPO" && pnpm --filter farcaster-web dev )
   fi
 }
