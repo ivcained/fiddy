@@ -93,6 +93,13 @@ of the brief, with the protocol citations. That is the "not AI slop" part: we re
 
 ## 7. Recruiting a voucher
 
+**Targeting is now data-backed instead of a template.** `docs/VOUCHER-OUTREACH.md` (2026-10-18) holds the verified
+17-candidate list pulled from live Farcaster data (the bounty thread's repliers, @ivc's 429 follows, the 2 805
+follow links at @ivc, plus recency and reach per account), three paste-ready DM variants, the public ask cast, and
+the per-candidate outreach outcome table. Friction a voucher hits is recorded verbatim in
+`docs/VOUCHER-FRICTION-LOG.md`. What is still missing is the send itself: no Farcaster write credential exists on
+this machine, so the DMs and the cast go out from @ivc's client.
+
 Where to look, in order of conversion:
 
 1. **Direct DMs to the owner's own network** — people who already run servers or side projects. Highest conversion,
