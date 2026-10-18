@@ -1,8 +1,17 @@
 # Fiddy — your own Farcaster client, on your own node, in three commands
 
-Fiddy is a forkable Farcaster client with external wallet support that reads
-and writes through **your own Snapchain read node** — no API keys, no Neynar,
-no Alchemy. You furnish the compute; the node syncs the network.
+Fiddy is a forkable Farcaster client with external wallet support that is built
+to read and write through **your own Snapchain read node** — no API keys, no
+Neynar, no Alchemy. You furnish the compute; the node syncs the network.
+
+> **Read this before you vouch for the node half.** The node side is real and
+> verified end to end (a mainnet read node installs over SSH, joins the gossip
+> mesh and starts the snapshot bootstrap). The client's *reads* do not come from
+> your node yet: the web client's data layer still calls Farcaster's hosted API,
+> and `fiddy client up` says so when it runs. The node-backed data layer
+> (`packages/farcaster-node-client`) exists but is not wired into the app.
+> Details, evidence and the path to close it: [docs/CLIENT-NODE-GAP.md](docs/CLIENT-NODE-GAP.md)
+> and [docs/RUN-REPORT-2026-10-18.md](docs/RUN-REPORT-2026-10-18.md).
 
 Full tutorial (mobile + desktop, protocol concepts explained as you go):
 **https://fiddy.fun/client** — or open `site/index.html` locally.
@@ -16,14 +25,27 @@ Full tutorial (mobile + desktop, protocol concepts explained as you go):
 git clone https://github.com/ivcained/fiddy && cd fiddy
 
 fiddy provision   # (0) compute: AWS EC2 via aws CLI, or register any server (--ssh user@host)
-fiddy node up     # (1) Snapchain read node on that compute — installs, syncs, waits for health
-fiddy client up   # (2) the Fiddy web client, reading YOUR node (SSH-tunneled by default)
+fiddy node up     # (1) Snapchain read node on that compute — installs, then bootstraps
+fiddy client up   # (2) the Fiddy web client, pointed at your node (SSH-tunneled by default)
 ```
 
-Run `bin/fiddy` directly (`bash bin/fiddy …`) or put it on your `PATH`.
-`fiddy doctor` checks your local prerequisites; `fiddy node status` reports
-sync health; `fiddy client up --tunnel` is the default because node APIs
-should not be public.
+**Size your machine for the job.** A mainnet read node needs 4 vCPU, 16 GB RAM
+and **2 TB** of disk: its snapshot bootstrap alone pulls ~468 GB of gzipped
+chunks and needs ~1.66 TB peak to unpack them (`fiddy provision --aws` creates
+a 2048 GB volume for this reason; `--ssh` targets are checked and refused below
+the minimum unless you pass `--force`). Measured numbers, ports and failure
+modes: [docs/NODE-REQUIREMENTS.md](docs/NODE-REQUIREMENTS.md).
+
+A fresh node **does not serve its HTTP API until the snapshot load finishes** —
+`fiddy node up` reports bootstrap progress and hands off to `fiddy node status`
+rather than waiting for hours.
+
+Run `bin/fiddy` directly (`bash bin/fiddy …`) or put it on your `PATH` — with
+bash, not `sh` (macOS's stock `/bin/bash` 3.2 is supported).
+`fiddy doctor` checks your local prerequisites; `fiddy node verify` runs the
+acceptance checks against your node (`/v1/info`, reads, `/v1/signersByFid`);
+`fiddy client check` reports where the client's reads actually go;
+`fiddy client up --tunnel` is the default because node APIs should not be public.
 
 **Posting is gasless.** The client issues itself an app key with a `KEY_ADD`
 message signed by your custody address — no ETH, no Optimism transaction,
@@ -35,8 +57,11 @@ importing anything.
 
 ## What you get
 
-- **Your reads and writes, your infra** — feed, casts, follows, reactions and
-  include/exclude of other clients' casts, all served by your node.
+- **Your own read node** — a Snapchain `read_node = true` install on your
+  compute, joining gossip and serving the HTTP + gRPC APIs (`fiddy node verify`
+  exercises them). Reads are served by the node's Hubble-compatible `/v1/*` API;
+  wiring the client's UI onto that API is the one piece still outstanding
+  ([docs/CLIENT-NODE-GAP.md](docs/CLIENT-NODE-GAP.md)).
 - **External wallets, non-custodial** — WalletConnect (EVM + Solana),
   EIP-6963 discovery, optional unified MetaMask Connect. No seed phrase is
   created, requested, or stored by the client beyond the local import above.

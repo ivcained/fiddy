@@ -8,6 +8,8 @@
 # No API keys from anyone. You furnish the compute; the node syncs the network.
 set -euo pipefail
 
+[ -n "${BASH_VERSION:-}" ] || { echo "fiddy needs bash (bash bin/fiddy …)" >&2; exit 1; }
+
 FIDDY_HOME="${FIDDY_HOME:-$HOME/.fiddy}"
 FIDDY_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export FIDDY_HOME FIDDY_REPO
@@ -24,14 +26,19 @@ Usage: fiddy <command> [options]
               --aws                       create an AWS EC2 instance (needs aws CLI)
               --ssh user@host             use any server you already have
   node        Manage your Snapchain read node
-              up                          install + start + wait for sync
+              up [--local] [--force]      install + start + wait for the API
               status                      sync status and health
               logs                        tail node logs
-              stop | start | upgrade      wrap snapchain.sh on the remote
-  client      Run the Fiddy client against your node
+              start | stop | upgrade      lifecycle without the log tail
+  client      Run the Fiddy client
               up [--tunnel] [--build]     dev server, SSH tunnel, or prod build
+              check                       where the client's reads go today
   doctor      Check local prerequisites
   config      Show current fiddy configuration
+
+A mainnet read node needs 4 vCPU, 16 GB RAM and 1.5 TB free disk (snapshot
+bootstrap needs scratch on top of that). fiddy checks the target first and
+will not fill a machine that cannot host it; --force overrides the check.
 
 Docs: https://fiddy.fun/client
 EOF

@@ -2,8 +2,14 @@
 # fiddy provision — command (0): furnish the compute.
 #
 # Two paths:
-#   --aws            create a fresh EC2 instance with Docker preinstalled via user-data
-#   --ssh user@host  register any server you already have (validated, then saved)
+#   --aws            create a fresh EC2 instance (m5.xlarge + 2 TB gp3) with
+#                    Docker preinstalled via user-data
+#   --ssh user@host  register any server you already have (checked, then saved)
+#
+# Storage is the constraint that decides whether this works at all: a mainnet
+# read node wants 1.5 TB free, and the snapshot bootstrap needs scratch space
+# on top of that (chunks + assembled tar before unpack). See
+# docs/NODE-REQUIREMENTS.md for the measured numbers.
 
 provision_main() {
   local mode=""
@@ -11,16 +17,26 @@ provision_main() {
     case "$1" in
       --aws)  mode=aws ;;
       --ssh)  mode=ssh; shift; FIDDY_SSH_TARGET_ARG="${1:-}" ;;
+      --force) FIDDY_ALLOW_UNDERSIZED=1 ;;
       -h|--help)
-        cat <<'EOF'
+        cat <<EOF
 fiddy provision — furnish the compute your node will run on.
 
-  --aws             Create an AWS EC2 instance (~$100/mo, t3.xlarge, 200GB gp3).
+  --aws             Create an AWS EC2 instance with Docker preinstalled.
                     Needs: aws CLI configured (aws configure).
-                    Options: FIDDY_AWS_REGION (default us-east-1)
-                             FIDDY_AWS_INSTANCE_TYPE (default t3.xlarge)
+                    Defaults: m5.xlarge (4 vCPU / 16 GB) in ${FIDDY_AWS_REGION:-us-east-1}
+                              with a ${FIDDY_AWS_VOLUME_GB:-2048} GB gp3 volume.
+                    Options: FIDDY_AWS_REGION, FIDDY_AWS_INSTANCE_TYPE,
+                             FIDDY_AWS_VOLUME_GB
+                    Rough list price: instance + volume (printed before it runs).
   --ssh user@host   Skip creation — use a server you already have.
                     Needs: SSH key auth already working, sudo on the remote.
+  --force           Skip the requirements preflight (see below).
+
+A Snapchain mainnet read node needs 4 vCPU, 16 GB RAM and 1.5 TB of free
+disk, a public IP, and ports 3381-3383 reachable (gossip is 3382/udp).
+Snapshot bootstrap needs scratch space beyond that. fiddy checks the target
+before installing and refuses to fill a machine that cannot host the node.
 
 The target is saved to ~/.fiddy/config (mode 0600).
 EOF
@@ -36,10 +52,12 @@ EOF
     *)
       step "fiddy provision"
       echo "Pick your compute:"
-      echo "  1. AWS (scripted, ~\$100/mo):  fiddy provision --aws"
-      echo "  2. Any server you have:        fiddy provision --ssh user@host"
+      echo "  1. AWS (scripted, ~\$300/mo at list price):  fiddy provision --aws"
+      echo "  2. Any server you have:                    fiddy provision --ssh user@host"
       echo ""
-      echo "Minimum for a Snapchain read node: 4 vCPU, 16 GB RAM, 200 GB SSD, Ubuntu 22.04+."
+      echo "Minimum for a Snapchain mainnet read node: 4 vCPU, 16 GB RAM,"
+      echo "1.5 TB free disk, public IP, ports 3381-3383 TCP+UDP."
+      echo "A cheaper 2 TB VPS from any provider works just as well — see the tutorial."
       ;;
   esac
 }
@@ -49,14 +67,23 @@ provision_ssh() {
   require ssh "install openssh"
   step "Registering existing server: $target"
   log "checking SSH (BatchMode, 10s timeout)…"
-  mapfile -t opts < <(ssh_opts 2>/dev/null || true)
-  ssh "${opts[@]:-}" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
-      "$target" 'echo fiddy-ok && uname -sm && (command -v docker >/dev/null && docker --version || echo no-docker)' \
-    | tee /tmp/fiddy-provision-ssh.$$
-  grep -q fiddy-ok /tmp/fiddy-provision-ssh.$$ || die "cannot reach $target — fix key auth first (ssh-copy-id $target)"
-  rm -f /tmp/fiddy-provision-ssh.$$
+  local probe
+  config_load                       # pick up FIDDY_SSH_KEY if a previous run saved one
+  build_ssh_args
+  probe="$(ssh "${FIDDY_SSH_ARGS[@]}" "$target" 'echo fiddy-ok && uname -sm && (command -v docker >/dev/null && docker --version || echo no-docker)' 2>&1)" \
+    || true
+  printf '%s\n' "$probe"
+  case "$probe" in
+    *fiddy-ok*) ;;
+    *) die "cannot reach $target — fix key auth first (ssh-copy-id $target)" ;;
+  esac
   config_set FIDDY_TARGET "$target"
   config_set FIDDY_PROVIDER "ssh"
+
+  # Same preflight the node install runs, done here so the answer arrives
+  # before anything is installed.
+  preflight_remote
+  preflight_verdict "${FIDDY_ALLOW_UNDERSIZED:-0}"
   ok "target saved. Next: fiddy node up"
 }
 
@@ -65,12 +92,30 @@ provision_aws() {
   require ssh "install openssh"
 
   local region="${FIDDY_AWS_REGION:-us-east-1}"
-  local itype="${FIDDY_AWS_INSTANCE_TYPE:-t3.xlarge}"
+  local itype="${FIDDY_AWS_INSTANCE_TYPE:-m5.xlarge}"   # matches Farcaster's own guide
+  local volume_gb="${FIDDY_AWS_VOLUME_GB:-2048}"        # 1.5 TB minimum + scratch
   local name="fiddy-node-$(date +%s)"
   local sg_name="fiddy-node"
   local my_ip
 
-  step "Provisioning AWS EC2 ($itype in $region)"
+  # Credentials before resources: a half-provisioned AWS run is worse than a
+  # clear "you are not logged in".
+  aws sts get-caller-identity >/dev/null 2>&1 \
+    || die "aws CLI is not authenticated — run: aws configure  (or: aws sso login)"
+
+  if [ "$volume_gb" -lt "$FIDDY_MIN_DISK_GB" ] 2>/dev/null; then
+    warn "FIDDY_AWS_VOLUME_GB=$volume_gb is below the ${FIDDY_MIN_DISK_GB} GB a read node needs"
+  fi
+
+  local inst_hr="${FIDDY_AWS_INSTANCE_HOURLY:-0.192}"   # m5.xlarge us-east-1 list
+  local gb_mo="${FIDDY_AWS_GP3_GB_MONTH:-0.08}"
+  local est
+  est="$(awk -v h="$inst_hr" -v g="$volume_gb" -v p="$gb_mo" 'BEGIN {printf "%.0f", h*730 + g*p}')"
+
+  step "Provisioning AWS EC2 ($itype in $region, ${volume_gb} GB gp3)"
+  log "estimated list price: \$${est}/month (instance \$$(awk -v h="$inst_hr" 'BEGIN{printf "%.0f", h*730}') + storage \$$(awk -v g="$volume_gb" -v p="$gb_mo" 'BEGIN{printf "%.0f", g*p}'))"
+  log "that is the cost of 1.5 TB of state, not a fiddy markup — a 2 TB VPS elsewhere is usually cheaper"
+
   my_ip="$(curl -fsS --max-time 10 https://checkip.amazonaws.com | tr -d '[:space:]')" \
     || die "could not determine your public IP"
   log "your IP: $my_ip (SSH + node API will be restricted to it)"
@@ -93,17 +138,21 @@ provision_aws() {
   chmod 600 "$key_path"
   ok "SSH key saved: $key_path"
 
-  # Security group: SSH + node HTTP/gRPC from your IP only; gossip open to the network.
+  # Security group. Snapchain documents 3381-3383 on TCP and UDP; in practice
+  # gossip is 3382/udp (quic-v1) with 3382/tcp as the documented pair, and
+  # 3381/3383 are the HTTP/gRPC APIs — those stay on your IP only.
   local sg_id
   sg_id="$(aws ec2 create-security-group --region "$region" --group-name "$sg_name-$name" \
     --description "fiddy snapchain read node" --query 'GroupId' --output text)" || die "security group failed"
-  for spec in "tcp 22 $my_ip/32" "tcp $SNAP_HTTP_PORT $my_ip/32" "tcp $SNAP_GRPC_PORT $my_ip/32" \
-              "tcp 3382 0.0.0.0/0" "udp 3382 0.0.0.0/0" "tcp 3384 0.0.0.0/0" "udp 3384 0.0.0.0/0"; do
+  for spec in "tcp 22 $my_ip/32" \
+              "tcp $SNAP_HTTP_PORT $my_ip/32" "udp $SNAP_HTTP_PORT $my_ip/32" \
+              "tcp $SNAP_GRPC_PORT $my_ip/32" "udp $SNAP_GRPC_PORT $my_ip/32" \
+              "tcp 3382 0.0.0.0/0" "udp 3382 0.0.0.0/0"; do
     set -- $spec
     aws ec2 authorize-security-group-ingress --region "$region" --group-id "$sg_id" \
       --protocol "$1" --port "$2" --cidr "$3" >/dev/null
   done
-  ok "security group: $sg_id (SSH/API → you only; gossip → world)"
+  ok "security group: $sg_id (SSH/API → you only; gossip 3382 → world)"
 
   # user-data: Docker preinstalled so `fiddy node up` is fast.
   local ud="$FIDDY_HOME/user-data.sh"
@@ -117,7 +166,7 @@ UD
   iid="$(aws ec2 run-instances --region "$region" \
     --image-id "$ami" --instance-type "$itype" --key-name "$name" \
     --security-group-ids "$sg_id" --user-data "file://$ud" \
-    --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=200,VolumeType=gp3}' \
+    --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$volume_gb,VolumeType=gp3}" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$name},{Key=project,Value=fiddy}]" \
     --query 'Instances[0].InstanceId' --output text)" || die "run-instances failed"
   log "instance: $iid — waiting for running state…"
@@ -133,14 +182,16 @@ UD
   config_set FIDDY_SSH_KEY "$key_path"
   config_set FIDDY_AWS_REGION "$region"
   config_set FIDDY_AWS_INSTANCE_ID "$iid"
+  config_set FIDDY_AWS_VOLUME_GB "$volume_gb"
 
   log "waiting for cloud-init (Docker install)…"
   local i
   for ((i = 1; i <= 40; i++)); do
     if ssh -i "$key_path" -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new \
         "ubuntu@$ip" 'command -v docker' >/dev/null 2>&1; then
-      ok "compute ready: ubuntu@$ip"
+      ok "compute ready: ubuntu@$ip (${volume_gb} GB disk)"
       ok "Next: fiddy node up"
+      ok "Running costs until you stop it — tear down with: aws ec2 terminate-instances --region $region --instance-ids $iid"
       return 0
     fi
     sleep 10
