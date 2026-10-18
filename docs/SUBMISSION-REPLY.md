@@ -68,6 +68,20 @@ Stating this in the reply, with the citation, is the difference between a judge 
 protocol" and "the author copied an old blog post". It also pre-empts the one place where our tutorial would
 otherwise look like it contradicts the brief.
 
+## Follow-up cast — post this as a reply to your own submission once it lands
+
+Extra-mile assets (ranked: vouches > Chinese > video). Short enough to be a normal cast:
+
+```
+59-second walkthrough, vertical, captions burned in (sound off is fine):
+https://fiddy.fun/client/fiddy-59s.mp4
+
+Chinese tutorial: https://fiddy.fun/client/zh/ — and README.zh-CN.md in the repo.
+Same three commands: fiddy provision → fiddy node up → fiddy client up.
+```
+
+Details, verification evidence and known limitations: `docs/EXTRA-MILE-ASSETS.md`.
+
 ## Links that back the claims
 
 - https://snapchain.farcaster.xyz/getting-started — requirements: 16 GB RAM, 4 cores, **2 TB free storage**, ports 3381–3383

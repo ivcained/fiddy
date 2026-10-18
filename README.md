@@ -7,6 +7,9 @@ no Alchemy. You furnish the compute; the node syncs the network.
 Full tutorial (mobile + desktop, protocol concepts explained as you go):
 **https://fiddy.fun/client** — or open `site/index.html` locally.
 
+中文版：教程 **https://fiddy.fun/client/zh**，README 关键章节（安装 / 跑读节点 / 跑客户端 /
+常见问题）见 [`README.zh-CN.md`](./README.zh-CN.md)。
+
 ## Quickstart
 
 ```bash
