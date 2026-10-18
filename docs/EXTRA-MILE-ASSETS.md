@@ -11,7 +11,7 @@ Both assets are public and linkable; the submission task can reference the URLs 
 | Chinese README (key sections) | https://github.com/ivcained/fiddy/blob/main/README.zh-CN.md | committed, linked from `README.md` |
 | 59s vertical video | https://fiddy.fun/client/fiddy-59s.mp4 | live, 200, `video/mp4`, 891,495 B, `accept-ranges: bytes` |
 | Captions / transcript (WebVTT) | https://fiddy.fun/client/fiddy-59s.vtt | live, 200 (see limitation below) |
-| 59s video, repo copy | https://github.com/ivcained/fiddy/raw/main/docs/assets/fiddy-59s.mp4 | committed (survives the VPS) |
+| 59s video, repo copy (download mirror) | https://github.com/ivcained/fiddy/raw/main/docs/assets/fiddy-59s.mp4 | committed, 200, byte-identical — serves `application/octet-stream`, so **use the fiddy.fun URL for playback**, this one for archiving |
 | Build script (reproduce the video) | https://github.com/ivcained/fiddy/blob/main/docs/assets/make_video.py | PIL + ffmpeg, no other deps |
 | Video preview (contact sheet, 6 frames) | task attachment `preview-contact-sheet.png` | evidence only |
 
@@ -51,7 +51,8 @@ commands are not. Both pages also keep the same anchor set (`quickstart`, `archi
 ## 2. The 59s vertical video
 
 - File: `fiddy-59s.mp4` — **1080x1920, 30 fps, h264 High, yuv420p, 58.00 s, 891 KB, no audio track**
-  (readable muted, which is how a feed autoplays). Captions are burned into every frame.
+  (readable muted, which is how a feed autoplays). Captions are burned into every frame. The same file
+  is committed at `docs/assets/fiddy-59s.mp4` as an archivable mirror.
 - Walkthrough order matches the brief: **install (`fiddy provision`) → read node (`fiddy node up`) →
   client (`fiddy client up --tunnel`)** — then what you get, a three-command recap, and an end card
   carrying **fiddy.fun/client** and **github.com/ivcained/fiddy** (plus the Chinese guide).
@@ -91,6 +92,7 @@ substitutes for a review)**
 | Container facts | `ffmpeg -i` → Duration 00:00:58.00, h264 High, yuv420p(progressive), 1080x1920, 30 fps, one stream (no audio) |
 | Served bytes | `md5` local == `md5` on the VPS == `md5` of the HTTPS body (`bb6bb3386ef9a00efc4c9853309fddcc`) |
 | Range support | `curl -r 0-99` → **206**, 100 bytes (players can seek) |
+| Repo mirror reachable | `gh api repos/ivcained/fiddy/commits/main` → `a28e03f`, and `docs/assets/fiddy-59s.mp4` is in that tree (891,495 B) |
 
 **Deploy (same pattern as the page — pin the hash, not the branch)**
 
