@@ -93,6 +93,13 @@ node_install_remote() {
   log "ensuring Docker…"
   remote_ensure_docker
 
+  # snapchain.sh gates on crontab; minimal cloud images (GCE Ubuntu) lack it
+  # and the installer dies AFTER statsd/Grafana are already up, leaving a
+  # confusing half-install. Install cron first.
+  log "ensuring cron (snapchain.sh requires crontab)…"
+  ssh_run 'command -v crontab >/dev/null 2>&1 || { sudo -n apt-get update -qq && sudo -n apt-get install -y -qq cron >/dev/null && sudo systemctl enable --now cron >/dev/null 2>&1; }; command -v crontab >/dev/null 2>&1 && echo cron-ok' | grep -q cron-ok \
+    || die "cron is missing on $FIDDY_TARGET and needs sudo to install (sudo apt-get install -y cron), then re-run."
+
   log "installing Snapchain (official snapchain.sh, fetched directly)…"
   remote_seed_snapchain_env
   local grafana_blocked=0
