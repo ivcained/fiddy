@@ -93,12 +93,12 @@ of the brief, with the protocol citations. That is the "not AI slop" part: we re
 
 ## 7. Recruiting a voucher
 
-**Targeting is now data-backed instead of a template.** `docs/VOUCHER-OUTREACH.md` (2026-10-18) holds the verified
-17-candidate list pulled from live Farcaster data (the bounty thread's repliers, @ivc's 429 follows, the 2 805
-follow links at @ivc, plus recency and reach per account), three paste-ready DM variants, the public ask cast, and
-the per-candidate outreach outcome table. Friction a voucher hits is recorded verbatim in
-`docs/VOUCHER-FRICTION-LOG.md`. What is still missing is the send itself: no Farcaster write credential exists on
-this machine, so the DMs and the cast go out from @ivc's client.
+**Targeting is now data-backed instead of a template, and split across three files:** `docs/VOUCHER-RECRUIT-TARGETS.md`
+holds the targeting and the evidence (tiers, verbatim posts, DM copy, how to verify a vouch from the public hub),
+`docs/VOUCHER-OUTREACH.md` holds the 13-person send queue with live recency/reach, the per-person first lines, the
+owner decisions and the per-candidate outcome tracker, and `docs/VOUCHER-FRICTION-LOG.md` is where a voucher's
+blockers get written down verbatim. What is still missing is the send itself: no Farcaster write credential exists
+on this machine, so the DMs and the cast go out from @ivc's client.
 
 Where to look, in order of conversion:
 

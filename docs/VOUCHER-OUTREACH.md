@@ -1,182 +1,134 @@
-# Fiddy voucher outreach — verified candidate list and paste-ready asks
+# Fiddy voucher outreach — the send queue, the copy, and the outcome tracker
 
-Written 2026-10-18T15:57Z by the recruit-and-onboard task (`t_7fff0bb5`).
-Companion files: `docs/VOUCHER-CAMPAIGN.md` (campaign + submission plan), `docs/VOUCHER-FRICTION-LOG.md`
-(where a voucher's blockers get recorded verbatim).
+Operational companion to `docs/VOUCHER-RECRUIT-TARGETS.md` (canonical targeting + evidence: who they are and why
+they will convert, with the verbatim posts that prove it) and `docs/VOUCHER-CAMPAIGN.md` (the campaign plan and
+the submission reply).
 
-**Status: the candidate list is built from live network data and the asks are ready to paste. Nothing has been
-sent, because no Farcaster write credential exists on this machine — the DMs and the cast have to go out from
-@ivc (fid 191554).** One owner action unblocks the whole card.
+Written 2026-10-18T15:57Z, updated 2026-10-18T~16:20Z after the site's honest-disk/price release (`8374eed`).
+This file answers three questions and nothing else: **who do we send to now, what do we paste, and what happened
+to each one.**
+
+**Status: queue built and verified against the live network. Nothing sent — no Farcaster write credential exists
+on this machine, so the send is the owner's action (see §1).**
 
 ## 1. Channel status (checked 2026-10-18, not assumed)
 
 | Check | Result | How |
 | --- | --- | --- |
-| Farcaster write credentials on this machine | **none** | `~/.hermes/.env` has no `FARCASTER_*`/`NEYNAR_*` key; `grep -ci neynar /etc/fiddy-auth/app.env` on the VPS = 0 |
-| Can we read the network? | **yes, unauthenticated** | public hub `https://haatz.quilibrium.com` answers `/v1/castsByFid`, `/v1/castsByParent`, `/v1/linksByFid`, `/v1/userDataByFid`; `api.warpcast.com/v2/user?fid=` also answers without a token (`/v2/recent-casts` needs auth, 401) |
-| Owner identity used for targeting | **@ivc, fid 191554** | Warpcast API: followerCount 1402, followingCount 429; profile URL `github.com/ivcained` |
-| Recruitment cast already posted? | **no** | read @ivc's last 50 casts — the only Fiddy cast is the Network Court early-list one |
+| Farcaster write credentials on this machine | **none** | no `FARCASTER_*`/`NEYNAR_*` key in `~/.hermes/.env`; `grep -ci neynar /etc/fiddy-auth/app.env` = 0 on the VPS |
+| Can we read the network? | **yes, unauthenticated** | public hub `https://haatz.quilibrium.com` answers `/v1/castsByFid`, `/v1/castsByParent`, `/v1/linksByFid`, `/v1/userDataByFid`; `api.warpcast.com/v2/user?fid=` also answers with no token |
+| Targeting source | **@ivc, fid 191554** | Warpcast API: 1 402 followers, 429 following; profile links `github.com/ivcained` |
+| Recruitment already posted? | **no** | @ivc's last 50 casts contain no ask; the only Fiddy cast is the Network Court early-list one |
+| `gh` CLI | **authenticated as `ivcained`** (`repo` scope) | `gh auth status` — repo issues are a second channel the owner can fire in one command |
 
-Consequence: recruiting is an owner action (DM from the Farcaster client, or one public cast). Everything else —
-targeting, copy, prerequisites, the honest cost numbers, the friction capture — is done and in this repo.
+## 2. Send queue — 13 people, in the order to send
 
-## 2. Candidate list — who, ranked, and why them
+Every row was read from the live network today: follower count, last-cast date and last-cast text are from the
+hub/Warpcast reads in this task, not from memory. `RT` marks rows whose evidence is written up in
+`docs/VOUCHER-RECRUIT-TARGETS.md`.
 
-Built from: the 37 replies to the bounty cast (`farcaster.xyz/balajis.eth/0x50184b62`), the 429 accounts @ivc
-follows, the 2 805 follow links pointing at @ivc, plus last-cast recency and follower counts for each candidate.
-Scores, bios, last-cast text and dates are in the task's `candidates_enriched.json` attachment.
+# 1–4 are **entrants in the same race who have publicly asked for a tester** (RT §2) — the ask is symmetric, so
+they convert best. #5–10 are **Snapchain node operators and client builders** (RT §3 + this run's filters over
+@ivc's graph) — the ask is a peer review, and their vouch carries weight with a judge. #11–13 are warm
+owner-network accounts with the infra habit.
 
-**Tier A — other bounty submitters who are also hunting a voucher (mutual-vouch trade).** Each of these has
-already said in public that they need someone to run and vouch for their submission, and each is already running
-a node. Highest conversion of any group: the ask is symmetric.
+| # | Handle | fid | followers | last cast | Why this one, now | Channel |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | @mobeen02 | 440212 | 2 428 | today | RT: posted a submission with "(3) Voucher: (getting voucher, will update)" and a standalone "Need a voucher" cast — stuck on exactly our gap | Farcaster DM |
+| 2 | @vaibhavmule | 1356870 | 3 318 | 1 d | RT: "Looking for a builder to test it and vouch. Who's up?" | Farcaster DM |
+| 3 | @webthe3rd.eth | 374565 | 220 | today | RT: "Any devs willing to test and vouch for it later this week?" — unanswered so far | Farcaster DM |
+| 4 | @sats100m | 3355244 | 0 | today | RT: wants 3–5 testers this week; his own node is mid-sync, so he is in the same week-one grind | Farcaster DM |
+| 5 | @0xzoz | 1918 | 13 134 | today | RT: asked for **one human-led and one agent-led** clean-machine run of his "In Three" by 10-23. We can supply the agent-led half; ask for a human run of ours in return. The strongest trade on the board | Farcaster DM |
+| 6 | @topocount.eth | 20603 | 1 620 | 2.8 d | RT: posts Snapchain node-runner release notes ("node runners will want to upgrade before Thursday") — runs the exact stack our tutorial installs | Farcaster DM |
+| 7 | @0xael.eth | 539854 | 1 326 | 0.1 d | RT: runs SnapMeter, "Hypersnap data is syncing with a local node" — will judge the node path on the numbers | Farcaster DM |
+| 8 | @felirami.eth | 196149 | 4 910 | 0.7 d | RT: "Making it easier to run a Hypersnap node" — adjacent tooling, will see the differences fast | Farcaster DM |
+| 9 | @boiler | 14217 | 708 | 0.6 d | RT: "Who is running either a snapchain node or a replicator?" — an open, unanswered node question | Farcaster DM (reply) |
+| 10 | @mvr | 230238 | 11 864 | 0.2 d | build a Farcaster client (Vibeshift); in the bounty thread he made the read-node/write-path point the tutorial implements | Farcaster DM |
+| 11 | @manan | 191 | 38 281 | 2.7 d | "Building (and sometimes breaking) farcaster" — will read the protocol claims critically | Farcaster DM |
+| 12 | @borodutch | 1356 | 38 398 | 0.7 d | "sr staff agentic engineer" — runs infra for a living, warm (@ivc follows, mutual) | Farcaster DM |
+| 13 | @darrylyeo | 3854 | 7 894 | today | Farcaster dev who replied in the bounty thread; also useful as a second vouch | Farcaster DM |
 
-| Handle | fid | followers | last cast | Why them |
-| --- | --- | --- | --- | --- |
-| @mobeen02 | 440212 | 2 428 | today | posted a submission and publicly asked for a voucher (`Need a voucher for Balaji's $2048…`, 10-17) |
-| @vaibhavmule | 1356870 | 3 318 | 1 d | "I'm in. 3 commands, my own read node, no API keys. Looking for a builder to test it and vouch. Who's up?" |
-| @webthe3rd.eth | 374565 | 220 | today | "Any devs willing to test and vouch for it later this week?" — actively soliciting |
-| @sats100m | 3355244 | 0 | today | posting progress on `farcaster-in-3`: "shard 0 of my node was 570 days behind" — node is up |
-| @0xzoz | 1918 | 13 134 | today | submission "In Three"; also engaged in the thread |
-| @10xchris.eth | 1129138 | 1 373 | today | ran a Farcaster-client bounty last month, cost-modelled this one (A$103/mo) — will judge the tutorial on the numbers |
+Held back on purpose: @piratekev.eth (fid 13525) wrote snapchain-on-kubernetes infra code but his last cast is
+**530 days old** — a dead DM. @nashrad (fid 3326491, 1 follower) is the highest-doc-value voucher ("I'm a
+crypto/farcaster noob… attempting this", "My first cast on a local node") and the most likely to stall; send only
+if a run is wanted that tests the docs rather than the code.
 
-Caveat to state honestly when asking: their vouch counts less than an independent one, and a judge may read a
-ring of mutual vouches as noise. Ask them to vouch only if the tutorial actually worked, and ask them to name
-one thing that broke.
+Send #1–5 today. They are the ones with the same deadline pressure. Then #6–13. Ask 8–10 people, not one.
 
-**Tier B — warm accounts @ivc follows, capable of running the box, no bounty conflict.** These are the vouches a
-judge will weight most.
+## 3. What to paste
 
-| Handle | fid | followers | last cast | Why them |
-| --- | --- | --- | --- | --- |
-| @manan | 191 | 38 281 | 2.7 d | "Building (and sometimes breaking) farcaster" — will read the protocol claims critically |
-| @darrylyeo | 3854 | 7 894 | today | dev, `/frontend` + decentralized-data wrangler, replied in the bounty thread |
-| @borodutch | 1356 | 38 398 | 0.7 d | "sr staff agentic engineer" — runs infra for a living |
-| @mvr | 230238 | 11 864 | 0.2 d | builds a Farcaster client (Vibeshift); thread comment shows he knows the read-node write path |
-| @macbudkowski | 1048 | 29 544 | 2.2 d | miniapp builder who writes a newsletter — a vouch with reach |
-| @jvaleska.eth | 13505 | 16 581 | 0.1 d | Ethereum dev, "Farcaster Framer" |
-| @linda | 12 | 87 946 | 1.6 d | previously dev-eco at Farcaster — heaviest credibility, lowest availability |
+Long copy for #1–4 (mutual-vouch) and #5–8 (node-operator pitch) is in `docs/VOUCHER-RECRUIT-TARGETS.md` §2 and
+§3 — use it as-is. Two additions from this run:
 
-**Tier C — thread participants who showed node curiosity.**
-
-| Handle | fid | followers | last cast | Why them |
-| --- | --- | --- | --- | --- |
-| @vaipraonde | 847902 | 155 | 0.7 d | "a client is super easy. a node is not. we would like to setup a NODE." |
-| @cashlessman.eth | 268438 | 10 303 | 0.4 d | dev, "open for opportunities", "will see if i can do this" |
-| @nashrad | 3326491 | 1 | today | "I'm a crypto/farcaster noob. But I'm attempting this" + "My first cast on a local node" — highest doc-value vouch, highest risk of stalling |
-| @bugster | 3332919 | 21 | 0.4 d | playful, replied to the bounty with a node joke, follows the bounty closely |
-
-Send 8–10 of these, not one. Ask for a run, not for kind words.
-
-## 3. DM copy (paste, then replace the bracketed first line)
-
-**Variant A — Tier B/C (the straight ask).**
-
-```
-[per-person line, see below]
-
-I wrote Fiddy — a Farcaster client + Snapchain read node that you stand up on your own box. Microsite:
-https://fiddy.fun/client, repo: https://github.com/ivcained/fiddy
-
-The honest ask: run it end to end and say publicly whether it worked. What it needs: a VPS with 4 vCPU / 16 GB
-RAM / 2 TB free disk and ports 3381-3383 open on TCP and UDP, a test account's seed phrase (not your main), and
-about half a day where most of it is the node syncing (~200 GB snapshot). No API keys, nothing created onchain,
-no cost to you beyond the box.
-
-If you hit anything broken I want the exact error — I'll fix it and log it. If it works, the vouch is just your
-honest review plus the link.
-```
-
-**Variant B — Tier A (mutual vouch).**
-
-```
-You're asking for a voucher and so am I — want to trade?
-
-I'll run your tutorial this week and post an honest cast about it; you run mine (https://fiddy.fun/client) and do
-the same. Mine needs a box with 4 vCPU / 16 GB RAM / 2 TB free disk, ports 3381-3383 open, and a test account's
-seed phrase. Same shape as yours.
-
-Deal only if you actually complete it — and say what broke, in public. That's worth more than a compliment.
-```
-
-**Variant C — one line per person to paste at the top of A or B.**
+**Per-person first line** (replace the opener so the DM does not read as a blast):
 
 - @manan — "you break farcaster professionally, so you'll catch whatever's wrong with my read-node claims"
-- @darrylyeo — "you replied in balajis's thread and you actually read protocol code"
 - @borodutch — "you already run agent infra; this is one box and three commands"
+- @darrylyeo — "you replied in balajis's thread and you actually read protocol code"
 - @mvr — "your point in the thread about clients reading from a Snapchain node is exactly what the tutorial implements"
-- @macbudkowski — "you write up what you build, which is what I'm asking for"
-- @jvaleska.eth — "you build on Ethereum and 3381-3383 is the whole ops surface here"
-- @linda — "you ran dev eco at Farcaster, so your read of this is the one I'd trust most"
-- @vaipraonde — "you said a node is the hard part — I want you to be the one who says whether it still is"
-- @cashlessman.eth — "you said you'd see if you could do this; that's all I'm asking for"
+- @0xael.eth — "you're already syncing Hypersnap locally, so you'll see my node path's shortcuts in minutes"
+- @felirami.eth — "you're making Hypersnap easier to run; I'd like the same scrutiny on my read-node path"
+- @topocount.eth — "you post the node-runner releases, so you'll know if my install is wrong"
+- @boiler — "you asked who's running a snapchain node or replicator — I shipped a three-command path to a read node"
+- @sats100m — "you're mid-sync on your own shard; you'll know exactly where mine wastes your time"
 
-Do **not** promise prizes, money, or that it takes ten minutes.
+**The one honest lever, if the owner approves it** (§5.2): "and if the box is what's stopping you, I'll cover the
+VPS for the run — the tutorial needs a 2 TB disk, which is $50–80/mo on Hetzner/Contabo/OVH class hosts, not the
+$285/mo AWS figure the page quotes for the scripted path."
 
-## 4. One action instead of ten: the public ask cast
+Do **not** promise prizes, money, a cut, or that it takes ten minutes. Do say that "your thing is broken here" is
+a successful answer.
 
-Post from @ivc. This doubles as marketing for the tutorial and reaches @ivc's 1 402 followers.
+## 4. One action instead of thirteen
 
-```
-Three commands to your own Farcaster client on your own read node:
-
-  fiddy provision   # your compute (AWS scripted, or any VPS over SSH)
-  fiddy node up     # Snapchain read node, no API keys from anyone
-  fiddy client up   # client reading YOUR node
-
-https://fiddy.fun/client — full tutorial, mobile + desktop, protocol concepts explained as you go.
-
-Looking for one person who'll actually run it end to end and say publicly whether it worked. Reply here or DM me.
-```
-
-## 5. Optional public channel you already own: a repo issue
-
-`gh` is authenticated as `ivcained`, so this is a one-liner once you approve the text:
+1. **Public ask cast** — copy in `docs/VOUCHER-CAMPAIGN.md` §7, post standalone in `/farcaster`; reaches @ivc's
+   1 402 followers and doubles as marketing.
+2. **Reply in the bounty thread** (37 replies, every other entrant) pointing at the three commands — cheaper
+   attention than a standalone cast.
+3. **Repo issue**, one command with the `gh` CLI already authenticated as `ivcained`:
 
 ```
-gh issue create --repo ivcained/fiddy --title "Looking for one person to run the tutorial end to end and vouch publicly" --body "<the cast text above + prerequisites section 4 of VOUCHER-CAMPAIGN.md>"
+gh issue create --repo ivcained/fiddy --title "Looking for one person to run the tutorial end to end and vouch publicly" --body "<cast text + the prerequisite block from VOUCHER-CAMPAIGN.md §4>"
 ```
 
-It costs nothing and leaves a permanent, linkable recruiting post.
+## 5. Decisions only the owner can make
 
-## 6. Decision needed from the owner
+1. **Send the DMs, post the cast, or both.** Nothing in this file can move without one of them.
+2. **May the ask offer to cover the voucher's VPS?** Biggest single conversion lever (see §3). It is a money
+   commitment, so it is deliberately not in the copy — say yes and the line goes in.
+3. **The vouch must come from the voucher's own account**, never @ivc's. Not negotiable with the judge.
 
-1. **Send the DMs** (Tier A + Tier B first, 8–10 people) or **post the ask cast** — or both.
-2. **May the ask offer to cover the voucher's VPS?** This is the single biggest conversion lever: the tutorial's
-   real prerequisite is a 2 TB disk (≈ $50–80/mo on Hetzner/Contabo/OVH class hosts, ≈ $285/mo on AWS). Offering
-   it is a money decision, so it is not in the copy above; say the word and the copy gets one line.
-3. **Who casts the vouch is the voucher's account, not @ivc** — nothing to decide, just do not accept a vouch
-   posted from the owner's account.
+## 6. Outreach outcome log — the tracker for every candidate
 
-## 7. Outreach outcome log
-
-Every candidate above is logged here with an outcome, so nobody has to re-derive who was asked or what happened.
 Update this table as replies land. It is the evidence for the card's "outreach outcome for every candidate
-recorded" criterion.
+recorded" criterion, and it is the only place that knows who was already asked.
 
-| Handle | tier | channel | asked (UTC) | outcome | note |
-| --- | --- | --- | --- | --- | --- |
-| @mobeen02 | A | Farcaster DM | not yet | not_contacted | |
-| @vaibhavmule | A | Farcaster DM | not yet | not_contacted | |
-| @webthe3rd.eth | A | Farcaster DM | not yet | not_contacted | |
-| @sats100m | A | Farcaster DM | not yet | not_contacted | |
-| @0xzoz | A | Farcaster DM | not yet | not_contacted | |
-| @10xchris.eth | A | Farcaster DM | not yet | not_contacted | |
-| @manan | B | Farcaster DM | not yet | not_contacted | |
-| @darrylyeo | B | Farcaster DM | not yet | not_contacted | |
-| @borodutch | B | Farcaster DM | not yet | not_contacted | |
-| @mvr | B | Farcaster DM | not yet | not_contacted | |
-| @macbudkowski | B | Farcaster DM | not yet | not_contacted | |
-| @jvaleska.eth | B | Farcaster DM | not yet | not_contacted | |
-| @linda | B | Farcaster DM | not yet | not_contacted | |
-| @vaipraonde | C | Farcaster DM | not yet | not_contacted | |
-| @cashlessman.eth | C | Farcaster DM | not yet | not_contacted | |
-| @nashrad | C | Farcaster DM | not yet | not_contacted | |
-| @bugster | C | Farcaster DM | not yet | not_contacted | |
+| Handle | queue # | asked (UTC) | outcome | note |
+| --- | --- | --- | --- | --- |
+| @mobeen02 | 1 | not yet | not_contacted | |
+| @vaibhavmule | 2 | not yet | not_contacted | |
+| @webthe3rd.eth | 3 | not yet | not_contacted | |
+| @sats100m | 4 | not yet | not_contacted | |
+| @0xzoz | 5 | not yet | not_contacted | agent-run trade offer |
+| @topocount.eth | 6 | not yet | not_contacted | |
+| @0xael.eth | 7 | not yet | not_contacted | |
+| @felirami.eth | 8 | not yet | not_contacted | |
+| @boiler | 9 | not yet | not_contacted | |
+| @mvr | 10 | not yet | not_contacted | |
+| @manan | 11 | not yet | not_contacted | |
+| @borodutch | 12 | not yet | not_contacted | |
+| @darrylyeo | 13 | not yet | not_contacted | |
+| @nashrad | hold | not yet | not_contacted | docs-stress run only |
+| @piratekev.eth | hold | — | dropped | last cast 530 days old — dead DM |
 
-Outcome vocabulary: `not_contacted` → `asked` → `running` → `completed` (with the cast URL) / `dropped` (with the
-step they died on) / `no_reply` (after 48 h). A `dropped` row must name the friction-log entry it produced.
+Vocabulary: `not_contacted` → `asked` → `running` → `completed` (with the cast URL, handle and UTC timestamp) /
+`dropped` (naming the step they died on) / `no_reply` (after 48 h). A `dropped` row must name its friction-log
+entry.
 
-## 8. While they run it
+When a vouch lands, verify it from the hub before it goes into the submission reply — the read works from this
+machine with no key, the recipe is in `VOUCHER-RECRUIT-TARGETS.md` §6.
 
-Record blockers in `docs/VOUCHER-FRICTION-LOG.md` as they happen — exact command, exact output, time stuck. That
-file is what the fix task consumes; it must never need a follow-up interview.
+## 7. While they run it
+
+Record every stumble in `docs/VOUCHER-FRICTION-LOG.md` as it happens: exact step, exact command, exact output,
+time stuck. That file is what the fix task (`t_2e6fcb98`) consumes, and it must never need a follow-up interview.

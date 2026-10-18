@@ -57,14 +57,14 @@ These are already known from the campaign's trip-point log (`docs/VOUCHER-CAMPAI
 re-check. When a voucher hits one, the entry above gets the voucher's own command and output — that is what turns
 "we think this is a problem" into "a human was stopped by this at 14:32".
 
-| # | Predicted trip point | Why it is predicted | Watch for |
+| # | Trip point | State before the voucher | Watch for |
 | --- | --- | --- | --- |
-| P0 | Tutorial and `provision.sh` still say **"200 GB SSD"**; the protocol needs **1.5 TB** (repo README) / **2 TB** (snapchain docs) free, and the 200 GB figure is only the snapshot download | a voucher provisioning 200 GB fills the disk during or after sync | the disk-full error, the exact `df -h` line, and how far the snapshot got |
-| P1 | Menu quotes **~$100/mo** AWS; the real figure at 2 TB is **~$285/mo** | a voucher who priced it out may walk away before starting | their reaction in the DM; if they quit here, that is a `dropped` row, not a friction entry |
-| P2 | The brief's stale claims (read nodes "do not accept writes", app keys cost "one small Optimism transaction") | a voucher may follow the brief and doubt the tutorial, or vice versa | which text they trusted and what they typed |
-| P3 | Block pruning is read-nodes-only and **off by default**, so the disk does not shrink by itself | a voucher may expect the disk to free up | their disk growth over time |
-| P4 | **No Farcaster write credential exists on this machine**, so DMs and casts are owner-only | recruitment itself stalls if the owner is not in the loop | not a voucher entry — a campaign blocker, tracked in `docs/VOUCHER-OUTREACH.md` |
-| — | Fixed 2026-10-18: Cloudflare rewrote the sample `--ssh ubuntu@…` command on the live page | anyone copy-pasting failed instantly | if a voucher still reports a broken sample command, it is a regression: log it |
+| P0 | Tutorial and `provision.sh` said **"200 GB SSD"**; the protocol needs **1.5 TB** (repo README) / **2 TB** (snapchain docs) free, and 200 GB is only the snapshot download | **fixed before any voucher ran** — the live page now reads `4 vCPU, 16 GB RAM, 1.5–2 TB free disk` and "The mainnet snapshot is ~200 GB" (`8374eed`, re-checked live 2026-10-18). If a voucher still reports a 200 GB requirement, it is a regression on a different surface and gets an entry | the exact `df -h` line and how far the snapshot got |
+| P1 | Menu quoted **~$100/mo** AWS; the real figure at 2 TB is **~$285/mo** | **fixed before any voucher ran** — the page now quotes `$285/month (instance ~$121 + 2 TB gp3 ~$164)` and `$50–80/month` for the cheaper 2 TB hosts (`8374eed`). Watch for a voucher who priced it from an older mirror or a cached page | their reaction in the DM; quitting over cost is a `dropped` row, not a friction entry |
+| P2 | The brief's stale claims (read nodes "do not accept writes", app keys cost "one small Optimism transaction") | open by design — the tutorial states the brief's assumption and then shows the current behaviour, with citations | which text they trusted and what they typed |
+| P3 | Block pruning is read-nodes-only and **off by default**, so the disk does not shrink by itself | open | their disk growth over time |
+| P4 | **No Farcaster write credential exists on this machine**, so DMs and casts are owner-only | open — recruitment stalls until the owner sends | not a voucher entry; tracked in `docs/VOUCHER-OUTREACH.md` §1 |
+| — | Cloudflare rewrote the sample `--ssh ubuntu@…` command on the live page | fixed 2026-10-18 (`358111f`); the page serves `ubuntu&#64;203.0.113.10` and no `__cf_email__` remains | a voucher reporting a broken sample command is a regression: log it |
 
 ## 5. Closing the loop
 
