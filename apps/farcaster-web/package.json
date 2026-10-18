@@ -65,6 +65,7 @@
     "farcaster-client-hooks": "workspace:*",
     "farcaster-cryptography": "workspace:*",
     "farcaster-cryptography-web": "workspace:*",
+    "farcaster-node-client": "workspace:^",
     "goober": "^2.1.16",
     "html2canvas": "^1.4.1",
     "jotai": "^2.20.0",

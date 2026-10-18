@@ -118,6 +118,7 @@ import {
   SettingsMutedKeywordsPage,
   SettingsMutedUsersPage,
   SettingsMutesAndBlocksPage,
+  SettingsNodePage,
   SettingsNotificationsPage,
   SettingsPreferredWalletPage,
   SettingsStarterPacksPage,
@@ -722,6 +723,13 @@ const routes = {
     search: {},
     family: family('settings'),
     Component: SettingsDeveloperToolsPage,
+  },
+  settingsNode: {
+    path: `${appPathPrefix}/settings/node`,
+    params: {},
+    search: {},
+    family: family('settings'),
+    Component: SettingsNodePage,
   },
   settingsCastsAndUsers: {
     path: `${appSettingsPathPrefix}/casts-and-users`,

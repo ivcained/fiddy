@@ -396,6 +396,12 @@ export const SettingsDeveloperToolsPage = lazyWithPreload(() =>
   ),
 );
 
+export const SettingsNodePage = lazyWithPreload(() =>
+  import('~/pages/settingsNode/SettingsNodePage').then((res) => ({
+    default: res.SettingsNodePage,
+  })),
+);
+
 export const NotificationGroupChannelRoleInvitesPage = lazyWithPreload(() =>
   import('~/pages/notificationGroupChannelRoleInvites/NotificationGroupChannelRoleInvitesPage').then(
     (res) => ({ default: res.NotificationGroupChannelRoleInvitesPage }),

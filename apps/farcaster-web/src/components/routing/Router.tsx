@@ -184,6 +184,10 @@ const Router: React.FC = () => {
                   element={<routes.settingsDeveloperTools.Component />}
                 />
                 <Route
+                  path={routes.settingsNode.path}
+                  element={<routes.settingsNode.Component />}
+                />
+                <Route
                   path={routes.settingsAdvanced.path}
                   element={<routes.settingsAdvanced.Component />}
                 />

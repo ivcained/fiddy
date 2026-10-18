@@ -93,6 +93,14 @@ const SettingsNav: FC = memo(() => {
         <SettingsNavLinkLabel>Mute and block</SettingsNavLinkLabel>
       </SettingsNavLink>
       <SettingsNavLink
+        to="settingsNode"
+        params={{}}
+        searchParams={{}}
+        title="Your node"
+      >
+        <SettingsNavLinkLabel>Your node</SettingsNavLinkLabel>
+      </SettingsNavLink>
+      <SettingsNavLink
         to="settingsDeveloperTools"
         params={{}}
         searchParams={{}}

@@ -73,6 +73,26 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: () => '/',
         },
+        '/snapchain-api': {
+          target:
+            environment.SNAPCHAIN_HTTP_URL ||
+            environment.VITE_SNAPCHAIN_HTTP_URL ||
+            'http://127.0.0.1:3381',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/snapchain-api/, ''),
+        },
+      },
+    },
+    preview: {
+      proxy: {
+        '/snapchain-api': {
+          target:
+            environment.SNAPCHAIN_HTTP_URL ||
+            environment.VITE_SNAPCHAIN_HTTP_URL ||
+            'http://127.0.0.1:3381',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/snapchain-api/, ''),
+        },
       },
     },
     build: {
