@@ -15,12 +15,17 @@ provision_main() {
         cat <<'EOF'
 fiddy provision — furnish the compute your node will run on.
 
-  --aws             Create an AWS EC2 instance (~$100/mo, t3.xlarge, 200GB gp3).
+  --aws             Create an AWS EC2 instance with Docker preinstalled.
                     Needs: aws CLI configured (aws configure).
                     Options: FIDDY_AWS_REGION (default us-east-1)
-                             FIDDY_AWS_INSTANCE_TYPE (default t3.xlarge)
+                             FIDDY_AWS_INSTANCE_TYPE
+                             FIDDY_AWS_VOLUME_GB (>= 1500 is the read-node floor)
+                    Cost: a read-node-sized box is ~$285/month on AWS list price
+                    (instance ~$121 + 2 TB gp3 ~$164/mo); a 2 TB VPS from a
+                    Hetzner/Contabo/OVH-class host is usually $50-80/month.
   --ssh user@host   Skip creation — use a server you already have.
-                    Needs: SSH key auth already working, sudo on the remote.
+                    Needs: SSH key auth already working, sudo on the remote,
+                    and 1.5-2 TB of free disk (checked before install).
 
 The target is saved to ~/.fiddy/config (mode 0600).
 EOF
@@ -36,10 +41,12 @@ EOF
     *)
       step "fiddy provision"
       echo "Pick your compute:"
-      echo "  1. AWS (scripted, ~\$100/mo):  fiddy provision --aws"
+      echo "  1. AWS (scripted, ~\$285/mo at list price):  fiddy provision --aws"
       echo "  2. Any server you have:        fiddy provision --ssh user@host"
       echo ""
-      echo "Minimum for a Snapchain read node: 4 vCPU, 16 GB RAM, 200 GB SSD, Ubuntu 22.04+."
+      echo "Minimum for a Snapchain read node: 4 vCPU, 16 GB RAM, 1.5-2 TB free disk, Ubuntu 22.04+."
+      echo "The ~200 GB mainnet snapshot is *compressed*; it decompresses several times larger."
+      echo "A 2 TB VPS from a Hetzner/Contabo/OVH-class host is usually \$50-80/month."
       ;;
   esac
 }
@@ -49,8 +56,8 @@ provision_ssh() {
   require ssh "install openssh"
   step "Registering existing server: $target"
   log "checking SSH (BatchMode, 10s timeout)…"
-  mapfile -t opts < <(ssh_opts 2>/dev/null || true)
-  ssh "${opts[@]:-}" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+  ssh_opts_fill
+  ssh "${FIDDY_SSH_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
       "$target" 'echo fiddy-ok && uname -sm && (command -v docker >/dev/null && docker --version || echo no-docker)' \
     | tee /tmp/fiddy-provision-ssh.$$
   grep -q fiddy-ok /tmp/fiddy-provision-ssh.$$ || die "cannot reach $target — fix key auth first (ssh-copy-id $target)"
@@ -58,6 +65,10 @@ provision_ssh() {
   config_set FIDDY_TARGET "$target"
   config_set FIDDY_PROVIDER "ssh"
   ok "target saved. Next: fiddy node up"
+  # Report sizing now, while the user is still picking a box: a read node needs
+  # 1.5-2 TB free and a small disk only shows up hours into a snapshot pull.
+  echo ""
+  FIDDY_SIZING_FATAL=0 check_node_sizing "$(node_facts_remote)" || true
 }
 
 provision_aws() {

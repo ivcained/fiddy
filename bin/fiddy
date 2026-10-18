@@ -13,6 +13,7 @@ FIDDY_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export FIDDY_HOME FIDDY_REPO
 
 source "$FIDDY_REPO/cli/lib/common.sh"
+bash_ok
 
 usage() {
   cat <<'EOF'
@@ -24,14 +25,18 @@ Usage: fiddy <command> [options]
               --aws                       create an AWS EC2 instance (needs aws CLI)
               --ssh user@host             use any server you already have
   node        Manage your Snapchain read node
-              up                          install + start + wait for sync
-              status                      sync status and health
+              up                          check sizing, install, start, wait for sync
+              status                      is it working? (/v1/info in plain words)
               logs                        tail node logs
               stop | start | upgrade      wrap snapchain.sh on the remote
   client      Run the Fiddy client against your node
               up [--tunnel] [--build]     dev server, SSH tunnel, or prod build
-  doctor      Check local prerequisites
+  doctor      Check local prerequisites (and whether --local is even possible)
   config      Show current fiddy configuration
+
+Run it as `bash bin/fiddy …`, or put bin/ on your PATH:
+  export PATH="$PWD/bin:$PATH"
+Runs on macOS's bash 3.2 as well as bash 4/5.
 
 Docs: https://fiddy.fun/client
 EOF
