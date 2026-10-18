@@ -51,7 +51,9 @@ const AgentPage: React.FC = () => {
 
   const handleConnect = () => {
     if (!validateUrl(agentUrl)) {
-      setError('Invalid instance URL. Must match ^https://[a-z0-9-]+.agent37.app$');
+      setError(
+        'Invalid instance URL. Must match ^https://[a-z0-9-]+.agent37.app$',
+      );
       return;
     }
     if (!agentKey.trim()) {
@@ -76,7 +78,9 @@ const AgentPage: React.FC = () => {
   };
 
   const sendMessage = async (text: string) => {
-    if (!text.trim() || !agentUrl || !agentKey) return;
+    if (!text.trim() || !agentUrl || !agentKey) {
+      return;
+    }
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -192,7 +196,9 @@ const AgentPage: React.FC = () => {
     return (
       <div className="flex h-full w-full items-center justify-center p-8">
         <div className="w-full max-w-md">
-          <h1 className="mb-6 text-2xl font-bold text-white">Pair Your Agent</h1>
+          <h1 className="mb-6 text-2xl font-bold text-white">
+            Pair Your Agent
+          </h1>
 
           <div className="space-y-4">
             <div>
