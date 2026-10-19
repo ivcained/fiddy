@@ -37,7 +37,11 @@ export const fetchFollowing = async ({
   const following: number[] = [];
   let pageToken: string | undefined;
   do {
-    const page = await node.linksByFid({ fid, linkType, pageSize, pageToken });
+    // The node pages ascending unless asked otherwise (measured against a live
+    // read node: `castsByFid` without `reverse` returns the *oldest* page). The
+    // follow graph is capped, so take the most recent follows rather than the
+    // first ones ever recorded.
+    const page = await node.linksByFid({ fid, linkType, pageSize, pageToken, reverse: true });
     for (const message of page.messages) {
       const targetFid = message.link?.targetFid;
       if (typeof targetFid === 'number') {
@@ -67,6 +71,10 @@ export const fetchCastsByFid = async ({
   const page = await node.castsByFid({
     fid,
     pageSize: pageSize ?? Math.max(limit, 25),
+    // Without this the node serves the *oldest* page first, so a client that
+    // sorted client-side would show a years-old "newest first" feed. Measured
+    // against a live read node, not assumed.
+    reverse: true,
   });
   return page.messages
     .filter((message) => message.castAdd)
