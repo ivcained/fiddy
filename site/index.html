@@ -162,8 +162,8 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   <div class="card quickstart" id="quickstart">
     <div class="qs-cmd">
       <span class="qs-n">0</span>
-      <span><code>fiddy provision --aws</code><small>furnish the compute — or <code class="inline">--ssh you@server</code> for any box you have</small></span>
-      <button class="qs-copy" data-c="fiddy provision --aws">copy</button>
+      <span><code>fiddy provision --gcp</code><small>furnish the compute — or the one-click Cloud Shell button below; <code class="inline">--ssh you@server</code> for any box you have</small></span>
+      <button class="qs-copy" data-c="fiddy provision --gcp">copy</button>
     </div>
     <div class="qs-cmd">
       <span class="qs-n">1</span>
@@ -201,32 +201,41 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   <h2><span class="n">0</span>fiddy provision</h2>
   <p class="dim">A read node needs a server: <strong>4 vCPU, 16 GB RAM, 1.5&ndash;2 TB free disk</strong>, Ubuntu 22.04+.
   The mainnet snapshot is ~200 GB <em>compressed</em> and takes several times that once decompressed &mdash; size for
-  <strong>1.5&ndash;2 TB</strong>, not 200 GB. On AWS the list price for that is about <strong>$285/month</strong>
-  (instance ~$121 + 2 TB gp3 ~$164); any equivalent VPS works and is far cheaper &mdash; a 2 TB box at Hetzner /
-  Contabo / OVH class hosts typically runs <strong>$50&ndash;80/month</strong>.</p>
+  <strong>1.5&ndash;2 TB</strong>, not 200 GB.</p>
   <!-- Keep the @ as &#64;: Cloudflare Scrape Shield rewrites literal addresses into a
        span that needs its decoder script, which this page's CSP blocks — the command
        would render as "[email protected]" live. -->
-  <p style="margin:18px 0 4px"><a href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener" style="border:none"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" style="height:36px"></a></p>
-  <p class="dim" style="font-size:14px;margin-top:0">One click on Google Cloud: Cloud Shell opens pre-authenticated with a guided walkthrough. Our own node was deployed exactly this way.</p>
-  <pre><span class="c"># Scripted Google Cloud path (needs the gcloud CLI signed in):</span>
-<span class="k">fiddy provision --gcp</span>
 
-<span class="c"># Scripted AWS path (needs the aws CLI configured):</span>
+  <div class="card" style="padding:22px;margin:18px 0">
+    <div class="kicker">Recommended — tested end to end</div>
+    <p style="margin-top:0"><strong>Google Cloud, one click.</strong> Cloud Shell opens pre-authenticated with a guided
+    walkthrough: one command creates the VM, disk and firewall, in your project, on your billing.
+    This exact path ran our own verified node (914M messages synced).</p>
+    <p style="margin:14px 0 4px"><a href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener" style="border:none"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" style="height:36px"></a></p>
+    <p class="dim" style="font-size:14px;margin-bottom:0">~$165/mo (e2-standard-4 + 2 TB HDD). Prefer the terminal? <code class="inline">fiddy provision --gcp</code> (needs the gcloud CLI signed in).</p>
+  </div>
+
+  <details class="pane" style="padding:16px 20px;margin:16px 0">
+    <summary style="cursor:pointer;color:var(--ink)"><strong>Other providers</strong> — same three commands, your pick</summary>
+    <pre style="margin-bottom:4px"><span class="c"># AWS (needs the aws CLI configured, ~$285/mo list):</span>
 <span class="k">fiddy provision --aws</span>
 
-<span class="c"># OVHcloud Public Cloud (b3-16 + 2 TB volume, ~$190/mo — API creds from api.ovh.com/createToken):</span>
-<span class="k">fiddy provision --ovh</span>
-
-<span class="c"># Hetzner Cloud (CCX33 + 2 TB volume, ~€120/mo — token from console.hetzner.cloud):</span>
+<span class="c"># Hetzner (CCX33 + 2 TB volume, ~€120/mo — token from console.hetzner.cloud):</span>
 <span class="k">fiddy provision --hetzner</span>
+
+<span class="c"># OVHcloud Public Cloud (b3-16 + 2 TB volume, ~$190/mo — creds from api.ovh.com/createToken):</span>
+<span class="k">fiddy provision --ovh</span>
 
 <span class="c"># Or any server you already have:</span>
 <span class="k">fiddy provision --ssh ubuntu&#64;203.0.113.10</span></pre>
-  <p class="dim">The AWS path creates a 4 vCPU / 16 GB instance with a gp3 volume sized for a read node and Docker preinstalled, generates an SSH keypair into
-  <code class="inline">~/.fiddy/</code>, and locks the security group down: SSH and the node API answer
-  <strong>your IP only</strong>; gossip ports stay open to the network (that's how your node talks to peers).
-  Either path saves the target to <code class="inline">~/.fiddy/config</code>.</p>
+    <p class="dim" style="font-size:14px;margin:0">Hetzner and OVH paths are scripted against their API docs but not yet
+    battle-tested — they fail loudly with the provider's own error if anything drifts. A 2 TB box at any
+    Hetzner / Contabo / OVH-class host typically runs <strong>$50&ndash;120/month</strong>.</p>
+  </details>
+  <p class="dim">Every scripted path creates a 4 vCPU / 16 GB machine with a ~2 TB disk and Docker preinstalled, then saves the target to
+  <code class="inline">~/.fiddy/config</code>. The AWS path also generates an SSH keypair into
+  <code class="inline">~/.fiddy/</code> and locks the security group down: SSH and the node API answer
+  <strong>your IP only</strong>; gossip ports stay open to the network (that's how your node talks to peers).</p>
 </div></section>
 
 <section id="step1"><div class="wrap">

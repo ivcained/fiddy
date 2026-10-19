@@ -70,9 +70,9 @@ EOF
     *)
       step "fiddy provision"
       echo "Pick your compute:"
-      echo "  1. AWS (scripted, ~\$300/mo at list price):  fiddy provision --aws"
-      echo "  2. Google Cloud (scripted, ~\$165/mo HDD):    fiddy provision --gcp"
+      echo "  1. Google Cloud (TESTED — recommended):        fiddy provision --gcp"
       echo "     …or one click in Cloud Shell: https://fiddy.fun/client#step0"
+      echo "  2. AWS (scripted, ~\$300/mo at list price):  fiddy provision --aws"
       echo "  3. OVH Public Cloud (~\$190/mo, untested):     fiddy provision --ovh"
       echo "  4. Hetzner (~€120/mo, untested):             fiddy provision --hetzner"
       echo "  5. Any server you have:                    fiddy provision --ssh user@host"
