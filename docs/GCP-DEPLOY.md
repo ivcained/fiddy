@@ -30,8 +30,8 @@ It creates one firewall rule and one VM (`e2-standard-4`, Ubuntu 24.04, 2 TB dis
 installs Docker + cron, and prints the node's IP. Safe to re-run — it reuses what exists.
 
 **Why a Standard (HDD) disk?** New GCP projects cap regional SSD at 500 GB and will
-reject a 2 TB SSD. HDD has its own, larger quota. Cost is ~\$85/mo for the VM plus
-~\$80/mo for the disk while it runs — delete the VM when you're done (the script
+reject a 2 TB SSD. HDD has its own, larger quota. Cost runs about \$350/mo all-in
+(VM plus 2 TB disk, measured on our own bill) — delete the VM when you're done (the script
 prints the two delete commands).
 
 ## 3. Install the node
