@@ -182,10 +182,13 @@ preflight_local() {
 
 preflight_remote() {
   local out vcpu ram_gb disk_gb ports
+  # Measure the disk the node's data will actually live on: when ~/snapchain
+  # is a symlink to an attached volume (the OVH path), ~ alone would report
+  # the small boot disk and false-fail the preflight.
   out="$(ssh_run 'printf "%s %s %s %s\n" \
       "$(nproc)" \
       "$(( $(awk "/MemTotal/ {print \$2}" /proc/meminfo) / 1024 / 1024 ))" \
-      "$(( $(df -Pk ~ 2>/dev/null | awk "NR==2 {print \$4}") / 1048576 ))" \
+      "$(( $( (df -Pk ~/snapchain 2>/dev/null || df -Pk ~) | awk "NR==2 {print \$4}" ) / 1048576 ))" \
       "$( (ss -lntup 2>/dev/null || netstat -lntup 2>/dev/null) | grep -oE ":(3000|3381|3382|3383|8125|8126)\b" | tr -d ":" | sort -u | tr "\n" "," )"')" \
     || die "could not read resources from $FIDDY_TARGET"
   set -- $out

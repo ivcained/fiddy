@@ -17,6 +17,7 @@ provision_main() {
     case "$1" in
       --aws)  mode=aws ;;
       --gcp)  mode=gcp ;;
+      --ovh)  mode=ovh ;;
       --ssh)  mode=ssh; shift; FIDDY_SSH_TARGET_ARG="${1:-}" ;;
       --force) FIDDY_ALLOW_UNDERSIZED=1 ;;
       -h|--help)
@@ -29,6 +30,10 @@ fiddy provision — furnish the compute your node will run on.
                     project set (gcloud config set project ...).
                     Options: FIDDY_GCP_ZONE (default us-central1-a)
                              FIDDY_GCP_TYPE (default e2-standard-4)
+  --ovh             OVHcloud Public Cloud: b3-16 + 2 TB Classic volume (~$190/mo).
+                    Needs: OVH_APPLICATION_KEY / _SECRET / CONSUMER_KEY and
+                    OVH_PUBLIC_CLOUD_PROJECT env vars (api.ovh.com/createToken).
+                    NOTE: not yet battle-tested — fails loudly with API errors.
                     Needs: aws CLI configured (aws configure).
                     Defaults: m5.xlarge (4 vCPU / 16 GB) in ${FIDDY_AWS_REGION:-us-east-1}
                               with a ${FIDDY_AWS_VOLUME_GB:-2048} GB gp3 volume.
@@ -55,6 +60,7 @@ EOF
   case "$mode" in
     aws) provision_aws ;;
     gcp) provision_gcp ;;
+    ovh) provision_ovh ;;
     ssh) provision_ssh "${FIDDY_SSH_TARGET_ARG:?missing user@host after --ssh}" ;;
     *)
       step "fiddy provision"
@@ -62,7 +68,8 @@ EOF
       echo "  1. AWS (scripted, ~\$300/mo at list price):  fiddy provision --aws"
       echo "  2. Google Cloud (scripted, ~\$165/mo HDD):    fiddy provision --gcp"
       echo "     …or one click in Cloud Shell: https://fiddy.fun/client#step0"
-      echo "  3. Any server you have:                    fiddy provision --ssh user@host"
+      echo "  3. OVH Public Cloud (~\$190/mo, untested):     fiddy provision --ovh"
+      echo "  4. Any server you have:                    fiddy provision --ssh user@host"
       echo ""
       echo "Minimum for a Snapchain mainnet read node: 4 vCPU, 16 GB RAM,"
       echo "1.5 TB free disk, public IP, ports 3381-3383 TCP+UDP."
@@ -83,6 +90,21 @@ provision_gcp() {
   config_set FIDDY_TARGET "$(whoami)@$ip"
   config_set FIDDY_PROVIDER "gcp"
   ok "compute ready: $(whoami)@$ip"
+  ok "Next: fiddy node up"
+}
+
+provision_ovh() {
+  require curl "install curl"; require openssl "install openssl"; require python3 "install python3"
+  # Same script the docs walk through — one path, no drift. It writes the IP to
+  # $FIDDY_HOME/ovh-last-ip on success.
+  mkdir -p "$FIDDY_HOME"
+  bash "$FIDDY_REPO/scripts/ovh-deploy.sh" || die "OVH deploy failed — see the output above"
+  local ip
+  ip="$(cat "$FIDDY_HOME/ovh-last-ip" 2>/dev/null || true)"
+  [ -n "$ip" ] || die "deploy finished but no IP was recorded — re-run, or: fiddy provision --ssh ubuntu@<IP-from-output>"
+  config_set FIDDY_TARGET "ubuntu@$ip"
+  config_set FIDDY_PROVIDER "ovh"
+  ok "compute ready: ubuntu@$ip"
   ok "Next: fiddy node up"
 }
 
