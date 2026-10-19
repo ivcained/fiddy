@@ -46,3 +46,16 @@ terraform destroy -var="project_id=YOUR_PROJECT_ID"
   `source_ranges = ["YOUR.IP.HERE/32"]` — but keep 3382/3384 open.
 - Grafana lands on the node at `:3000` and stays private by design — use
   `fiddy node dashboard` (SSH tunnel) instead of opening the port.
+
+## Alternative: GCP Infrastructure Manager
+
+This module also works with [Infrastructure Manager](https://docs.cloud.google.com/infrastructure-manager/docs/overview)
+(Google's managed Terraform — runs configs straight from a git repo, with a
+Console "Deploy" button): create a deployment, point it at
+`github.com/ivcained/fiddy` path `terraform/gcp-read-node`, set `project_id`.
+
+We don't make it the default: Infra Manager needs a service account with the
+right roles wired first, which is more setup than Cloud Shell's pre-authed
+one click. If you already live in the GCP Console, it's the nicer long-term
+surface — state and rollbacks managed for you.
+

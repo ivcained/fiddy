@@ -57,6 +57,17 @@ a { color: var(--lime); text-decoration: none; }
   <p class="dim" style="margin-top:12px">Google Cloud, in your project, on your billing (~$165/mo while it runs).
   Nothing custodial — the script runs where you can read it.</p>
 
+  <div class="card" id="managedCard">
+    <h2><span class="n">✦</span>Zero clicks — we run it for you</h2>
+    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, $480/mo.</strong>
+    Pay from your Farcaster wallet; we provision and babysit a node on our cloud and hand you the endpoint.
+    Cancel anytime. Your node holds no keys and only public data — casts are always signed on your device.</p>
+    <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $480 USDC &amp; deploy</button>
+    <span id="payStatus" style="margin-left:12px;font-size:13.5px" class="dim"></span></p>
+    <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
+    On the open web the button tells you how to pay instead. Nodes go live within 24h of payment — overnight is the snapshot, not us.</p>
+  </div>
+
   <div class="card">
     <h2><span class="n">1</span>Create the machine</h2>
     <p class="dim" style="font-size:14.5px">Opens Cloud Shell (already signed in as you) with a guided walkthrough.
@@ -134,6 +145,47 @@ async function poll(ip) {
     el.replaceChildren(wait);
   }
 }
+</script>
+<script src="/client/assets/miniapp-sdk.min.js"></script>
+<script>
+// Managed-by-Fiddy: one click → USDC send from the user's Farcaster wallet →
+// we record the order and deploy within 24h. Recipient is the operator's
+// Farcaster-verified wallet (fid 191554). USDC on Base, 6 decimals.
+const PAY_TO = '0xde4dcfca310b6a7ade321b6981363e2d7e0323d9';
+const USDC_BASE = 'eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const AMOUNT = '480000000'; // $480.00 USDC
+
+$('payBtn').addEventListener('click', async () => {
+  const status = $('payStatus');
+  const sdk = window.miniapp && window.miniapp.sdk;
+  if (!sdk) {
+    status.textContent = 'Open this page inside a Farcaster client (e.g. Warpcast) to pay from your Farcaster wallet.';
+    return;
+  }
+  status.textContent = 'Opening your wallet…';
+  try {
+    await sdk.actions.ready();
+    const ctx = await Promise.race([sdk.context, new Promise((_, rej) => setTimeout(() => rej(new Error('host-timeout')), 5000))]);
+    const fid = ctx && ctx.user && ctx.user.fid;
+    if (!fid) { status.textContent = 'Could not read your Farcaster account from the host.'; return; }
+    const result = await sdk.actions.sendToken({
+      token: USDC_BASE,
+      amount: AMOUNT,
+      recipientAddress: PAY_TO,
+    });
+    if (!result || !result.success) { status.textContent = 'Payment cancelled — nothing was charged.'; return; }
+    const txHash = result.send && result.send.transaction;
+    status.textContent = 'Paid. Registering your order…';
+    const r = await fetch('/api/fiddy/managed-node', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ fid, address: (ctx.user.custodyAddress || ''), txHash: txHash || '' }),
+    });
+    if (!r.ok) throw new Error('order registration failed');
+    status.textContent = '✓ Order in. We deploy within 24h and message you on Farcaster with your endpoint.';
+  } catch (e) {
+    status.textContent = 'Something failed: ' + (e && e.message ? e.message : String(e)) + ' — if you paid, your tx hash is your receipt; message @ivc.';
+  }
+});
 </script>
 </body>
 </html>
