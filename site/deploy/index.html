@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Deploy your node — Fiddy</title>
 <meta name="description" content="One click to your own Farcaster read node on Google Cloud.">
-<meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://fiddy.fun/client/assets/deploy-card.png","button":{"title":"Deploy my node","action":{"type":"launch_miniapp","name":"Deploy a Node","url":"https://fiddy.fun/client/deploy/","splashImageUrl":"https://fiddy.fun/splash.png","splashBackgroundColor":"#161715"}}}'>
+<meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://fiddy.fun/client/assets/deploy-card.png","button":{"title":"Deploy my node","action":{"type":"launch_miniapp","name":"Deploy a Node","url":"https://fiddy.fun/client/deploy/","splashImageUrl":"https://fiddy.fun/client/assets/fiddy-splash.png","splashBackgroundColor":"#161715"}}}'>
 <meta property="og:title" content="Deploy your own Farcaster node — Fiddy">
 <meta property="og:description" content="One click to your own read node on Google Cloud — or let Fiddy run it for you.">
 <meta property="og:image" content="https://fiddy.fun/client/assets/deploy-card.png">
@@ -216,10 +216,12 @@ async function showSubscription(fid) {
   } catch { /* status is a nicety; never break the pay flow */ }
 }
 
-// On load: if a Farcaster host knows this user, show their subscription.
+// On load: clear the host splash (ready), then if a Farcaster host knows this
+// user, show their subscription.
 (function () {
   const sdk = window.miniapp && window.miniapp.sdk;
   if (!sdk) return;
+  try { sdk.actions.ready(); } catch (e) { /* not in a host */ }
   Promise.race([sdk.context, new Promise((_, rej) => setTimeout(() => rej(new Error('t')), 4000))])
     .then((ctx) => { const fid = ctx && ctx.user && ctx.user.fid; if (fid) showSubscription(fid); })
     .catch(() => {});
