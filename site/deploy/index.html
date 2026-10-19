@@ -60,18 +60,6 @@ a { color: var(--lime); text-decoration: none; }
   <p class="dim" style="margin-top:12px">Google Cloud, in your project, on your billing (~$165/mo while it runs).
   Nothing custodial — the script runs where you can read it.</p>
 
-  <div class="card" id="managedCard">
-    <h2><span class="n">✦</span>Zero clicks — we run it for you</h2>
-    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, $480/mo.</strong>
-    Pay from your Farcaster wallet; we provision and babysit a node on our cloud and hand you the endpoint.
-    Cancel anytime. Your node holds no keys and only public data — casts are always signed on your device.</p>
-    <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $480 USDC &amp; deploy</button>
-    <span id="payStatus" style="margin-left:12px;font-size:13.5px" class="dim"></span></p>
-    <div id="subView" hidden style="margin-top:14px;font:14px/1.7 var(--mono)"></div>
-    <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
-    On the open web the button tells you how to pay instead. Nodes go live within 24h of payment — overnight is the snapshot, not us.</p>
-  </div>
-
   <div class="card">
     <h2><span class="n">1</span>Create the machine</h2>
     <p class="dim" style="font-size:14.5px">Opens Cloud Shell (already signed in as you) with a guided walkthrough.
@@ -97,6 +85,18 @@ bin/fiddy node up</span></pre>
     Some browsers block the poll from an HTTPS page — the reliable check is
     <code style="font-family:var(--mono)">bin/fiddy node status</code> from your terminal.</p>
     <div id="status"></div>
+  </div>
+
+  <div class="card" id="managedCard">
+    <h2><span class="n">✦</span>Zero clicks — we run it for you</h2>
+    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, $480/mo.</strong>
+    Pay from your Farcaster wallet; we provision and babysit a node on our cloud and hand you the endpoint.
+    Cancel anytime. Your node holds no keys and only public data — casts are always signed on your device.</p>
+    <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $480 USDC &amp; deploy</button>
+    <span id="payStatus" style="margin-left:12px;font-size:13.5px" class="dim"></span></p>
+    <div id="subView" hidden style="margin-top:14px;font:14px/1.7 var(--mono)"></div>
+    <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
+    On the open web the button tells you how to pay instead. Nodes go live within 24h of payment — overnight is the snapshot, not us.</p>
   </div>
 
   <footer>
