@@ -487,6 +487,19 @@ module.exports = {
         'overlay-show': 'overlayShow 150ms cubic-bezier(0.16, 1, 0.3, 1)',
       },
       colors: {
+        /* Fiddy brand tokens, same values as src/styles/fiddy-shell.css and
+           the design's tokens.css. Flat, dark-only: no light variant exists. */
+        fiddy: {
+          bg: '#161715',
+          raise: '#1d1e1c',
+          ink: '#eef0e8',
+          dim: '#9ba193',
+          accent: '#d4ff3f',
+          'on-accent': '#1a1c10',
+          'accent-deep': '#7cb518',
+          glass: 'rgba(255,255,255,0.04)',
+          'glass-border': 'rgba(255,255,255,0.09)',
+        },
         ['action-green']: {
           light: text.light.success,
           dark: text.dark.success,

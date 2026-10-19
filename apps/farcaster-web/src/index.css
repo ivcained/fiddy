@@ -138,6 +138,8 @@
 
 @import 'tailwindcss';
 @import '@neynar/ui/styles';
+/* Fiddy brand tokens + shell chrome (design: OpenDesign fiddy-client-4695). */
+@import './styles/fiddy-shell.css';
 @config '../tailwind.config.js';
 
 * {

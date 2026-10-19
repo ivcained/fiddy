@@ -96,3 +96,39 @@ The accent color changed from **violet** (`#866aff` in dark) to **chartreuse** (
 - **Shared state**: One style for hover/chosen/held
 
 Use `.solid-glass-pane` class on container elements to apply these styles.
+## The shell (Oct 19) — design implemented, not reskinned
+
+Source of truth: OpenDesign project `fiddy-client-4695` (`index.html` +
+`tokens.css`). The values below are copied from it, not invented.
+
+### Where the tokens live
+
+- `src/styles/fiddy-shell.css` — the `--fiddy-*` CSS variables and the shell
+  chrome classes (`.fiddy-topbar`, `.fiddy-nav`, `.fiddy-agent-card`,
+  `.fiddy-tabs`, `.fiddy-welcome*`). Imported from `src/index.css`.
+- `tailwind.config.js` — the same palette as a flat `fiddy` colour group
+  (`bg-fiddy-bg`, `text-fiddy-accent`, …) for new components.
+- `index.html` — favicon/apple-touch-icon from `public/brand/`, `theme-color`
+  `#161715`, and an unset theme preference now resolves to **dark** (`system`
+  was the fork's default; a light Fiddy shell does not exist).
+
+### Dark only, on purpose
+
+`useFiddyBrandGround()` (`src/components/fiddy/useFiddyBrand.ts`) pins the app
+to dark while a Fiddy surface is mounted and writes `user-saved-theme=dark`, the
+same key Settings already reads — the choice stays visible and reversible.
+
+### What is ours now
+
+1. **Welcome screen** (`/` unauthenticated) — `FiddyWelcomePage`: the Fiddy
+   lockup, the tagline *"the agentic farcaster client"*, the four differentiators,
+   and the fork's own Farcaster sign-in modals behind our buttons.
+2. **Shell chrome** — `FiddyTopBar` (brand dot + wordmark, node-status pill,
+   avatar), left nav ordered Feed → Agent → Wallet → Settings then the rest of
+   the fork's surfaces under "More", and the agent panel at the top of the right
+   column on the feed (`AgentRailPanel`, honest `soon` tags intact).
+3. **Phone** — `FiddyMobileTabBar`: Feed / Agent / Wallet / Settings on a fixed
+   bottom bar; the node pill stays in `MobileHeader`'s top bar.
+
+The feed's own typography and density are untouched: the rounded brand face is
+chrome-only so dense text stays as readable as upstream.

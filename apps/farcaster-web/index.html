@@ -6,27 +6,23 @@
       name="ahrefs-site-verification"
       content="38f091146e9739ea28ca6ea0cfd077cfd3387a798283fd07c83e902c20c15379"
     />
-    <link rel="icon" href="/favicon-v3.png" />
+    <link rel="icon" href="/fiddy-favicon.png" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=no"
     />
     <meta
       name="theme-color"
-      content="#101010"
+      content="#161715"
       media="(prefers-color-scheme: dark)"
     />
-    <meta
-      name="theme-color"
-      content="#ffffff"
-      media="(prefers-color-scheme: light)"
-    />
+    <meta name="theme-color" content="#161715" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
     />
-    <link rel="apple-touch-icon" href="/og-logo-v3.png" />
+    <link rel="apple-touch-icon" href="/brand/fiddy-app-icon.png" />
     <link rel="manifest" href="/manifest.json" />
     <title>Fiddy</title>
     <!-- Preconnect to image CDN for faster LCP -->
@@ -43,7 +39,9 @@
     <script>
       (function() {
         const STORAGE_KEY = 'user-saved-theme';
-        const DEFAULT_THEME = 'system';
+        // Fiddy is a dark client: an unset preference resolves to dark, not to
+        // the OS, so the shell never flashes the fork's light ground.
+        const DEFAULT_THEME = 'dark';
         
         try {
           const stored = localStorage.getItem(STORAGE_KEY);
