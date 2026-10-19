@@ -1,5 +1,6 @@
 import { FC, memo, Suspense, useMemo } from 'react';
 
+import { AgentRailPanel } from '~/components/agent/AgentRailPanel';
 import {
   MinimizableWindowHost,
   MinimizableWindowHostVariant,
@@ -34,6 +35,10 @@ const AuthedRightSideBar: FC = memo(() => {
     return (
       <>
         <RightSideBar as="div">
+          {/* The agent is one of the two things this client is for, so on the
+              feed it gets the top of the right column — above search, above
+              the fork's widgets, which all stay below it. */}
+          {routeName === 'homeFeed' && <AgentRailPanel />}
           {routeFamily === 'search' ? <></> : <Search showClearIcon={false} />}
           {routeFamily !== 'profile' && routeFamily !== 'news' && (
             <Suspense>

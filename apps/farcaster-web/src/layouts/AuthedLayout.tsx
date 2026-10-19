@@ -7,6 +7,8 @@ import { useLocation } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 
 import { EmbeddedWalletBridgeProvider } from '~/components/EmbeddedWallet';
+import { FiddyTopBar } from '~/components/fiddy/FiddyTopBar';
+import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { PreloadAuthedResources } from '~/components/PrefetchAuthedResources';
 import { EnsureCachedCurrentUser } from '~/components/users/EnsureCachedCurrentUser';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
@@ -239,6 +241,9 @@ const AuthedLayout: FC = () => {
   const location = useLocation();
   const { inStandaloneMode } = useStandaloneMode();
 
+  // Fiddy ships dark; pin the ground while the shell is mounted.
+  useFiddyBrandGround();
+
   return (
     <EnsureCachedCurrentUser>
       <UserAppContextProvider>
@@ -301,15 +306,18 @@ const AuthedLayout: FC = () => {
                                           <HomeFeedSessionBoundary />
                                           <FollowingFeedSessionBoundary />
                                           <CastComposerSessionProvider>
-                                            <Container>
-                                              <PreloadAuthedResources />
-                                              <AuthedLeftSideBar />
-                                              <MainContent />
-                                              <AuthedRightSideBar />
-                                              <ToastContainer
-                                                {...toastOptions}
-                                              />
-                                            </Container>
+                                            <div className="fiddy-shell-frame fiddy-surface">
+                                              <FiddyTopBar />
+                                              <Container>
+                                                <PreloadAuthedResources />
+                                                <AuthedLeftSideBar />
+                                                <MainContent />
+                                                <AuthedRightSideBar />
+                                                <ToastContainer
+                                                  {...toastOptions}
+                                                />
+                                              </Container>
+                                            </div>
                                           </CastComposerSessionProvider>
                                         </BespokeTransactionModalProvider>
                                       </HomeLastSelectedTabContextProvider>

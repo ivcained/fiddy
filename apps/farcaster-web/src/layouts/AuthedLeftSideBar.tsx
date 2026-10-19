@@ -11,6 +11,7 @@ import {
   Send,
   Server,
   UserPlusIcon,
+  Wallet,
 } from 'lucide-react';
 import React from 'react';
 
@@ -43,7 +44,7 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
     : 0;
 
   return (
-    <LeftSideBar className="justify-between pb-4">
+    <LeftSideBar asideClassName="fiddy-nav" className="justify-between pb-4">
       <div className="flex grow flex-col space-y-1 xl:w-full">
         <div className="flex flex-row items-center justify-center xl:justify-between">
           <div className="block">
@@ -60,14 +61,34 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
             className="xl:px-2.5"
           />
         </div>
-        <NavLink to="homeFeed" params={{}} searchParams={{}} title="Home">
+        {/* The four surfaces Fiddy is actually about, first — then everything
+            else the fork exposes, so nothing becomes unreachable. */}
+        <NavLink to="homeFeed" params={{}} searchParams={{}} title="Feed">
           <NavLinkIcon>
             <div className="-translate-y-px">
               <HomeIcon size={20} />
             </div>
           </NavLinkIcon>
-          <NavLinkLabel>Home</NavLinkLabel>
+          <NavLinkLabel>Feed</NavLinkLabel>
         </NavLink>
+        <AgentNavEntry />
+        {/* The wallet is a real surface in this build, so it is a real entry —
+            no "soon" tag where something actually works. */}
+        <NavLink to="wallet" params={{}} searchParams={{}} title="Wallet">
+          <NavLinkIcon>
+            <div className="relative translate-y-[-0.75px]">
+              <Wallet size={20} />
+            </div>
+          </NavLinkIcon>
+          <NavLinkLabel>Wallet</NavLinkLabel>
+        </NavLink>
+        <NavLink to="settings" params={{}} searchParams={{}} title="Settings">
+          <NavLinkIcon>
+            <GearIcon size={20} />
+          </NavLinkIcon>
+          <NavLinkLabel>Settings</NavLinkLabel>
+        </NavLink>
+        <div className="fiddy-nav-caption">More</div>
         <NavLink
           to="notifications"
           params={{}}
@@ -139,7 +160,6 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
           </NavLinkIcon>
           <NavLinkLabel>Saved</NavLinkLabel>
         </NavLink>
-        <AgentNavEntry />
         {/* Your own node is a first-class surface, not a buried settings page:
             the status pill and this entry land on the same place. */}
         <NavLink
@@ -154,12 +174,6 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
             </div>
           </NavLinkIcon>
           <NavLinkLabel>Your node</NavLinkLabel>
-        </NavLink>
-        <NavLink to="settings" params={{}} searchParams={{}} title="Settings">
-          <NavLinkIcon>
-            <GearIcon size={20} />
-          </NavLinkIcon>
-          <NavLinkLabel>Settings</NavLinkLabel>
         </NavLink>
         {developerModeEnabled && (
           <NavLink
