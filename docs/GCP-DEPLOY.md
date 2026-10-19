@@ -11,6 +11,9 @@ you type here leaves your project. This is command (0) of the three-command path
 
 ## 1. Pick a project
 
+Usually automatic: the deploy script auto-selects your project when you have
+exactly one, and prints a picker when you have several. To choose by hand:
+
 ```bash
 gcloud config set project YOUR_PROJECT_ID
 ```

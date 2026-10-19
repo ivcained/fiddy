@@ -21,7 +21,41 @@ DISK_GB="${FIDDY_GCP_DISK_GB:-2048}"
 
 command -v gcloud >/dev/null || { echo "gcloud not found — run this in Cloud Shell: https://shell.cloud.google.com"; exit 1; }
 PROJECT="$(gcloud config get-value project 2>/dev/null)"
-[ -n "$PROJECT" ] || { echo "no project set — run: gcloud config set project PROJECT_ID"; exit 1; }
+if [ -z "$PROJECT" ]; then
+  # Cloud Shell opened from a repo link has no project preselected. Don't die —
+  # list what this account can see and auto-pick when there is exactly one.
+  PROJECTS=()
+  while IFS= read -r p; do [ -n "$p" ] && PROJECTS+=("$p"); done < <(gcloud projects list --format='value(projectId)' 2>/dev/null || true)
+  if [ "${#PROJECTS[@]}" = 1 ]; then
+    PROJECT="${PROJECTS[0]}"
+    gcloud config set project "$PROJECT" >/dev/null
+    echo "▸ auto-selected your only project: $PROJECT"
+  elif [ "${#PROJECTS[@]}" -gt 1 ]; then
+    echo "Pick a project first:"
+    printf '  %s\n' "${PROJECTS[@]}"
+    echo "then: gcloud config set project PROJECT_ID && bash scripts/gcp-deploy.sh"
+    exit 1
+  else
+    # No projects at all — create one with a random ID so the user types nothing.
+    PROJECT="fiddy-node-$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 6)"
+    echo "▸ no project on this account — creating one: $PROJECT"
+    gcloud projects create "$PROJECT" --name="fiddy node" --quiet \
+      || { echo "project creation failed — create one at https://console.cloud.google.com/projectcreate then re-run"; exit 1; }
+    gcloud config set project "$PROJECT" >/dev/null
+    # Compute needs billing. Link the account's first billing account when one
+    # exists; otherwise tell the user exactly where to click (free trial works).
+    BILL="$(gcloud billing accounts list --format='value(name)' --limit=1 2>/dev/null || true)"
+    if [ -n "$BILL" ]; then
+      gcloud billing projects link "$PROJECT" --billing-account "$BILL" --quiet \
+        && echo "▸ linked billing account $BILL"
+    else
+      echo "▸ action needed once: link billing (free trial's \$300 credit covers this node for weeks):"
+      echo "  https://console.cloud.google.com/billing/linkedaccount?project=$PROJECT"
+      echo "  Re-run this script after linking."
+      exit 1
+    fi
+  fi
+fi
 echo "▸ project: $PROJECT · zone: $ZONE · type: $TYPE · disk: ${DISK_GB}GB pd-standard"
 
 echo "▸ firewall rule (gossip must face the world; API ports are yours to guard)"
