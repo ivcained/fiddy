@@ -12,7 +12,7 @@ import { OnCurrentNavLinkClickedProvider } from '~/contexts/OnCurrentNavLinkClic
 import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
 import { AuthedLayout } from '~/layouts/AuthedLayout';
 import { UnauthedLayout } from '~/layouts/UnauthedLayout';
-import { HomeFeedPage, HomeLandingPage } from '~/lazy/pages';
+import { FiddyWelcomePage, HomeFeedPage } from '~/lazy/pages';
 import { trackError } from '~/utils/errorUtils';
 import { getItem } from '~/utils/storageUtils';
 
@@ -627,7 +627,7 @@ const Router: React.FC = () => {
                   isSignedIn ? (
                     <routes.homeFeed.Component />
                   ) : (
-                    <HomeLandingPage />
+                    <FiddyWelcomePage />
                   )
                 }
               />

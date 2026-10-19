@@ -254,6 +254,12 @@ export const ComposePage = lazyWithPreload(() =>
   })),
 );
 
+export const FiddyWelcomePage = lazyWithPreload(() =>
+  import('~/pages/fiddyWelcome/FiddyWelcomePage').then((res) => ({
+    default: res.FiddyWelcomePage,
+  })),
+);
+
 export const HomeLandingPage = lazyWithPreload(() =>
   import('~/pages/homeLanding/HomeLandingPage').then((res) => ({
     default: res.HomeLandingPage,
