@@ -246,7 +246,8 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   (<code class="inline">:3381</code>) and gRPC (<code class="inline">:3383</code>) APIs. Anyone can run one. No permission, no API keys.</p>
   <pre><span class="k">fiddy node up</span>      <span class="c"># install, start, wait for the API to answer</span>
 <span class="k">fiddy node status</span>  <span class="c"># sync progress</span>
-<span class="k">fiddy node logs</span>    <span class="c"># tail the node</span></pre>
+<span class="k">fiddy node logs</span>    <span class="c"># tail the node</span>
+<span class="k">fiddy node dashboard</span> <span class="c"># Grafana (sync height, peers, shards) via SSH tunnel → localhost:3000</span></pre>
 
   <div class="pane note">
     <div class="t">Read nodes vs validators — and where your casts go</div>

@@ -27,6 +27,7 @@ node_main() {
     status)  node_status ;;
     verify)  node_verify ;;
     logs)    node_logs ;;
+    dashboard) node_dashboard ;;
     stop)    node_stop ;;
     start)   node_start ;;
     upgrade) node_upgrade ;;
@@ -45,6 +46,9 @@ fiddy node — manage your Snapchain read node.
                  health, reads served by this node, signer list. Default FID
                  is 3 (dwr.eth); pass any FID you can check.
   logs           Tail node logs (Ctrl-C to stop).
+  dashboard      Open the node's Grafana dashboard (sync height, peers,
+                 shard stats) via an SSH tunnel on http://localhost:3000.
+                 Grafana ships with the official snapchain.sh install.
   start | stop   Start / stop the node's containers (non-blocking).
   upgrade        Re-run the official installer, pulling the latest release.
 
@@ -349,6 +353,17 @@ require_snapchain_remote() {
 node_logs() {
   require_snapchain_remote
   ssh_run_tty 'cd ~/snapchain && ./snapchain.sh logs'
+}
+
+node_dashboard() {
+  require_target
+  # snapchain.sh installs Grafana on the node at :3000. It should never be
+  # public — open it through an SSH tunnel instead.
+  log "tunneling the node's Grafana to http://localhost:3000 (Ctrl-C to close)"
+  log "default login is admin / admin — change it in the Grafana UI."
+  local opts=(-N -L 3000:127.0.0.1:3000)
+  [ -n "${FIDDY_SSH_KEY:-}" ] && opts+=(-i "$FIDDY_SSH_KEY")
+  ssh "${opts[@]}" -o StrictHostKeyChecking=accept-new "$FIDDY_TARGET"
 }
 
 node_stop() {
