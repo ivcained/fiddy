@@ -32,20 +32,13 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* These classes are unlayered, so they beat Tailwind's `hidden` /
-   `sm:hidden` utilities. The responsive gate therefore has to live here too:
-   the top bar is desktop chrome, the tab bar is phone chrome. */
-@media (max-width: 639px) {
-  .fiddy-topbar {
-    display: none;
-  }
-}
-
-@media (min-width: 640px) {
-  .fiddy-tabs {
-    display: none;
-  }
-}
+/* These classes are unlayered, so they beat Tailwind's `hidden` / `sm:hidden`
+   utilities. The responsive gate therefore has to live here too, and it has to
+   be the ONLY declaration of `display` for each class: a later
+   `.fiddy-nav { display: flex }` would out-rank an earlier media query at equal
+   specificity and un-hide the chrome at every width (verified in a headless
+   browser at 390px and 1440px). Each base rule below therefore drops `display`
+   and states it inside its own media query. */
 
 /* The rounded brand face is chrome-only: the feed keeps the app's own type so
    dense text stays as readable as it is upstream. */
@@ -77,7 +70,6 @@ html.fiddy-dark-shell body {
 /* ---------- top bar ---------- */
 
 .fiddy-topbar {
-  display: flex;
   align-items: center;
   gap: 16px;
   height: 60px;
@@ -87,6 +79,14 @@ html.fiddy-dark-shell body {
   position: sticky;
   top: 0;
   z-index: 40;
+}
+
+/* Desktop chrome only: phones keep the app's own compact header, which carries
+   the node pill. */
+@media (min-width: 640px) {
+  .fiddy-topbar {
+    display: flex;
+  }
 }
 
 .fiddy-brand {
@@ -149,12 +149,21 @@ html.fiddy-dark-shell body {
 /* ---------- left nav ---------- */
 
 .fiddy-nav {
-  display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 18px 14px 14px;
   border-right: 1px solid var(--fiddy-glass-border);
   background: color-mix(in oklab, var(--fiddy-bg), var(--fiddy-bg-raise) 30%);
+}
+
+/* Desktop chrome only. The upstream <aside> is already `hidden sm:block`; this
+   has to say the same thing out loud, because an unlayered `.fiddy-nav` beats
+   that utility. Without it the rail stays on screen at 390px, laid out at the
+   fork's collapsed offset (x = -35px) and pushing the page 35px wide. */
+@media (min-width: 640px) {
+  .fiddy-nav {
+    display: flex;
+  }
 }
 
 .fiddy-nav-item {
@@ -379,7 +388,7 @@ html.fiddy-dark-shell body {
   background: var(--fiddy-accent);
   color: var(--fiddy-on-accent);
   font-weight: 800;
-  font-size: 15.5px;
+  font-size: 16px;
   letter-spacing: 0.01em;
   display: inline-flex;
   align-items: center;
@@ -436,10 +445,18 @@ html.fiddy-dark-shell body {
 /* ---------- mobile bottom tab bar ---------- */
 
 .fiddy-tabs {
-  display: flex;
   border-top: 1px solid var(--fiddy-glass-border);
   background: color-mix(in oklab, var(--fiddy-bg-raise), var(--fiddy-bg) 35%);
   padding: 7px 8px 0;
+}
+
+/* Phone chrome only. The JSX carries `sm:hidden`, but this class is unlayered
+   and would out-rank it — so the gate is restated here, after the base rule and
+   as the only `display` declaration for the bar. */
+@media (max-width: 639px) {
+  .fiddy-tabs {
+    display: flex;
+  }
 }
 
 .fiddy-tab {
@@ -595,7 +612,7 @@ html.fiddy-dark-shell body {
 }
 
 .fiddy-signin-card h2 {
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 800;
   letter-spacing: -0.01em;
   color: var(--fiddy-ink);
@@ -609,7 +626,7 @@ html.fiddy-dark-shell body {
   background: var(--fiddy-accent);
   color: var(--fiddy-on-accent);
   font-weight: 800;
-  font-size: 15.5px;
+  font-size: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
