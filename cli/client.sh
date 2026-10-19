@@ -169,9 +169,14 @@ client_up() {
   fi
 
   step "Starting Fiddy"
+  # The upstream dev server forces a self-signed HTTPS cert, which greets every
+  # first-time user with a browser security warning. localhost is a secure
+  # context over plain HTTP, so nothing needs it — default off, opt back in
+  # with HTTPS=true.
   if [ "$build" = 1 ]; then
     ( cd "$FIDDY_REPO" && pnpm --filter farcaster-web build && pnpm --filter farcaster-web preview )
   else
-    ( cd "$FIDDY_REPO" && pnpm --filter farcaster-web dev )
+    log "serving plain HTTP on localhost (set HTTPS=true to restore the self-signed cert)"
+    ( cd "$FIDDY_REPO" && HTTPS="${HTTPS:-false}" pnpm --filter farcaster-web dev )
   fi
 }
