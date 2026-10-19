@@ -218,6 +218,9 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
 <span class="c"># OVHcloud Public Cloud (b3-16 + 2 TB volume, ~$190/mo — API creds from api.ovh.com/createToken):</span>
 <span class="k">fiddy provision --ovh</span>
 
+<span class="c"># Hetzner Cloud (CCX33 + 2 TB volume, ~€120/mo — token from console.hetzner.cloud):</span>
+<span class="k">fiddy provision --hetzner</span>
+
 <span class="c"># Or any server you already have:</span>
 <span class="k">fiddy provision --ssh ubuntu&#64;203.0.113.10</span></pre>
   <p class="dim">The AWS path creates a 4 vCPU / 16 GB instance with a gp3 volume sized for a read node and Docker preinstalled, generates an SSH keypair into

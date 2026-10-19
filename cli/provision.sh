@@ -18,6 +18,7 @@ provision_main() {
       --aws)  mode=aws ;;
       --gcp)  mode=gcp ;;
       --ovh)  mode=ovh ;;
+      --hetzner)  mode=hetzner ;;
       --ssh)  mode=ssh; shift; FIDDY_SSH_TARGET_ARG="${1:-}" ;;
       --force) FIDDY_ALLOW_UNDERSIZED=1 ;;
       -h|--help)
@@ -34,6 +35,9 @@ fiddy provision — furnish the compute your node will run on.
                     Needs: OVH_APPLICATION_KEY / _SECRET / CONSUMER_KEY and
                     OVH_PUBLIC_CLOUD_PROJECT env vars (api.ovh.com/createToken).
                     NOTE: not yet battle-tested — fails loudly with API errors.
+  --hetzner         Hetzner Cloud: CCX33 + 2 TB volume (~€120/mo).
+                    Needs: HCLOUD_TOKEN env (console.hetzner.cloud → project →
+                    Security → API tokens). NOTE: not yet battle-tested.
                     Needs: aws CLI configured (aws configure).
                     Defaults: m5.xlarge (4 vCPU / 16 GB) in ${FIDDY_AWS_REGION:-us-east-1}
                               with a ${FIDDY_AWS_VOLUME_GB:-2048} GB gp3 volume.
@@ -61,6 +65,7 @@ EOF
     aws) provision_aws ;;
     gcp) provision_gcp ;;
     ovh) provision_ovh ;;
+    hetzner) provision_hetzner ;;
     ssh) provision_ssh "${FIDDY_SSH_TARGET_ARG:?missing user@host after --ssh}" ;;
     *)
       step "fiddy provision"
@@ -69,7 +74,8 @@ EOF
       echo "  2. Google Cloud (scripted, ~\$165/mo HDD):    fiddy provision --gcp"
       echo "     …or one click in Cloud Shell: https://fiddy.fun/client#step0"
       echo "  3. OVH Public Cloud (~\$190/mo, untested):     fiddy provision --ovh"
-      echo "  4. Any server you have:                    fiddy provision --ssh user@host"
+      echo "  4. Hetzner (~€120/mo, untested):             fiddy provision --hetzner"
+      echo "  5. Any server you have:                    fiddy provision --ssh user@host"
       echo ""
       echo "Minimum for a Snapchain mainnet read node: 4 vCPU, 16 GB RAM,"
       echo "1.5 TB free disk, public IP, ports 3381-3383 TCP+UDP."
@@ -105,6 +111,21 @@ provision_ovh() {
   config_set FIDDY_TARGET "ubuntu@$ip"
   config_set FIDDY_PROVIDER "ovh"
   ok "compute ready: ubuntu@$ip"
+  ok "Next: fiddy node up"
+}
+
+provision_hetzner() {
+  require curl "install curl"; require python3 "install python3"
+  # Same script the docs walk through — one path, no drift. Writes the IP to
+  # $FIDDY_HOME/hetzner-last-ip on success.
+  mkdir -p "$FIDDY_HOME"
+  bash "$FIDDY_REPO/scripts/hetzner-deploy.sh" || die "Hetzner deploy failed — see the output above"
+  local ip
+  ip="$(cat "$FIDDY_HOME/hetzner-last-ip" 2>/dev/null || true)"
+  [ -n "$ip" ] || die "deploy finished but no IP was recorded — re-run, or: fiddy provision --ssh root@<IP-from-output>"
+  config_set FIDDY_TARGET "root@$ip"
+  config_set FIDDY_PROVIDER "hetzner"
+  ok "compute ready: root@$ip"
   ok "Next: fiddy node up"
 }
 
