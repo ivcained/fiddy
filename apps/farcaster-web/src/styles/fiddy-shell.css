@@ -32,6 +32,21 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* These classes are unlayered, so they beat Tailwind's `hidden` /
+   `sm:hidden` utilities. The responsive gate therefore has to live here too:
+   the top bar is desktop chrome, the tab bar is phone chrome. */
+@media (max-width: 639px) {
+  .fiddy-topbar {
+    display: none;
+  }
+}
+
+@media (min-width: 640px) {
+  .fiddy-tabs {
+    display: none;
+  }
+}
+
 /* The rounded brand face is chrome-only: the feed keeps the app's own type so
    dense text stays as readable as it is upstream. */
 .fiddy-topbar,
