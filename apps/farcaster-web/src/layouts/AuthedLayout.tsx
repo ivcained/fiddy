@@ -7,6 +7,7 @@ import { useLocation } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 
 import { EmbeddedWalletBridgeProvider } from '~/components/EmbeddedWallet';
+import { FiddyMobileTabBar } from '~/components/fiddy/FiddyMobileTabBar';
 import { FiddyTopBar } from '~/components/fiddy/FiddyTopBar';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { PreloadAuthedResources } from '~/components/PrefetchAuthedResources';
@@ -317,6 +318,13 @@ const AuthedLayout: FC = () => {
                                                   {...toastOptions}
                                                 />
                                               </Container>
+                                              {/* Keeps the phone's tab bar
+                                                  from covering the last row. */}
+                                              <div
+                                                aria-hidden="true"
+                                                className="h-16 sm:hidden"
+                                              />
+                                              <FiddyMobileTabBar />
                                             </div>
                                           </CastComposerSessionProvider>
                                         </BespokeTransactionModalProvider>
