@@ -24,7 +24,9 @@ Full tutorial (mobile + desktop, protocol concepts explained as you go):
 ```bash
 git clone https://github.com/ivcained/fiddy && cd fiddy
 
-fiddy provision   # (0) compute: AWS EC2 via aws CLI, or register any server (--ssh user@host)
+fiddy provision   # (0) compute: one click on GCP (https://fiddy.fun/client/deploy/),
+                  #      --gcp / --aws / --ovh / --hetzner, Terraform (terraform/gcp-read-node/),
+                  #      or register any server (--ssh user@host)
 fiddy node up     # (1) Snapchain read node on that compute — installs, then bootstraps
 fiddy client up   # (2) the Fiddy web client, pointed at your node (SSH-tunneled by default)
 ```
