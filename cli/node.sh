@@ -305,7 +305,7 @@ node_verify() { # the bounty's acceptance checks, against the node's HTTP API
 
   # 2. Reads served by this node (no third-party API involved)
   local casts count
-  if casts="$(curl -fsS --max-time 15 "$base/v1/castsByFid?fid=$fid&pageSize=2&reverse=1")"; then
+  if casts="$(curl -fsS --max-time 15 "$base/v1/castsByFid?fid=$fid&pageSize=2&reverse=true")"; then
     count="$(printf '%s' "$casts" | jq -r '.messages | length' 2>/dev/null || echo 0)"
     if [ "${count:-0}" -gt 0 ]; then
       printf '  %-26s %s\n' "/v1/castsByFid:" "OK — this node served ${count} cast(s) for fid $fid"
