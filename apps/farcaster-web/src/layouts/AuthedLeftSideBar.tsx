@@ -9,16 +9,19 @@ import {
   Megaphone,
   Mic,
   Send,
+  Server,
   UserPlusIcon,
 } from 'lucide-react';
 import React from 'react';
 
+import { AgentNavEntry } from '~/components/agent/AgentNavItem';
 import { AvatarImage } from '~/components/avatar/AvatarImage';
 import { NavLink } from '~/components/links/NavLink';
 import { NavLinkBadge } from '~/components/links/NavLinkBadge';
 import { NavLinkIcon } from '~/components/links/NavLinkIcon';
 import { NavLinkLabel } from '~/components/links/NavLinkLabel';
 import { ChannelNavLinks } from '~/components/sidebar/ChannelNavLinks';
+import { NodeStatusPill } from '~/components/snapchain/NodeStatusPill';
 import { useUserAppContext } from '~/contexts/UserAppContextProvider';
 import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import { useCurrentUserProfileCastsLinkProps } from '~/hooks/navigation/useCurrentUserProfileCastsLinkProps';
@@ -46,6 +49,16 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
           <div className="block">
             <LeftSideBarLogo title="Recommended feed" />
           </div>
+        </div>
+        {/* Whose node answered is persistent chrome, not a settings detail:
+            the collapsed (icon-only) sidebar keeps the dot, the wide one adds
+            the words. */}
+        <div className="my-2 flex flex-row items-center justify-center xl:justify-start">
+          <NodeStatusPill
+            short
+            labelClassName="hidden xl:inline"
+            className="xl:px-2.5"
+          />
         </div>
         <NavLink to="homeFeed" params={{}} searchParams={{}} title="Home">
           <NavLinkIcon>
@@ -126,26 +139,21 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
           </NavLinkIcon>
           <NavLinkLabel>Saved</NavLinkLabel>
         </NavLink>
-        <NavLink to={'agent'} params={{}} searchParams={{}} title="Agent">
+        <AgentNavEntry />
+        {/* Your own node is a first-class surface, not a buried settings page:
+            the status pill and this entry land on the same place. */}
+        <NavLink
+          to="settingsNode"
+          params={{}}
+          searchParams={{}}
+          title="Your node"
+        >
           <NavLinkIcon>
             <div className="relative translate-y-[-0.75px]">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
-                <circle cx="7.5" cy="14.5" r="1.5" />
-                <circle cx="16.5" cy="14.5" r="1.5" />
-              </svg>
+              <Server size={20} />
             </div>
           </NavLinkIcon>
-          <NavLinkLabel>Agent</NavLinkLabel>
+          <NavLinkLabel>Your node</NavLinkLabel>
         </NavLink>
         <NavLink to="settings" params={{}} searchParams={{}} title="Settings">
           <NavLinkIcon>

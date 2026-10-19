@@ -37,6 +37,21 @@ export const resolveNodeBaseUrl = (
 };
 
 /**
+ * Did the user (or the deploy) name a node explicitly?
+ *
+ * This is what separates "you chose to read from your own node and it is not
+ * answering" from "this build never had a node at all". The status pill must
+ * say which one it is: a silent fall back to the public relay would be the
+ * client lying about where its data came from.
+ */
+export const isNodeExplicitlyConfigured = (
+  env: Record<string, unknown> = import.meta.env,
+): boolean => {
+  const directUrl = env.VITE_SNAPCHAIN_HTTP_URL as string | undefined;
+  return Boolean(directUrl && directUrl.trim().length > 0);
+};
+
+/**
  * Resolve the target URL for the Vite proxy configuration.
  *
  * This determines where `/snapchain-api` requests get forwarded to.

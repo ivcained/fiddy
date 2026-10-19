@@ -1,378 +1,643 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * The Fiddy Agent surface.
+ *
+ * Three states, no fake ones:
+ *   not paired  — the egg, one hatch action, and the honest availability line
+ *   pairing     — paste the address of the service that runs your agent
+ *   paired      — the agent itself: identity, chat, scheduled tasks, channels
+ *
+ * Every network call goes through `~/lib/agentService`, which never holds a
+ * provider key. Capabilities the service has not confirmed are labelled; a
+ * failed call says so instead of showing a spinner forever.
+ */
 
-interface ChatMessage {
-  role: 'user' | 'agent';
-  content: string;
-  timestamp: Date;
-}
+import React, { useCallback, useEffect, useState } from 'react';
 
-// Storage keys
-const STORAGE_URL_KEY = 'fiddy.agent.url';
-const STORAGE_KEY_KEY = 'fiddy.agent.key';
+import {
+  AgentHatchCard,
+  AgentIdentityCard,
+  type HatchAvailability,
+  hatchAvailabilityCopy,
+} from '~/components/agent/AgentCard';
+import { Page } from '~/components/page/Page';
+import { useAgentSession } from '~/hooks/agent/useAgentSession';
+import {
+  loadSchedules,
+  newScheduleId,
+  saveSchedules,
+  type ScheduleRequest,
+  upsertSchedule,
+} from '~/lib/agentSchedules';
+import {
+  agentLifecycle,
+  AgentServiceError,
+  type AgentServiceSession,
+  type AgentSummary,
+  type ChannelConnection,
+  type ChannelToolkit,
+  chatWithAgent,
+  connectChannel,
+  DEFAULT_AGENT_SERVICE_URL,
+  destroyAgent,
+  fetchHatchQuote,
+  fetchHermesCatalog,
+  fetchServiceHealth,
+  isUnavailable,
+  listAgents,
+  listChannels,
+  probeAgentService,
+} from '~/lib/agentService';
+import { trackError } from '~/utils/errorUtils';
+
+import { AgentChannelsPanel } from './Component/AgentChannelsPanel';
+import {
+  type AgentChatMessage,
+  AgentChatPanel,
+} from './Component/AgentChatPanel';
+import { AgentPairPanel } from './Component/AgentPairPanel';
+import { AgentSchedulesPanel } from './Component/AgentSchedulesPanel';
+
+/** Channels Hermes supports that this control plane does not expose yet. */
+const PENDING_CHANNELS = ['iMessage', 'WhatsApp', 'Email', 'Web / API'];
+
+const errorText = (error: unknown): string => {
+  if (error instanceof AgentServiceError) {
+    switch (error.code) {
+      case 'AUTH_REQUIRED':
+      case 'INVALID_AUTH_TOKEN':
+        return 'That session token was not accepted. Check it and try again.';
+      case 'INVALID_SERVICE_URL':
+        return 'That address is not a usable agent service address.';
+      case 'NOT_PAIRED':
+        return 'Pair an agent service first.';
+      case 'CHAT_FAILED':
+      case 'EMPTY_REPLY':
+        return 'Your agent did not answer. Its instance may be stopped — check the status above.';
+      default:
+        return error.message || `Agent service error: ${error.code}`;
+    }
+  }
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    return 'Your agent took too long to answer. Try again, or check whether it is running.';
+  }
+  return error instanceof Error ? error.message : 'Something went wrong.';
+};
+
+const newMessageId = (): string =>
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 const AgentPage: React.FC = () => {
-  // State management
-  const [connectionState, setConnectionState] = useState<
-    'NOT_HATCHED' | 'PAIRING' | 'CONNECTED'
-  >('NOT_HATCHED');
-  const [agentUrl, setAgentUrl] = useState('');
-  const [agentKey, setAgentKey] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [schedulerInput, setSchedulerInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { status, session, pair, forget } = useAgentSession();
 
-  // Load persisted credentials on mount
+  const [view, setView] = useState<'surface' | 'pair'>('surface');
+  const [pairBusy, setPairBusy] = useState(false);
+  const [pairError, setPairError] = useState<string | null>(null);
+
+  const [availability, setAvailability] =
+    useState<HatchAvailability>('unknown');
+  const [catalog, setCatalog] = useState<{
+    skills: number;
+    plugins: number;
+  } | null>(null);
+
+  const [agents, setAgents] = useState<AgentSummary[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+
+  const [tab, setTab] = useState<'chat' | 'tasks' | 'channels'>('chat');
+  const [messages, setMessages] = useState<AgentChatMessage[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [schedules, setSchedules] = useState<ScheduleRequest[]>([]);
+  const [toolkits, setToolkits] = useState<ChannelToolkit[]>([]);
+  const [connections, setConnections] = useState<ChannelConnection[]>([]);
+  const [channelBusy, setChannelBusy] = useState<string | null>(null);
+  const [channelError, setChannelError] = useState<string | null>(null);
+
+  const paired: AgentServiceSession | null =
+    status === 'paired' ? session : null;
+
+  // The live Hermes catalog is public: it is a receipt for what a hatched agent
+  // ships with, so it is fetched before anyone pairs.
   useEffect(() => {
-    const storedUrl = localStorage.getItem(STORAGE_URL_KEY);
-    const storedKey = localStorage.getItem(STORAGE_KEY_KEY);
-
-    if (storedUrl && storedKey) {
-      setAgentUrl(storedUrl);
-      setAgentKey(storedKey);
-      setConnectionState('CONNECTED');
-    }
+    let cancelled = false;
+    fetchHermesCatalog()
+      .then((result) => {
+        if (!cancelled) {
+          setCatalog({ skills: result.skills, plugins: result.plugins });
+        }
+      })
+      .catch(() => {
+        // A catalog that will not load is not an error the owner can act on.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleHatch = () => {
-    window.open('https://fiddy.fun/start', '_blank', 'noopener');
-  };
-
-  const handlePair = () => {
-    setConnectionState('PAIRING');
-    setError(null);
-  };
-
-  const validateUrl = (url: string): boolean => {
-    const regex = /^https:\/\/[a-z0-9-]+\.agent37\.app$/;
-    return regex.test(url);
-  };
-
-  const handleConnect = () => {
-    if (!validateUrl(agentUrl)) {
-      setError(
-        'Invalid instance URL. Must match ^https://[a-z0-9-]+.agent37.app$',
-      );
+  // Not paired: the only thing knowable anonymously is whether the default
+  // service is up. Never claim hatching is closed without asking it.
+  useEffect(() => {
+    if (paired) {
       return;
     }
-    if (!agentKey.trim()) {
-      setError('Agent key is required');
-      return;
-    }
-
-    localStorage.setItem(STORAGE_URL_KEY, agentUrl);
-    localStorage.setItem(STORAGE_KEY_KEY, agentKey);
-    setConnectionState('CONNECTED');
-    setError(null);
-  };
-
-  const handleDisconnect = () => {
-    localStorage.removeItem(STORAGE_URL_KEY);
-    localStorage.removeItem(STORAGE_KEY_KEY);
-    setAgentUrl('');
-    setAgentKey('');
-    setMessages([]);
-    setConnectionState('NOT_HATCHED');
-    setError(null);
-  };
-
-  const sendMessage = async (text: string) => {
-    if (!text.trim() || !agentUrl || !agentKey) {
-      return;
-    }
-
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: text,
-      timestamp: new Date(),
+    let cancelled = false;
+    probeAgentService()
+      .then((probe) => {
+        if (!cancelled) {
+          setAvailability(probe.reachable ? 'unknown' : 'unreachable');
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
     };
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
-    setError(null);
+  }, [paired]);
 
-    try {
-      const response = await fetch(`${agentUrl}/v1/responses`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Agent37-Key': agentKey,
-        },
-        body: JSON.stringify({ input: text }),
-      });
+  // Paired: what agents exist, is the service up, is hatching offered here.
+  useEffect(() => {
+    if (!paired) {
+      setAgents(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadError(null);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const load = async () => {
+      try {
+        const [listed] = await Promise.all([
+          listAgents(paired),
+          fetchServiceHealth(paired).catch(() => undefined),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setAgents(listed);
+        setSelectedId((current) => current ?? listed[0]?.id ?? null);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        trackError(new Error(`agent surface: ${errorText(error)}`));
+        setLoadError(errorText(error));
+        setAgents([]);
       }
 
-      const payload = await response.json();
-      const agentContent =
-        payload.output_text || JSON.stringify(payload, null, 2);
+      try {
+        const quote = await fetchHatchQuote(paired);
+        if (!cancelled) {
+          setAvailability(quote.hatchEnabled ? 'open' : 'closed');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAvailability(isUnavailable(error) ? 'closed' : 'unreachable');
+        }
+      }
+    };
 
-      const agentMessage: ChatMessage = {
-        role: 'agent',
-        content: agentContent,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, agentMessage]);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(errorMessage);
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [paired]);
 
-      const errorMsg: ChatMessage = {
-        role: 'agent',
-        content: `Error: ${errorMessage}`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+  // Selected agent: its schedule log and its channels.
+  useEffect(() => {
+    if (!paired || !selectedId) {
+      setSchedules([]);
+      setToolkits([]);
+      setConnections([]);
+      return;
+    }
+    let cancelled = false;
+    setMessages([]);
+    setChannelError(null);
+    loadSchedules(selectedId)
+      .then((stored) => {
+        if (!cancelled) {
+          setSchedules(stored);
+        }
+      })
+      .catch(() => undefined);
+
+    listChannels(paired, selectedId)
+      .then((result) => {
+        if (!cancelled) {
+          setToolkits(result.toolkits);
+          setConnections(result.connections);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setChannelError(
+            isUnavailable(error)
+              ? 'This service does not expose channel connections yet.'
+              : errorText(error),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [paired, selectedId]);
+
+  const handlePair = useCallback(
+    async (next: AgentServiceSession) => {
+      setPairBusy(true);
+      setPairError(null);
+      try {
+        // Prove the token before storing it: a bad token must not look paired.
+        await listAgents(next);
+        await pair(next);
+        setView('surface');
+      } catch (error) {
+        setPairError(errorText(error));
+      } finally {
+        setPairBusy(false);
+      }
+    },
+    [pair],
+  );
+
+  const handleForget = useCallback(async () => {
+    await forget();
+    setAgents(null);
+    setSelectedId(null);
+    setMessages([]);
+    setSchedules([]);
+    setToolkits([]);
+    setConnections([]);
+    setView('surface');
+  }, [forget]);
+
+  const selected = agents?.find((agent) => agent.id === selectedId) ?? null;
+
+  const refreshAgents = useCallback(async () => {
+    if (!paired) {
+      return;
+    }
+    try {
+      const listed = await listAgents(paired);
+      setAgents(listed);
+      setSelectedId((current) => current ?? listed[0]?.id ?? null);
+    } catch (error) {
+      setLoadError(errorText(error));
+    }
+  }, [paired]);
+
+  const handleLifecycle = useCallback(
+    async (action: 'start' | 'stop' | 'restart') => {
+      if (!paired || !selected) {
+        return;
+      }
+      setLifecycleBusy(true);
+      try {
+        await agentLifecycle(paired, selected.id, action);
+        await refreshAgents();
+      } catch (error) {
+        setLoadError(errorText(error));
+      } finally {
+        setLifecycleBusy(false);
+      }
+    },
+    [paired, selected, refreshAgents],
+  );
+
+  const handleDestroy = useCallback(async () => {
+    if (!paired || !selected) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Destroy ${selected.name}? This stops all billing and cannot be undone.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setLifecycleBusy(true);
+    try {
+      await destroyAgent(paired, selected.id);
+      setSelectedId(null);
+      setMessages([]);
+      await refreshAgents();
+    } catch (error) {
+      setLoadError(errorText(error));
     } finally {
-      setIsLoading(false);
+      setLifecycleBusy(false);
     }
-  };
+  }, [paired, selected, refreshAgents]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    sendMessage(input);
-  };
+  const sendMessage = useCallback(
+    async (text: string, options: { trackAs?: ScheduleRequest } = {}) => {
+      if (!paired || !selected) {
+        return null;
+      }
+      setChatBusy(true);
+      setMessages((current) => [
+        ...current,
+        {
+          id: newMessageId(),
+          role: 'owner',
+          text,
+          at: Date.now(),
+        },
+      ]);
+      try {
+        const reply = await chatWithAgent(paired, selected.id, text);
+        setMessages((current) => [
+          ...current,
+          { id: newMessageId(), role: 'agent', text: reply, at: Date.now() },
+        ]);
+        if (options.trackAs) {
+          const answered: ScheduleRequest = {
+            ...options.trackAs,
+            state: 'answered',
+            reply: reply.slice(0, 600),
+          };
+          setSchedules((current) => {
+            const next = upsertSchedule(current, answered);
+            saveSchedules(selected.id, next).catch(() => undefined);
+            return next;
+          });
+        }
+        return reply;
+      } catch (error) {
+        const text2 = errorText(error);
+        setMessages((current) => [
+          ...current,
+          { id: newMessageId(), role: 'error', text: text2, at: Date.now() },
+        ]);
+        if (options.trackAs) {
+          const failed: ScheduleRequest = {
+            ...options.trackAs,
+            state: 'failed',
+            reply: text2,
+          };
+          setSchedules((current) => {
+            const next = upsertSchedule(current, failed);
+            saveSchedules(selected.id, next).catch(() => undefined);
+            return next;
+          });
+        }
+        return null;
+      } finally {
+        setChatBusy(false);
+      }
+    },
+    [paired, selected],
+  );
 
-  const handleSchedulerSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (schedulerInput.trim()) {
-      sendMessage(`Please schedule this recurring task: ${schedulerInput}`);
-      setSchedulerInput('');
+  const handleSchedule = useCallback(
+    (prompt: string) => {
+      if (!selected) {
+        return;
+      }
+      const request: ScheduleRequest = {
+        id: newScheduleId(),
+        agentId: selected.id,
+        prompt,
+        state: 'requested',
+        createdAt: Date.now(),
+      };
+      setSchedules((current) => {
+        const next = upsertSchedule(current, request);
+        saveSchedules(selected.id, next).catch(() => undefined);
+        return next;
+      });
+      void sendMessage(
+        `Schedule this recurring task for me, then confirm it in one line: ${prompt}`,
+        { trackAs: request },
+      );
+    },
+    [selected, sendMessage],
+  );
+
+  const handleRemoveSchedule = useCallback(
+    (id: string) => {
+      if (!selected) {
+        return;
+      }
+      setSchedules((current) => {
+        const next = current.filter((item) => item.id !== id);
+        saveSchedules(selected.id, next).catch(() => undefined);
+        return next;
+      });
+    },
+    [selected],
+  );
+
+  const handleConnectChannel = useCallback(
+    async (slug: string) => {
+      if (!paired || !selected) {
+        return;
+      }
+      setChannelBusy(slug);
+      setChannelError(null);
+      try {
+        const redirectUrl = await connectChannel(paired, selected.id, slug);
+        window.open(redirectUrl, '_blank', 'noopener,noreferrer');
+      } catch (error) {
+        setChannelError(errorText(error));
+      } finally {
+        setChannelBusy(null);
+      }
+    },
+    [paired, selected],
+  );
+
+  const renderSurface = () => {
+    if (status === 'loading') {
+      return <p className="p-8 text-sm text-muted">Loading your agent…</p>;
     }
-  };
 
-  // NOT HATCHED STATE
-  if (connectionState === 'NOT_HATCHED') {
-    return (
-      <div className="flex h-full w-full items-center justify-center p-8">
-        <div className="max-w-md text-center">
-          <h1 className="mb-4 text-3xl font-bold text-white">
-            Your 24/7 AI Agent
+    if (view === 'pair') {
+      return (
+        <AgentPairPanel
+          busy={pairBusy}
+          error={pairError}
+          onSubmit={handlePair}
+          onCancel={() => {
+            setView('surface');
+            setPairError(null);
+          }}
+        />
+      );
+    }
+
+    if (!paired) {
+      return (
+        <AgentHatchCard
+          availability={availability}
+          catalog={catalog}
+          onHatch={() => setView('pair')}
+          onPair={() => setView('pair')}
+        />
+      );
+    }
+
+    if (agents === null) {
+      return (
+        <p className="p-8 text-sm text-muted">Reading your agent service…</p>
+      );
+    }
+
+    if (loadError) {
+      return (
+        <section className="solid-glass-pane mx-auto w-full max-w-xl rounded-[18px] p-6 text-center">
+          <h1 className="mb-2 font-[SeasonMix] text-lg font-semibold text-default">
+            Your agent service did not answer
           </h1>
-          <p className="mb-6 text-lg text-gray-400">
-            A personal Hermes agent that works around the clock. Schedule tasks
-            like «check my mentions every morning» or «draft my weekly recap».
+          <p role="alert" className="mb-4 text-sm text-muted">
+            {loadError}
           </p>
-
-          <div className="mb-8 rounded-lg border border-[#24292e] bg-[#161715] p-4 text-left">
-            <h3 className="mb-3 font-semibold text-[#d4ff3f]">
-              Available Channels
-            </h3>
-            <ul className="space-y-1 text-sm text-gray-300">
-              <li>• Farcaster – owner approval for each action</li>
-              <li>• iMessage – owner approval for each action</li>
-              <li>• Discord – owner approval for each action</li>
-              <li>• Telegram – owner approval for each action</li>
-              <li>• WhatsApp – owner approval for each action</li>
-              <li>• Email – owner approval for each action</li>
-            </ul>
-          </div>
-
-          <button
-            onClick={handleHatch}
-            className="solid-glass-pane inline-block rounded-lg bg-[#d4ff3f] px-6 py-3 text-sm font-semibold text-[#1a1c10] transition-opacity hover:opacity-90"
-          >
-            Hatch your Fiddy →
-          </button>
-
-          <div className="mt-6">
+          <p className="mb-4 text-xs text-muted">
+            Paired at {paired.baseUrl.replace('https://', '')}. The token is
+            still in this browser; retry, or unpair and pair again.
+          </p>
+          <div className="flex justify-center gap-3">
             <button
-              onClick={handlePair}
-              className="text-sm text-gray-500 underline hover:text-gray-400"
+              type="button"
+              onClick={() => void refreshAgents()}
+              className="rounded-lg border border-[#d4ff3f] px-4 py-2 text-sm font-medium text-[#d4ff3f] hover:bg-[#d4ff3f]/10"
             >
-              Already have an agent? Pair it
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleForget()}
+              className="rounded-lg border border-[rgba(255,255,255,0.09)] px-4 py-2 text-sm text-muted hover:text-default"
+            >
+              Unpair
             </button>
           </div>
-        </div>
-      </div>
-    );
-  }
+        </section>
+      );
+    }
 
-  // PAIRING STATE
-  if (connectionState === 'PAIRING') {
-    return (
-      <div className="flex h-full w-full items-center justify-center p-8">
-        <div className="w-full max-w-md">
-          <h1 className="mb-6 text-2xl font-bold text-white">
-            Pair Your Agent
+    if (!selected) {
+      return (
+        <section className="solid-glass-pane mx-auto w-full max-w-xl rounded-[18px] p-8 text-center">
+          <h1 className="mb-2 font-[SeasonMix] text-lg font-semibold text-default">
+            No agent on this service yet
           </h1>
+          <p className="mb-2 text-sm text-muted">
+            You are paired with {paired.baseUrl.replace('https://', '')}, which
+            has no agents for your account.
+          </p>
+          <p className="mb-4 text-xs text-muted">
+            {hatchAvailabilityCopy[availability]}
+          </p>
+          <button
+            type="button"
+            onClick={() => setView('pair')}
+            className="rounded-lg border border-[#d4ff3f] px-4 py-2 text-sm font-medium text-[#d4ff3f] hover:bg-[#d4ff3f]/10"
+          >
+            Pair a different service
+          </button>
+        </section>
+      );
+    }
 
-          <div className="space-y-4">
-            <div>
-              <label className="mb-2 block text-sm text-gray-400">
-                Instance URL
-              </label>
-              <input
-                type="text"
-                value={agentUrl}
-                onChange={(e) => setAgentUrl(e.target.value)}
-                placeholder="https://your-agent.agent37.app"
-                className="w-full rounded-lg border border-[#24292e] bg-[#0c0c0c] px-4 py-2 text-white placeholder-gray-600 focus:border-[#d4ff3f] focus:outline-none"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Must match https://[name].agent37.app
-              </p>
-            </div>
+    return (
+      <div className="flex flex-col gap-4">
+        <AgentIdentityCard
+          name={selected.name}
+          status={selected.status}
+          serviceUrl={paired.baseUrl}
+          busy={lifecycleBusy}
+          onStart={() => void handleLifecycle('start')}
+          onStop={() => void handleLifecycle('stop')}
+          onRestart={() => void handleLifecycle('restart')}
+          onDestroy={() => void handleDestroy()}
+          onForget={() => void handleForget()}
+        />
 
-            <div>
-              <label className="mb-2 block text-sm text-gray-400">
-                Agent Key
-              </label>
-              <input
-                type="password"
-                value={agentKey}
-                onChange={(e) => setAgentKey(e.target.value)}
-                placeholder="Enter your agent key"
-                className="w-full rounded-lg border border-[#24292e] bg-[#0c0c0c] px-4 py-2 text-white placeholder-gray-600 focus:border-[#d4ff3f] focus:outline-none"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                This key stays in this browser only
-              </p>
-            </div>
+        {agents && agents.length > 1 ? (
+          <label className="flex items-center gap-2 text-xs text-muted">
+            Agent
+            <select
+              value={selected.id}
+              onChange={(event) => setSelectedId(event.target.value)}
+              className="rounded-lg border border-[rgba(255,255,255,0.09)] bg-[#1d1e1c] px-2 py-1 text-xs text-default focus:border-[#d4ff3f] focus:outline-none"
+            >
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
-            {error && (
-              <div className="rounded-lg border border-red-800 bg-red-900/20 p-3 text-sm text-red-400">
-                {error}
-              </div>
-            )}
-
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => setConnectionState('NOT_HATCHED')}
-                className="flex-1 rounded-lg border border-[#24292e] py-2 text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
-              >
-                Back
-              </button>
-              <button
-                onClick={handleConnect}
-                className="flex-1 rounded-lg bg-[#d4ff3f] px-4 py-2 font-semibold text-[#1a1c10] transition-opacity hover:opacity-90"
-              >
-                Connect
-              </button>
-            </div>
-          </div>
+        <div
+          role="tablist"
+          aria-label="Agent surfaces"
+          className="flex gap-1 rounded-xl border border-[rgba(255,255,255,0.09)] p-1"
+        >
+          {(
+            [
+              ['chat', 'Chat'],
+              ['tasks', 'Scheduled tasks'],
+              ['channels', 'Channels'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`flex-1 rounded-lg px-3 py-1.5 text-sm ${
+                tab === key
+                  ? 'bg-[#d4ff3f] font-semibold text-[#1a1c10]'
+                  : 'text-muted hover:text-default'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
+
+        {tab === 'chat' ? (
+          <AgentChatPanel
+            messages={messages}
+            busy={chatBusy}
+            onSend={(text) => void sendMessage(text)}
+          />
+        ) : null}
+
+        {tab === 'tasks' ? (
+          <AgentSchedulesPanel
+            schedules={schedules}
+            busy={chatBusy}
+            onRequest={handleSchedule}
+            onRemove={handleRemoveSchedule}
+          />
+        ) : null}
+
+        {tab === 'channels' ? (
+          <AgentChannelsPanel
+            toolkits={toolkits}
+            connections={connections}
+            busyToolkit={channelBusy}
+            error={channelError}
+            pending={PENDING_CHANNELS}
+            onConnect={(slug) => void handleConnectChannel(slug)}
+          />
+        ) : null}
       </div>
     );
-  }
+  };
 
-  // CONNECTED STATE
   return (
-    <div className="flex h-full flex-col p-4">
-      {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">Fiddy Agent</h1>
-        <button
-          onClick={handleDisconnect}
-          className="rounded-lg border border-red-800 px-3 py-1 text-sm text-red-400 transition-colors hover:bg-red-900/20"
-        >
-          Disconnect
-        </button>
-      </div>
-
-      {/* Error Display */}
-      {error && connectionState === 'CONNECTED' && (
-        <div className="mb-4 flex items-center justify-between rounded-lg border border-red-800 bg-red-900/20 p-3">
-          <span className="text-sm text-red-400">{error}</span>
-          <button
-            onClick={() => setConnectionState('PAIRING')}
-            className="text-sm text-[#d4ff3f] underline hover:text-[#ccff5c]"
-          >
-            Re-pair
-          </button>
-        </div>
-      )}
-
-      {/* Chat Panel */}
-      <div className="solid-glass-pane mb-4 flex flex-1 flex-col overflow-hidden rounded-lg">
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-gray-500">
-              <p>Send a message to start chatting with your agent</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex ${
-                    msg.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  <div
-                    className={`max-w-[80%] rounded-lg p-3 ${
-                      msg.role === 'user'
-                        ? 'bg-[#d4ff3f] text-[#1a1c10]'
-                        : 'border border-[#24292e] bg-[#0c0c0c] text-gray-200'
-                    }`}
-                  >
-                    <pre className="whitespace-pre-wrap font-sans text-sm">
-                      {msg.content}
-                    </pre>
-                  </div>
-                </div>
-              ))}
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="border border-[#24292e] bg-[#0c0c0c] p-3 text-gray-400">
-                    <span className="animate-pulse">Thinking...</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Composer */}
-        <form
-          onSubmit={handleSubmit}
-          className="flex border-t border-[#24292e] p-3"
-        >
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Message your agent..."
-            disabled={isLoading}
-            className="flex-1 rounded-lg border border-[#24292e] bg-[#0c0c0c] px-4 py-2 text-white placeholder-gray-600 focus:border-[#d4ff3f] focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim()}
-            className="ml-2 rounded-lg bg-[#d4ff3f] px-4 py-2 font-semibold text-[#1a1c10] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Send
-          </button>
-        </form>
-      </div>
-
-      {/* Scheduler Helper */}
-      <div className="rounded-lg border border-[#24292e] bg-[#161715] p-4">
-        <h3 className="mb-2 text-sm font-semibold text-[#d4ff3f]">
-          Schedule a Task
-        </h3>
-        <form onSubmit={handleSchedulerSubmit} className="flex gap-2">
-          <input
-            type="text"
-            value={schedulerInput}
-            onChange={(e) => setSchedulerInput(e.target.value)}
-            placeholder="e.g., Check my mentions every morning at 9am"
-            className="flex-1 rounded-lg border border-[#24292e] bg-[#0c0c0c] px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-[#d4ff3f] focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!schedulerInput.trim()}
-            className="rounded-lg border border-[#d4ff3f] px-3 py-2 text-sm font-medium text-[#d4ff3f] transition-opacity hover:bg-[#d4ff3f]/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Schedule
-          </button>
-        </form>
-      </div>
-    </div>
+    <Page meta={{ title: 'Fiddy Agent' }} className="px-4 py-6">
+      <p className="mb-4 text-xs text-muted">
+        Agent service:{' '}
+        {paired
+          ? paired.baseUrl.replace('https://', '')
+          : DEFAULT_AGENT_SERVICE_URL.replace('https://', '')}
+      </p>
+      {renderSurface()}
+    </Page>
   );
 };
 

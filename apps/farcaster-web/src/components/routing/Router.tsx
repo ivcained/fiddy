@@ -134,6 +134,14 @@ const Router: React.FC = () => {
                   path={routes.saved.path}
                   element={<routes.saved.Component />}
                 />
+                {/* The agent surface is a first-class route: the sidebar entry,
+                    the hatch CTA on the empty state, and the status pill all
+                    land here, and without this route the nav would fall through
+                    to the catch-all redirect. */}
+                <Route
+                  path={routes.agent.path}
+                  element={<routes.agent.Component />}
+                />
                 <Route
                   path={routes.savedStarterPacks.path}
                   element={<routes.savedStarterPacks.Component />}

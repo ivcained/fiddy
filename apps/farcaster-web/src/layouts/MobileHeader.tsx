@@ -5,12 +5,14 @@ import { useUnseen } from 'farcaster-client-hooks';
 import {
   Archive,
   BellIcon,
+  Bot as BotIcon,
   ChevronDown,
   Grid3X3Icon,
   HomeIcon,
   Megaphone,
   SearchIcon,
   Send,
+  Server as ServerIcon,
   UserPlusIcon,
   XIcon,
 } from 'lucide-react';
@@ -23,6 +25,7 @@ import { ComposeCastButton } from '~/components/forms/buttons/ComposeCastButton'
 import { ExternalLink } from '~/components/links/ExternalLink';
 import { NavLinkBadge } from '~/components/links/NavLinkBadge';
 import { Search } from '~/components/search/Search';
+import { NodeStatusPill } from '~/components/snapchain/NodeStatusPill';
 import { routes } from '~/constants/routes';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useCastComposerSession } from '~/contexts/CastComposerSessionProvider';
@@ -91,6 +94,16 @@ const useMobileNavState = () => {
         params: {},
         searchParams: undefined,
       }),
+      agent: hydratePath({
+        path: routes.agent.path,
+        params: {},
+        searchParams: undefined,
+      }),
+      node: hydratePath({
+        path: routes.settingsNode.path,
+        params: {},
+        searchParams: undefined,
+      }),
       updates: hydratePath({
         path: routes.channel.path,
         params: { channelKey: 'fc-updates' },
@@ -119,6 +132,8 @@ const useMobileNavState = () => {
         family: 'directCasts',
       }),
       saved: arePathFamiliesRelated({ path: pathname, family: 'saved' }),
+      agent: arePathsRelated(pathname, hrefs.agent),
+      node: arePathsRelated(pathname, hrefs.node),
       apps: arePathFamiliesRelated({ path: pathname, family: 'apps' }),
       settings: arePathFamiliesRelated({ path: pathname, family: 'settings' }),
       developers: arePathsRelated(pathname, hrefs.developers),
@@ -141,6 +156,12 @@ const useMobileNavState = () => {
     }
     if (active.saved) {
       return 'Saved';
+    }
+    if (active.agent) {
+      return 'Fiddy Agent';
+    }
+    if (active.node) {
+      return 'Your node';
     }
     if (active.apps) {
       return 'Apps';
@@ -310,6 +331,20 @@ const MobileNavDropdown: FC<MobileNavDropdownProps> = memo(
               onClose={onClose}
             />
             <DropdownItem
+              href={hrefs.agent}
+              label="Fiddy Agent"
+              icon={<BotIcon size={16} />}
+              isActive={active.agent}
+              onClose={onClose}
+            />
+            <DropdownItem
+              href={hrefs.node}
+              label="Your node"
+              icon={<ServerIcon size={16} />}
+              isActive={active.node}
+              onClose={onClose}
+            />
+            <DropdownItem
               href={hrefs.apps}
               label="Apps"
               icon={<Grid3X3Icon size={16} />}
@@ -457,6 +492,9 @@ const MobileHeaderInner: FC = memo(() => {
             >
               <SearchIcon size={18} className="text-default" />
             </button>
+
+            {/* Whose node answered, on the phone too — one word and a dot. */}
+            <NodeStatusPill short />
 
             {active.apps && !hasBackgroundedSession ? (
               <ComposeCastButton
