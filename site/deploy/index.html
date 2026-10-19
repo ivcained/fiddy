@@ -64,6 +64,7 @@ a { color: var(--lime); text-decoration: none; }
     Cancel anytime. Your node holds no keys and only public data — casts are always signed on your device.</p>
     <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $480 USDC &amp; deploy</button>
     <span id="payStatus" style="margin-left:12px;font-size:13.5px" class="dim"></span></p>
+    <div id="subView" hidden style="margin-top:14px;font:14px/1.7 var(--mono)"></div>
     <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
     On the open web the button tells you how to pay instead. Nodes go live within 24h of payment — overnight is the snapshot, not us.</p>
   </div>
@@ -182,10 +183,44 @@ $('payBtn').addEventListener('click', async () => {
     });
     if (!r.ok) throw new Error('order registration failed');
     status.textContent = '✓ Order in. We deploy within 24h and message you on Farcaster with your endpoint.';
+    showSubscription(fid);
   } catch (e) {
     status.textContent = 'Something failed: ' + (e && e.message ? e.message : String(e)) + ' — if you paid, your tx hash is your receipt; message @ivc.';
   }
 });
+
+// Subscription view: once the host tells us who this is, swap the pay pitch for
+// their live subscription — since when, days left, renewal date. At ≤5 days the
+// line turns into a renewal reminder.
+async function showSubscription(fid) {
+  const view = $('subView');
+  try {
+    const r = await fetch('/api/fiddy/managed-node/status?fid=' + encodeURIComponent(fid));
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.subscribed) return;
+    const since = new Date(d.since).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const renews = new Date(d.renewsOn).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const dot = document.createElement('span');
+    dot.style.color = d.daysLeft <= 5 ? '#ff8a5c' : 'var(--lime)';
+    dot.textContent = '●';
+    const state = d.nodeStatus === 'deployed' ? 'node live' : 'deploying';
+    view.replaceChildren(dot, document.createTextNode(
+      ` ${state} · subscribed ${since} · ${d.daysLeft} days left · renews ${renews}` +
+      (d.daysLeft <= 5 ? ' — time to renew' : '')));
+    view.hidden = false;
+    $('payBtn').textContent = d.daysLeft <= 5 ? 'Renew — $480 USDC' : 'Renew early';
+  } catch { /* status is a nicety; never break the pay flow */ }
+}
+
+// On load: if a Farcaster host knows this user, show their subscription.
+(function () {
+  const sdk = window.miniapp && window.miniapp.sdk;
+  if (!sdk) return;
+  Promise.race([sdk.context, new Promise((_, rej) => setTimeout(() => rej(new Error('t')), 4000))])
+    .then((ctx) => { const fid = ctx && ctx.user && ctx.user.fid; if (fid) showSubscription(fid); })
+    .catch(() => {});
+})();
 </script>
 </body>
 </html>
