@@ -77,6 +77,11 @@ dedicated box leave it unconstrained. fiddy's preflight refuses anything below
   download. Upstream's "the API answers immediately" is wrong for a brand new
   node. Watch progress with `fiddy node logs`; `fiddy node status` starts
   working once the load completes.
+* **Bootstrap time is disk-bound.** On a GCE e2-standard-4 with a Standard
+  (pd-standard) HDD the ~470 GB of chunks took **over 6 hours** and counting
+  (~5 chunks/min, ~88 MB each, 905 GB on disk at chunk #1935). Budget an
+  overnight bootstrap on HDD-class disks; SSD cuts this substantially. The
+  earlier "~2h" figure is the SSD best case, not the norm.
 
 ## Sharing a host with other services
 
