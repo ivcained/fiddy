@@ -16,6 +16,7 @@ provision_main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --aws)  mode=aws ;;
+      --gcp)  mode=gcp ;;
       --ssh)  mode=ssh; shift; FIDDY_SSH_TARGET_ARG="${1:-}" ;;
       --force) FIDDY_ALLOW_UNDERSIZED=1 ;;
       -h|--help)
@@ -23,6 +24,11 @@ provision_main() {
 fiddy provision — furnish the compute your node will run on.
 
   --aws             Create an AWS EC2 instance with Docker preinstalled.
+  --gcp             Create a Google Cloud VM (e2-standard-4 + 2 TB HDD).
+                    Needs: gcloud CLI signed in (gcloud auth login) and a
+                    project set (gcloud config set project ...).
+                    Options: FIDDY_GCP_ZONE (default us-central1-a)
+                             FIDDY_GCP_TYPE (default e2-standard-4)
                     Needs: aws CLI configured (aws configure).
                     Defaults: m5.xlarge (4 vCPU / 16 GB) in ${FIDDY_AWS_REGION:-us-east-1}
                               with a ${FIDDY_AWS_VOLUME_GB:-2048} GB gp3 volume.
@@ -48,18 +54,36 @@ EOF
 
   case "$mode" in
     aws) provision_aws ;;
+    gcp) provision_gcp ;;
     ssh) provision_ssh "${FIDDY_SSH_TARGET_ARG:?missing user@host after --ssh}" ;;
     *)
       step "fiddy provision"
       echo "Pick your compute:"
       echo "  1. AWS (scripted, ~\$300/mo at list price):  fiddy provision --aws"
-      echo "  2. Any server you have:                    fiddy provision --ssh user@host"
+      echo "  2. Google Cloud (scripted, ~\$165/mo HDD):    fiddy provision --gcp"
+      echo "     …or one click in Cloud Shell: https://fiddy.fun/client#step0"
+      echo "  3. Any server you have:                    fiddy provision --ssh user@host"
       echo ""
       echo "Minimum for a Snapchain mainnet read node: 4 vCPU, 16 GB RAM,"
       echo "1.5 TB free disk, public IP, ports 3381-3383 TCP+UDP."
       echo "A cheaper 2 TB VPS from any provider works just as well — see the tutorial."
       ;;
   esac
+}
+
+provision_gcp() {
+  require gcloud "install: https://cloud.google.com/sdk/docs/install (or use the one-click Cloud Shell path: https://fiddy.fun/client#step0)"
+  # The deploy script owns VM + firewall creation and is deliberately the same
+  # one Cloud Shell users run — one path, no drift.
+  FIDDY_GCP_ZONE="${FIDDY_GCP_ZONE:-us-central1-a}" bash "$FIDDY_REPO/scripts/gcp-deploy.sh" \
+    || die "GCP deploy failed — see the output above"
+  local name="${FIDDY_GCP_NAME:-fiddy-node}" zone="${FIDDY_GCP_ZONE:-us-central1-a}" ip
+  ip="$(gcloud compute instances describe "$name" --zone "$zone" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')" \
+    || die "instance created but no external IP — check: gcloud compute instances describe $name --zone $zone"
+  config_set FIDDY_TARGET "$(whoami)@$ip"
+  config_set FIDDY_PROVIDER "gcp"
+  ok "compute ready: $(whoami)@$ip"
+  ok "Next: fiddy node up"
 }
 
 provision_ssh() {
