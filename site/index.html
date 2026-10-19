@@ -249,7 +249,8 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   <pre><span class="k">fiddy node up</span>      <span class="c"># install, start, wait for the API to answer</span>
 <span class="k">fiddy node status</span>  <span class="c"># sync progress</span>
 <span class="k">fiddy node logs</span>    <span class="c"># tail the node</span>
-<span class="k">fiddy node dashboard</span> <span class="c"># Grafana (sync height, peers, shards) via SSH tunnel → localhost:3000</span></pre>
+<span class="k">fiddy node dashboard</span> <span class="c"># Grafana (sync height, peers, shards) via SSH tunnel → localhost:3000</span>
+<span class="k">fiddy node autoupgrade on</span> <span class="c"># weekly upgrades (Tue 03:00). Default off: the upstream job ends with a host-wide docker prune — fine on a dedicated box, never on a shared one</span></pre>
 
   <div class="pane note">
     <div class="t">Read nodes vs validators — and where your casts go</div>
