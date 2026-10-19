@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy your node — Fiddy</title>
+<meta name="description" content="One click to your own Farcaster read node on Google Cloud.">
+<meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://fiddy.fun/image.png","button":{"title":"Deploy my node","action":{"type":"launch_miniapp","url":"https://fiddy.fun/client/deploy/"}}}'>
+<style>
+:root {
+  --ground: #161715; --ink: #eef0e8; --ink-dim: #a7ab9e;
+  --lime: #d4ff3f; --lime-ink: #1a1c10; --lime-deep: #7cb518;
+  --pane: rgba(255 255 255 / 0.045); --card: rgba(255 255 255 / 0.075);
+  --rim: rgba(255 255 255 / 0.14); --inner: rgba(255 255 255 / 0.05);
+  --edge: rgba(0 0 0 / 0.5); --shade: rgba(0 0 0 / 0.35);
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Inter", sans-serif; -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 620px; margin: 0 auto; padding: 48px 20px 72px; }
+.wordmark { font: 700 13px/1 var(--mono); letter-spacing: 0.14em; color: var(--lime);
+  text-transform: uppercase; display: flex; align-items: center; gap: 8px; margin-bottom: 24px; }
+.wordmark .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--lime);
+  box-shadow: 0 0 10px rgba(212 255 63 / 0.6); }
+h1 { font-size: clamp(26px, 5.5vw, 36px); line-height: 1.15; letter-spacing: -0.02em; }
+p.dim, li { color: var(--ink-dim); }
+.card { background: var(--card); border-radius: 18px; padding: 22px; margin-top: 22px;
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 2px 0 var(--inner), inset 0 0 0 1px var(--edge), 0 4px 16px var(--shade);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.n { font: 700 12px/1 var(--mono); color: var(--lime-ink); background: var(--lime); border-radius: 6px;
+  padding: 4px 7px; margin-right: 10px;
+  box-shadow: inset 0 1px 0 rgba(255 255 255 / 0.45), 0 2px 6px var(--shade); }
+h2 { font-size: 17px; display: flex; align-items: center; margin-bottom: 8px; }
+pre { font: 13px/1.6 var(--mono); background: #10110f; padding: 14px 16px; border-radius: 12px;
+  overflow-x: auto; margin-top: 12px; box-shadow: inset 0 1px 0 rgba(255 255 255 / 0.07), inset 0 0 0 1px var(--edge); }
+pre .k { color: var(--lime); }
+input { width: 100%; font: 14px var(--mono); color: var(--ink); background: #10110f; border: none;
+  border-radius: 10px; padding: 12px 14px; margin-top: 12px; outline: none;
+  box-shadow: inset 0 0 0 1px var(--edge), inset 0 2px 4px rgba(0 0 0 / 0.3); }
+input:focus { box-shadow: inset 0 0 0 1px var(--lime-deep), inset 0 2px 4px rgba(0 0 0 / 0.3); }
+.btn { display: inline-block; font: 650 14px/1 -apple-system, sans-serif; color: var(--lime-ink);
+  background: var(--lime); border: none; border-radius: 10px; padding: 12px 18px; cursor: pointer;
+  text-decoration: none; box-shadow: inset 0 1px 0 rgba(255 255 255 / 0.45), 0 2px 8px var(--shade); }
+.btn.ghost { background: var(--pane); color: var(--ink);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--edge); }
+#status { font: 13px var(--mono); margin-top: 12px; white-space: pre-wrap; }
+.live { color: var(--lime); } .wait { color: var(--ink-dim); }
+footer { margin-top: 40px; font-size: 13.5px; color: var(--ink-dim); }
+a { color: var(--lime); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="wordmark"><span class="dot"></span>fiddy · node deploy</div>
+  <h1>Your own Farcaster read node.<br>One click.</h1>
+  <p class="dim" style="margin-top:12px">Google Cloud, in your project, on your billing (~$165/mo while it runs).
+  Nothing custodial — the script runs where you can read it.</p>
+
+  <div class="card">
+    <h2><span class="n">1</span>Create the machine</h2>
+    <p class="dim" style="font-size:14.5px">Opens Cloud Shell (already signed in as you) with a guided walkthrough.
+    One command inside — <code style="font-family:var(--mono)">bash scripts/gcp-deploy.sh</code> — creates the VM,
+    2 TB disk and firewall.</p>
+    <p style="margin-top:14px"><a class="btn" href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener">Open in Cloud Shell ↗</a></p>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">2</span>Paste your node's IP</h2>
+    <p class="dim" style="font-size:14.5px">The script prints it. Paste it here — the rest of the commands build themselves.</p>
+    <input id="ip" inputmode="decimal" placeholder="34.101.…" autocomplete="off">
+    <pre id="cmds" hidden><span class="k">git clone https://github.com/ivcained/fiddy && cd fiddy
+bin/fiddy provision --ssh</span> <span id="sshuser">ubuntu</span>@<span id="ip2">…</span><span class="k">
+bin/fiddy node up</span></pre>
+    <p style="margin-top:10px" id="copyrow" hidden><button class="btn ghost" id="copy">Copy commands</button></p>
+  </div>
+
+  <div class="card" id="statusCard" hidden>
+    <h2><span class="n">3</span>Watch it sync</h2>
+    <p class="dim" style="font-size:14.5px">The node downloads ~470 GB of snapshot chunks before its API answers —
+    overnight on the default HDD is normal. This polls your node directly; nothing goes through us.
+    Some browsers block the poll from an HTTPS page — the reliable check is
+    <code style="font-family:var(--mono)">bin/fiddy node status</code> from your terminal.</p>
+    <div id="status"></div>
+  </div>
+
+  <footer>
+    Full protocol walkthrough: <a href="/client/">fiddy.fun/client</a> ·
+    Repo (MIT): <a href="https://github.com/ivcained/fiddy">github.com/ivcained/fiddy</a>
+  </footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const ipRe = /^(\d{1,3}\.){3}\d{1,3}$/;
+let timer = null;
+
+$('ip').addEventListener('input', () => {
+  const ip = $('ip').value.trim();
+  const ok = ipRe.test(ip);
+  $('cmds').hidden = $('copyrow').hidden = $('statusCard').hidden = !ok;
+  if (ok) {
+    $('ip2').textContent = ip;
+    clearInterval(timer);
+    poll(ip);
+    timer = setInterval(() => poll(ip), 30000);
+  }
+});
+
+$('copy').addEventListener('click', () => {
+  const text = $('cmds').innerText;
+  navigator.clipboard?.writeText(text).then(() => {
+    $('copy').textContent = 'Copied';
+    setTimeout(() => $('copy').textContent = 'Copy commands', 1200);
+  });
+});
+
+async function poll(ip) {
+  const el = $('status');
+  try {
+    const r = await fetch(`http://${ip}:3381/v1/info`, { signal: AbortSignal.timeout(8000) });
+    const d = await r.json();
+    // Build with textContent only: this data comes from a remote server.
+    const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
+    const shards = (d.shardInfos || []).map(s => `shard ${num(s.shardId)}: height ${num(s.maxHeight)}`).join(' · ');
+    const live = document.createElement('span');
+    live.className = 'live';
+    live.textContent = '● LIVE';
+    el.replaceChildren(live, document.createTextNode(` — ${num(d.dbStats?.numMessages).toLocaleString()} messages synced\n${shards}`));
+  } catch {
+    const wait = document.createElement('span');
+    wait.className = 'wait';
+    wait.textContent = '… bootstrapping (API answers when the snapshot finishes)';
+    el.replaceChildren(wait);
+  }
+}
+</script>
+</body>
+</html>
