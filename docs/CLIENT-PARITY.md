@@ -238,6 +238,22 @@ The unit tests for the boundary's three branches (generic failure, node cannot
 answer, node did not answer) are in
 `src/components/session/__tests__/deviceOnlySession.test.tsx`.
 
+### Still open: a node that never answers (measured, not fixed here)
+
+With the node `.env.local` names black-holed (`http://34.101.47.167:3381`,
+unreachable from this Mac), the same signed-in client on
+`https://localhost:5173` was driven for 75 seconds. The rail's Explore region
+showed the honest refusal (that read is a `501`, answered locally by the
+adapter — this fix applies to it too), but the **feed column showed no casts, no
+error and no message** — just the feed's header and tabs. The adapter's `502`
+branch ("Your node did not answer this read: …", with a retry) never fired: the
+dev server's relay is still waiting on a TCP connection to a black-holed address,
+and nothing on the client side times a node read out. So it is not a crash and
+not a fake, but it is not an answer either. A read timeout on the client
+(`nodeBackedFetch`) or a connect timeout on the relay would turn it into the
+`502` sentence; that is a card of its own. The `502` branch is unit-tested; this
+is the one configuration where it cannot be reached.
+
 ### Two measured defects this card had to fix first
 
 1. **`fetch` needs its receiver.** Passing the bare `fetch` into the node client
