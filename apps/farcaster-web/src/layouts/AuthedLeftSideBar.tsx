@@ -30,8 +30,12 @@ import { LeftSideBar } from '~/layouts/LeftSideBar';
 import { LeftSideBarLogo } from '~/layouts/LeftSideBarLogo';
 
 const AuthedLeftSideBar: React.FC = React.memo(() => {
-  const { notificationsCount, inboxCount, channelFeedsUnseenStatus } =
-    useUnseen();
+  const {
+    notificationsCount,
+    inboxCount,
+    channelFeedsUnseenStatus,
+    countsUnavailable,
+  } = useUnseen();
   const { developerModeEnabled } = useUserAppContext();
   const currentUser = useCurrentUser();
 
@@ -89,6 +93,21 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
           <NavLinkLabel>Settings</NavLinkLabel>
         </NavLink>
         <div className="fiddy-nav-caption">More</div>
+        {/* The unseen counts are the only thing in this rail that comes from a
+            read of its own (/v2/unseen, polled by UnseenProvider), and badges
+            that cannot load look exactly like badges that are zero. When the
+            read fails, say so where the badges would be — the poll keeps
+            retrying, so the note clears itself. See UnseenProvider. */}
+        {countsUnavailable && (
+          <div
+            className="fiddy-nav-note"
+            data-fiddy="unseen-unavailable"
+            role="status"
+          >
+            Unseen counts couldn&rsquo;t load &mdash; Farcaster didn&rsquo;t
+            answer. Retrying.
+          </div>
+        )}
         <NavLink
           to="notifications"
           params={{}}
