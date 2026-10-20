@@ -60,9 +60,9 @@ import {
 } from '~/snapchain/appKeyStorage';
 import {
   chooseNode,
+  type NodeChoice,
   resetNodeChoice,
   resolveEffectiveNodeBaseUrl,
-  type NodeChoice,
 } from '~/snapchain/nodeChoice';
 import {
   type ClientLabels,
@@ -73,8 +73,8 @@ import {
   toKnownClients,
   withClientLabel,
 } from '~/snapchain/nodePreferences';
-import { useNodeClient } from '~/snapchain/useNodeClient';
 import { useNodeChoice } from '~/snapchain/useNodeChoice';
+import { useNodeClient } from '~/snapchain/useNodeClient';
 import { trackError } from '~/utils/errorUtils';
 
 import { AppKeyCard } from './Component/AppKeyCard';
@@ -83,6 +83,7 @@ import { NodeChoiceCard } from './Component/NodeChoiceCard';
 import { NodeComposer } from './Component/NodeComposer';
 import { NodeFeed } from './Component/NodeFeed';
 import { NodeStatusCard } from './Component/NodeStatusCard';
+import { ProviderListCard } from './Component/ProviderListCard';
 import { SeedPhraseWarningModal } from './Component/SeedPhraseWarningModal';
 
 /**
@@ -669,6 +670,10 @@ const SettingsNodePage = memo(() => {
               onChoose={handleChooseNode}
               onReset={handleResetNode}
             />
+
+            {/* The order, and what happens when the first server on it stops
+                answering: the reader's list, with the last check on each. */}
+            <ProviderListCard fid={fid ?? undefined} />
 
             {/* Node Status Card */}
             <NodeStatusCard

@@ -33,10 +33,22 @@ import {
   resolveEffectiveNodeBaseUrl,
 } from '~/snapchain/nodeChoice';
 import type { NodeChoiceKind } from '~/snapchain/nodePreferences';
-import { useNodeHealth } from '~/snapchain/useNodeClient';
+import { providerPillView } from '~/snapchain/providers/pill';
+import { useProviderSnapshot } from '~/snapchain/providers/useProviders';
 import { useActiveNodeChoice } from '~/snapchain/useNodeChoice';
+import { useNodeHealth } from '~/snapchain/useNodeClient';
 
-export type NodePillState = 'checking' | 'served' | 'unreachable' | 'relay';
+/**
+ * `switched` is not a fifth opinion about the server: it is the same healthy
+ * pill with a different story — the engine moved the feed to a backup, and the
+ * colour is there so the change is visible rather than silent.
+ */
+export type NodePillState =
+  | 'checking'
+  | 'served'
+  | 'switched'
+  | 'unreachable'
+  | 'relay';
 
 export interface NodePillInputs {
   configured: boolean;
@@ -68,6 +80,7 @@ export const nodePillState = ({
 const DOT_CLASSES: Record<NodePillState, string> = {
   checking: 'bg-muted',
   served: 'bg-[#d4ff3f]',
+  switched: 'bg-[#f5c451]',
   unreachable: 'bg-red-400',
   relay: 'bg-muted',
 };
@@ -75,6 +88,7 @@ const DOT_CLASSES: Record<NodePillState, string> = {
 const SHELL_CLASSES: Record<NodePillState, string> = {
   checking: 'border-default text-muted',
   served: 'border-[#d4ff3f]/40 text-[#d4ff3f]',
+  switched: 'border-[#f5c451]/40 text-[#f5c451]',
   unreachable: 'border-red-800/60 text-red-400',
   relay: 'border-default text-muted',
 };
@@ -144,6 +158,15 @@ export interface NodeStatusPillViewProps {
   short?: boolean;
   /** Which kind of server answered — only ever refines the words. */
   kind?: NodeChoiceKind | null;
+  /**
+   * The provider engine's own words, when it has some. The pill is the only
+   * place a reader is told where the feed comes from, so when the engine moved
+   * it to a backup these two win: they name the server that answered AND why
+   * the one they chose is not the one answering.
+   */
+  providerLabel?: string;
+  providerShortLabel?: string;
+  providerTitle?: string;
   className?: string;
   /** Extra classes for the label span — e.g. hide it in a collapsed sidebar. */
   labelClassName?: string;
@@ -156,6 +179,9 @@ export const NodeStatusPillView = memo<NodeStatusPillViewProps>(
     health,
     short = false,
     kind = null,
+    providerLabel,
+    providerShortLabel,
+    providerTitle,
     className = '',
     labelClassName = '',
   }) => (
@@ -163,7 +189,7 @@ export const NodeStatusPillView = memo<NodeStatusPillViewProps>(
       to="settingsNode"
       params={{}}
       searchParams={{}}
-      title={title(state, kind)}
+      title={providerTitle ?? title(state, kind)}
       className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors hover:border-[#d4ff3f] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d4ff3f] ${SHELL_CLASSES[state]} ${className}`}
     >
       <span
@@ -177,7 +203,11 @@ export const NodeStatusPillView = memo<NodeStatusPillViewProps>(
         aria-live="polite"
         className={`truncate ${labelClassName}`}
       >
-        {label(state, health, short, kind)}
+        {providerLabel
+          ? short
+            ? (providerShortLabel ?? providerLabel)
+            : providerLabel
+          : label(state, health, short, kind)}
       </span>
     </Link>
   ),
@@ -219,6 +249,11 @@ export const NodeStatusPill = memo<NodeStatusPillProps>(
           : undefined,
         configured: isConfigured,
       };
+      // `choice` is read inside `resolveEffectiveNodeBaseUrl` (it is the module
+      // store the picker writes), so the linter cannot see the read: the value
+      // is still a real input, because a change to it changes the address the
+      // client is rebuilt against.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [node, configured, choice]);
 
     const { health, loading } = useNodeHealth(resolved.client);
@@ -228,12 +263,27 @@ export const NodeStatusPill = memo<NodeStatusPillProps>(
       health,
     });
 
+    // When the provider engine has measured the reader's servers, it owns the
+    // words: it knows which one answered and whether the engine moved off the
+    // reader's first choice to get there. Until it has, the pill keeps its own
+    // single-server story rather than claiming a measurement nobody made.
+    const providers = useProviderSnapshot();
+    const providerView =
+      providers.activeId !== null ? providerPillView(providers) : null;
+
     return (
       <NodeStatusPillView
-        state={state}
+        state={providerView ? providerView.state : state}
         health={health}
         short={short}
         kind={isNodeChosen() ? (choice?.kind ?? null) : null}
+        {...(providerView
+          ? {
+              providerLabel: providerView.label,
+              providerShortLabel: providerView.shortLabel,
+              providerTitle: providerView.title,
+            }
+          : {})}
         className={className}
         labelClassName={labelClassName}
       />
