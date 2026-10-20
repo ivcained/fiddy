@@ -145,33 +145,47 @@ premise — that every surface is a `farcaster.xyz` read or write — is no long
 true, so with the adapter on *and a node named* the session runs the real
 client. Adapter-without-node still lands on the honest landing.
 
+**Which node answered (measured 2026-10-20, at `d467d28` + the two honesty fixes
+described below).** The dev server this ran against is `https://localhost:5174`,
+started with `SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com` — a live public
+read node, read through the dev server's own `/snapchain-api` relay. The node
+this repo's `apps/farcaster-web/.env.local` names,
+`http://34.101.47.167:3381`, did **not** answer while this was measured: ICMP and
+TCP to 3381/3383 time out from this Mac **and** from the VPS (both measured). So
+`https://localhost:5173` (which reads `.env.local`) currently has no node behind
+its relay, and the run below is what proves the adapter against a real node. When
+that node is back, the same probe run against `5173` needs no env override.
+
 **Verified end-to-end, not by construction.** `scripts/verify-node-backed-client.mjs`
 (Playwright, headless Chrome, `ignoreHTTPSErrors`) signs in with a real SIWE
 message signed by a throwaway key — only the SIWF relay is stubbed, and it names
 `fid 3` (`dwr`) so the feed has a real follow graph — then drives the client
-against a live public read node through the dev server's `/snapchain-api` relay:
+against that node through the relay. One run, 11/11 checks:
 
 | Check | Evidence |
 | --- | --- |
 | a completed sign-in lands in the client | `path=/`, not the setup, not the device-only landing |
-| the home feed reads the node | `GET 200 /v1/castsByFid?fid=…&pageSize=10&reverse=true` |
-| real casts are on screen | 27 of 480 node-returned cast texts found in the DOM |
-| a cast detail opens | `GET 200 /v1/castById` + `castsByParent?fid=3&hash=0x40a0…` |
-| a profile reads the node | `GET 200 /v1/userDataByFid?fid=3`, page names `dwr` |
-| a channel reads the node | `GET 200 /v1/castsByParent?url=…~/channel/dev` |
-| notifications are derived | `GET 200 /v1/castsByMention?fid=3`, `linksByTargetFid?target_fid=3` |
+| the home feed reads the node | `GET 200 /v1/castsByFid?fid=…&pageSize=10&reverse=true` — one followed author at a time (seen: `fid=3`, `fid=7237`) |
+| real casts are on screen | 22–25 of ~480–620 node-returned cast texts found in the DOM (two runs) |
+| a cast detail opens | `GET 200 /v1/castsByParent?fid=3&hash=0x40a0…&pageSize=10&reverse=true` |
+| a profile reads the node | `GET 200 /v1/userDataByFid?fid=3&pageSize=100`, page names `dwr` |
+| a channel reads the node | `GET 200 /v1/castsByParent?url=…%2Fchannel%2Fdev&pageSize=50` |
+| notifications are derived | `GET 200 /v1/castsByMention?fid=3&pageSize=15` |
+| **a reload keeps it** | after `goto('/')`: the same bounded `castsByFid` read, 44–47 cast texts back on screen |
 | the rail is honest about DMs | `Direct Casts · soon` in place of the link |
 
-Node routes the client used in one run, all `200`: `castsByFid` (62),
-`linksByFid` (95), `linksByTargetFid` (73), `reactionsByCast` (60),
+Node routes the client used in that run, all `200`: `castsByFid` (62),
+`linksByFid` (96), `linksByTargetFid` (73), `reactionsByCast` (60),
 `userDataByFid` (28), `castsByParent` (10), `castById` (6), `castsByMention` (3),
 `reactionsByFid` (2), `verificationsByFid` (1), `userNameProofByName` (1),
-`info` (6).
+`info` (6) — the same shape as the first pass measured, re-measured after the
+fan-out bound and the honesty fixes.
 
 ### The 501s are the honest part
 
-These endpoints answer `501` with a sentence saying whose job they are; the UI
-shows the sentence where the surface sits, never an empty success:
+These endpoints answer `501` with a sentence saying whose job they are — and,
+since the fixes below, the **screens** say it too, where the surface sits, never
+an empty success:
 
 * `explore-feed`, `feeds` (feed summaries), `get-trending-topics` — ranking is
   an indexer's job;
@@ -181,6 +195,48 @@ shows the sentence where the surface sits, never an empty success:
   grouping are not on a read node;
 * `search-casts`/`search-*` — a read node keeps no search index;
 * `audio-rooms`, `favorite-frames`, `user-thread-casts`, `analytics-events`.
+
+### A refused surface used to hide the sentence (measured; fixed here)
+
+That list was true of the *adapter*. It was **not** true of the screens: driven
+with a real session against a live node
+(`scripts/verify-node-unanswered-surfaces.mjs`, 2026-10-20), four surfaces were
+measured **before** the fix:
+
+| Surface | What it showed | Why that was wrong |
+| --- | --- | --- |
+| search (`/~/search`) | `This page couldn't load` / `Error retrieving data. Please try again.` / `Try again` | the adapter's sentence was thrown away, and the retry was offered for a read no retry can fix |
+| channel directory (`/~/channels`) | the same generic copy | same |
+| explore / trending (`/~/apps/trending`) | the same generic copy | same |
+| direct messages (`/~/inbox`) | a normal-looking inbox reading `No direct casts` | an empty success: the node cannot serve direct messages at all, so this reads as "you have none" |
+
+Cause: `getErrorDescription` (`~/utils/errorUtils`) maps every
+`FarcasterApiError` to "Error retrieving data. Please try again." for the
+page-column boundary, and the DM route rendered the fork's empty inbox whatever
+the data source was.
+
+What changed — same probe, four surfaces, **15/15 checks**, no page errors:
+
+* `~/snapchain/nodeApi/nodeCannotAnswer.ts` recognises the adapter's own two
+  refusals on a `HandledFetchError` and hands back its sentence: `501` (your node
+  cannot answer this read) and `502` (your node did not answer). The `501` rule is
+  safe because a `501` in this client has only ever been the adapter's own answer
+  — the hosted API's failures appear in the same console as `400/401/403/404`
+  (measured), and if a `501` ever came from the API instead, showing the API's own
+  sentence is still the honest thing to do.
+* `~/components/snapchain/NodeCannotAnswerPanel` is the one panel for it
+  (`data-fiddy="node-cannot-answer"`): the sentence as written, and a retry
+  **only** where a retry could change the outcome (the node was down) — never for
+  a read the node cannot serve.
+* `ShellSectionErrorBoundary` renders that panel for a refused region, so the
+  page column says why with the shell standing around it.
+* `DirectCastsInboxPage` renders the same panel on the DM route when the node is
+  the data source (and the dev mock API is not), reading the reason off
+  `classifyHostedRequest` so the page cannot drift from the adapter's answer.
+
+The unit tests for the boundary's three branches (generic failure, node cannot
+answer, node did not answer) are in
+`src/components/session/__tests__/deviceOnlySession.test.tsx`.
 
 ### Two measured defects this card had to fix first
 
