@@ -42,6 +42,8 @@ import {
 
 const FID = 4242;
 const DEAD = 'snapchain:https://dead.example';
+/** Fiddy's own relay: the full node that rides behind whatever the reader chose. */
+const RELAY = 'snapchain:https://haatz.quilibrium.com';
 
 const sample = (overrides: Partial<ProbeSample> = {}): ProbeSample => ({
   ok: true,
@@ -85,10 +87,12 @@ describe('startProviderWatch', () => {
     const snapshot = getProviderSnapshot();
     expect(snapshot.order.map((provider) => provider.id)).toEqual([
       DEAD,
+      RELAY,
       FARCASTER_PUBLIC_PROVIDER_ID,
     ]);
-    // Nothing was live before the checks, so the first pick is not a switch.
-    expect(snapshot.activeId).toBe(FARCASTER_PUBLIC_PROVIDER_ID);
+    // Nothing was live before the checks, so the first pick is not a switch —
+    // and the fallback is the next full node, not the read-only safety net.
+    expect(snapshot.activeId).toBe(RELAY);
     expect(snapshot.health[DEAD]!.status).toBe('down');
     expect(snapshot.health[FARCASTER_PUBLIC_PROVIDER_ID]!.status).toBe('live');
   });
@@ -112,7 +116,7 @@ describe('startProviderWatch', () => {
     await startProviderWatch(FID, { probe, autoStart: false });
 
     const snapshot = getProviderSnapshot();
-    expect(snapshot.activeId).toBe(FARCASTER_PUBLIC_PROVIDER_ID);
+    expect(snapshot.activeId).toBe(RELAY);
     expect(snapshot.failover.reason).toBe('preferred-slow');
     expect(providerPillView(snapshot).label).toBe(
       'Switched to a backup node — your first choice got slow.',
@@ -126,13 +130,13 @@ describe('startProviderWatch', () => {
       provider.id === DEAD && deadIsDown ? down() : sample();
 
     await startProviderWatch(FID, { probe, autoStart: false });
-    expect(getProviderSnapshot().activeId).toBe(FARCASTER_PUBLIC_PROVIDER_ID);
+    expect(getProviderSnapshot().activeId).toBe(RELAY);
 
     // The first choice comes back. One good check is not recovery — the engine
     // wants two in a row before it moves the reader back.
     deadIsDown = false;
     await checkProvidersNow();
-    expect(getProviderSnapshot().activeId).toBe(FARCASTER_PUBLIC_PROVIDER_ID);
+    expect(getProviderSnapshot().activeId).toBe(RELAY);
     expect(getProviderSnapshot().failover.preferredGoodChecks).toBe(1);
 
     await checkProvidersNow();
@@ -159,7 +163,7 @@ describe('noteProviderReadResult', () => {
 
     const snapshot = getProviderSnapshot();
     expect(snapshot.readErrors[DEAD]).toBe(READ_ERRORS_BEFORE_DOWN);
-    expect(snapshot.activeId).toBe(FARCASTER_PUBLIC_PROVIDER_ID);
+    expect(snapshot.activeId).toBe(RELAY);
     expect(snapshot.explanation).toContain('stopped answering');
     expect(snapshot.health[DEAD]!.detail).toContain('3 in a row failed');
   });

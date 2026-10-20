@@ -200,6 +200,15 @@ export const resolveProviderOrder = ({
     if (relay) {
       push(relay);
     }
+  } else {
+    // A reader who runs their own node still gets Fiddy's relay behind it, as a
+    // real backup. MEASURED (2026-10-20, scripts/verify-provider-picker.mjs):
+    // without this, a chosen own node that goes slow leaves the list with only
+    // the safety net behind it, and the safety net cannot serve several of the
+    // client's reads (`/v2/unseen`, the direct-cast inbox) — so the reader's
+    // feed lands on a server that answers the pill's question and not the
+    // client's. The relay is a full node; it belongs right behind their choice.
+    push(defaultPublicRelay());
   }
 
   push(farcasterPublicProvider());

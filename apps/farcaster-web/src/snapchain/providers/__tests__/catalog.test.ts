@@ -50,6 +50,20 @@ describe('resolveProviderOrder', () => {
     expect(order[order.length - 1]!.id).toBe(FARCASTER_PUBLIC_PROVIDER_ID);
   });
 
+  it('keeps Fiddy’s own relay behind the reader’s choices, as a backup', () => {
+    const order = resolveProviderOrder({
+      chosen: { kind: 'own', url: 'https://mine.example' },
+      storedIds: [],
+      neynarConfigured: false,
+    });
+    const ids = order.map((provider) => provider.id);
+    expect(ids).toEqual([
+      'snapchain:https://mine.example',
+      'snapchain:https://haatz.quilibrium.com',
+      FARCASTER_PUBLIC_PROVIDER_ID,
+    ]);
+  });
+
   it('never lists the same server twice', () => {
     const order = resolveProviderOrder({
       chosen: { kind: 'own', url: 'https://mine.example/' },
