@@ -16,6 +16,27 @@ export default [
     },
   },
   {
+    // The probes in scripts/ are Node programs that also read the page they
+    // drive, inside page.evaluate() callbacks, so they need both sides'
+    // globals. validateSitemaps.mjs imports its Node globals from `node:`
+    // instead; these are here so a probe that does not is still lintable.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        document: 'readonly',
+        process: 'readonly',
+        URL: 'readonly',
+        window: 'readonly',
+      },
+    },
+    rules: {
+      // A failed localStorage write in an addInitScript is genuinely
+      // ignorable, same as everywhere else in the repo.
+      'no-empty': ['error', { allowEmptyCatch: true }],
+    },
+  },
+  {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
     rules: {
       curly: 'error',
