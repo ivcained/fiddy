@@ -23,9 +23,15 @@ export default [
     files: ['scripts/**/*.mjs'],
     languageOptions: {
       globals: {
+        cancelAnimationFrame: 'readonly',
         console: 'readonly',
         document: 'readonly',
+        Image: 'readonly',
+        localStorage: 'readonly',
+        MutationObserver: 'readonly',
+        performance: 'readonly',
         process: 'readonly',
+        requestAnimationFrame: 'readonly',
         URL: 'readonly',
         window: 'readonly',
       },
