@@ -71,10 +71,14 @@ export interface HealthConfig {
 
 export const DEFAULT_HEALTH_CONFIG: HealthConfig = {
   // MEASURED (2026-10-20): a healthy public read node answers /v1/info in
-  // 0.19–1.6s. Five seconds is several times the worst healthy answer, which is
-  // where "slow enough to switch away from" belongs.
-  slowMs: 5_000,
-  timeoutMs: 5_000,
+  // 0.19–1.6s, so 2.5s is already several times the worst healthy answer.
+  slowMs: 2_500,
+  // The deadline has to be LONGER than the slowness threshold, or a slow server
+  // can never be reported as slow: it would be aborted at the same instant it
+  // becomes slow, and every sluggish node would be described to the reader as
+  // one that "stopped answering" — the wrong story, and the wrong reason for the
+  // switch, for a server that is answering and merely late.
+  timeoutMs: 6_000,
   // blogDelay is in blocks behind the chain tip; a node a handful of blocks
   // behind is normal, a node minutes behind is not following.
   maxBlocksBehind: 20,

@@ -107,6 +107,15 @@ describe('judgeProbe', () => {
     expect(health.detail).toContain('6.5s');
   });
 
+  it('has a deadline longer than its slowness threshold', () => {
+    // Otherwise `slow` is unreachable from a real probe: the request would be
+    // aborted at the very moment it becomes slow, so every sluggish server would
+    // be reported to the reader as one that stopped answering.
+    expect(DEFAULT_HEALTH_CONFIG.timeoutMs).toBeGreaterThan(
+      DEFAULT_HEALTH_CONFIG.slowMs,
+    );
+  });
+
   it('calls a server that says it is catching up stale', () => {
     const health = judge({ catchingUp: true });
     expect(health.status).toBe('stale');
