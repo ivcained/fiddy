@@ -156,6 +156,13 @@ html.fiddy-dark-shell body {
   }
 }
 
+/* The nav's mark is the same character as the top bar's, as a still — one
+   animated mark per shell (see LeftSideBarLogo for why it is not a canvas). */
+.fiddy-nav-mark {
+  display: block;
+  object-fit: contain;
+}
+
 .fiddy-grow {
   flex: 1;
 }

@@ -126,7 +126,9 @@ same key Settings already reads — the choice stays visible and reversible.
 2. **Shell chrome** — `FiddyTopBar` (the 3D baby mark + wordmark, node-status
    pill, avatar), left nav ordered Feed → Agent → Wallet → Settings then the rest
    of the fork's surfaces under "More", and the agent panel at the top of the
-   right column on the feed (`AgentRailPanel`, honest `soon` tags intact).
+   right column on the feed (`AgentRailPanel`, honest `soon` tags intact). The
+   nav's own logo is the same baby as a still, not a second animated mark: one
+   canvas per shell is the brand, and the nav sits below the fold.
 3. **Phone** — `FiddyMobileTabBar`: Feed / Agent / Wallet / Settings on a fixed
    bottom bar; the node pill stays in `MobileHeader`'s top bar.
 
