@@ -297,9 +297,27 @@ const run = async () => {
   });
   const page = await desktop.newPage();
   const modelRequests = [];
-  page.on('request', (request) => {
-    if (request.url().includes('fiddy-loader.glb'))
-      modelRequests.push(request.url());
+  // What the page looked like at the instant the model was asked for: the claim
+  // is that the still is already painted by then, and that is what is asserted —
+  // a resource timing entry is not usable here, because this app makes enough
+  // requests to overflow the browser's timing buffer.
+  let atFirstModelRequest = null;
+  page.on('request', async (request) => {
+    if (!request.url().includes('fiddy-loader.glb')) return;
+    modelRequests.push(request.url());
+    if (atFirstModelRequest !== null) return;
+    atFirstModelRequest = await page
+      .evaluate(() => {
+        const img = document.querySelector('[data-fiddy-mark] img');
+        return {
+          posterInDom: Boolean(img),
+          posterPainted: Boolean(img?.complete && img?.naturalWidth > 0),
+          fcpDone: globalThis.performance
+            .getEntriesByType('paint')
+            .some((entry) => entry.name === 'first-contentful-paint'),
+        };
+      })
+      .catch(() => null);
   });
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 200)));
@@ -361,11 +379,9 @@ const run = async () => {
     `webgl=${webgl} state=${mark.markState} canvas=${mark.canvas} modelRequests=${modelRequests.length}`,
   );
   check(
-    'the model is not on the critical path: its fetch starts after first paint',
-    timing.firstPaintMs === null ||
-      timing.modelStartMs === null ||
-      timing.modelStartMs >= timing.firstPaintMs,
-    `firstPaint=${timing.firstPaintMs}ms modelFetch=${timing.modelStartMs}ms`,
+    'the model is not on the critical path: the still was painted first',
+    atFirstModelRequest?.posterPainted === true,
+    `at the model request: posterInDom=${atFirstModelRequest?.posterInDom} posterPainted=${atFirstModelRequest?.posterPainted} firstPaintDone=${atFirstModelRequest?.fcpDone}; requests=${modelRequests.length}; FCP=${timing.firstPaintMs}ms`,
   );
   check(
     'the shell painted without a page error',
