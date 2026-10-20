@@ -12,7 +12,9 @@
 #        VITE_FIDDY_MEDIA_URL     the media host the composer uploads to
 #                                 (default https://fiddy.fun, named anyway);
 #   3. a LOCAL gate: the built bundle must contain the adapter's 501 sentence
-#      and the media path, or we do not ship it at all;
+#      and the media path, or we do not ship it at all — and the built shell
+#      must carry no inline script, because the host serves script-src 'self'
+#      (the theme bootstrap lives at public/shell-bootstrap.js);
 #   4. assemble the release tree the vhost expects — web/ (the client) plus
 #      server/ (the read-only preview's API, which systemd runs from
 #      /var/www/fiddy.fun/current/server/server.mjs, so a release without it
@@ -84,6 +86,12 @@ grep -rqs "$NODE_URL" "$APP/assets" || { echo "MISSING the configured node in th
 echo "  adapter  ok"
 echo "  media    ok"
 echo "  node     ok ($NODE_URL)"
+# The shell the host serves runs under script-src 'self'. An inline <script> in
+# index.html (the theme bootstrap used to be one) or an inline on*= handler (the
+# font sheet used to have one) is inline script, and that CSP refuses it — in
+# the browser, on the live page, after the release. Refuse to ship it instead.
+node "$STAGE/base/apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs" "$APP/index.html" \
+  || { echo "REFUSING to ship: the built shell needs script-src 'unsafe-inline'" >&2; exit 1; }
 
 say "4/8 assemble web/ + server/ + the preview it must keep"
 WEB="$STAGE/release/web"
@@ -152,6 +160,11 @@ set +e
 # `set -o pipefail` that SIGPIPE reads as a failed check even when the string is
 # there.
 curl -fsS https://fiddy.fun/ -o "$STAGE/served-index.html"
+# The served shell is what the browser runs, so check THAT file and not the one
+# the build produced: an inline <script> or an inline on*= handler in it is
+# refused by the host's script-src 'self'.
+node "$REPO/apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs" "$STAGE/served-index.html" \
+  || { rollback_on_failure; exit 1; }
 ASSET=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$STAGE/served-index.html" | head -1)
 echo "  index.html names $ASSET"
 curl -fsS "https://fiddy.fun$ASSET" -o "$STAGE/served-$SHORT.js"

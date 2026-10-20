@@ -16,6 +16,19 @@ export default [
     },
   },
   {
+    // public/ is served as-is by the host: the shell bootstrap runs in the page
+    // before the bundle does, so it has the page's globals and nothing else.
+    // It is the one file under public/ that is code; the rest is assets.
+    files: ['public/**/*.js'],
+    languageOptions: {
+      globals: {
+        document: 'readonly',
+        localStorage: 'readonly',
+        window: 'readonly',
+      },
+    },
+  },
+  {
     // The probes in scripts/ are Node programs that also read the page they
     // drive, inside page.evaluate() callbacks, so they need both sides'
     // globals. validateSitemaps.mjs imports its Node globals from `node:`
@@ -26,6 +39,8 @@ export default [
         cancelAnimationFrame: 'readonly',
         console: 'readonly',
         document: 'readonly',
+        fetch: 'readonly',
+        getComputedStyle: 'readonly',
         Image: 'readonly',
         localStorage: 'readonly',
         MutationObserver: 'readonly',

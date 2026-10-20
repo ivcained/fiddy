@@ -30,42 +30,18 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Inter, as a normal render-blocking stylesheet. It used to be loaded
+         asynchronously via `media="print" onload="this.media='all'"`, but an
+         inline event handler is inline script: it needs script-src
+         'unsafe-inline' exactly like the theme bootstrap did. The two
+         preconnects above are what keep this cheap. -->
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
       rel="stylesheet"
-      media="print"
-      onload="this.media='all'"
     />
-    <script>
-      (function() {
-        const STORAGE_KEY = 'user-saved-theme';
-        // Fiddy is a dark client: an unset preference resolves to dark, not to
-        // the OS, so the shell never flashes the fork's light ground.
-        const DEFAULT_THEME = 'dark';
-        
-        try {
-          const stored = localStorage.getItem(STORAGE_KEY);
-          const userSavedTheme = stored || DEFAULT_THEME;
-          
-          let effective = userSavedTheme;
-          if (userSavedTheme === 'system') {
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            effective = prefersDark ? 'dark' : 'light';
-          }
-          
-          const root = document.documentElement;
-          root.classList.toggle('dark', effective === 'dark');
-          root.classList.toggle('light', effective === 'light');
-          root.setAttribute('data-theme', userSavedTheme);
-        } catch (e) {
-          // Fallback if localStorage is unavailable
-          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          const root = document.documentElement;
-          root.classList.toggle('dark', prefersDark);
-          root.classList.toggle('light', !prefersDark);
-        }
-      })();
-    </script>
+    <!-- The shell bootstrap (the saved theme, on <html>, before first paint).
+         A separate same-origin file, never inline, so script-src stays 'self'. -->
+    <script src="/shell-bootstrap.js"></script>
     <style>
       html.dark {
         background-color: #161715;
