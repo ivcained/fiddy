@@ -268,9 +268,17 @@ const run = async () => {
     waitUntil: 'domcontentloaded',
     timeout: 60000,
   });
-  await page.waitForFunction(() => document.body.innerText.trim().length > 40, {
-    timeout: 60000,
-  });
+  // Wait for the ready step's OWN control, not for "there is text on the page":
+  // the document paints its own skeleton ("Loading Fiddy…") first, so a length
+  // check returns before the step has rendered, the click below finds nothing,
+  // and the run spends its whole minute looking like a failed sign-in.
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('button, a, [role=button]')].some((el) =>
+        /go social/i.test(el.innerText || ''),
+      ),
+    { timeout: 60000 },
+  );
 
   for (const el of await page.$$('button, a, [role=button]')) {
     const text = ((await el.innerText()) || '').replace(/\s+/g, ' ').trim();

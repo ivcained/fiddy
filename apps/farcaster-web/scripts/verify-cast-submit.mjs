@@ -181,15 +181,32 @@ const run = async () => {
     waitUntil: 'domcontentloaded',
     timeout: 60000,
   });
-  await page.waitForFunction(() => document.body.innerText.trim().length > 40, {
-    timeout: 60000,
-  });
+  // Wait for the ready step's OWN control, not for "there is text on the page":
+  // the document paints its own skeleton first (the shell-paint work), so a
+  // length check returns while the step has not rendered yet, the click below
+  // finds nothing, and the run stalls for its full minute looking like a
+  // sign-in failure. MEASURED 2026-10-21: that is exactly how a re-run of this
+  // probe read 3/12 on a quiet tree.
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('button, a, [role=button]')].some((el) =>
+        /go social/i.test(el.innerText || ''),
+      ),
+    { timeout: 60000 },
+  );
+  let startedSignIn = false;
   for (const el of await page.$$('button, a, [role=button]')) {
     const text = ((await el.innerText()) || '').replace(/\s+/g, ' ').trim();
     if (/go social/i.test(text)) {
       await el.click();
+      startedSignIn = true;
       break;
     }
+  }
+  if (!startedSignIn) {
+    throw new Error(
+      'the ready step never offered "Go social — sign in with Farcaster"',
+    );
   }
   let surface = await readSurface(page);
   for (let i = 0; i < 60; i += 1) {
