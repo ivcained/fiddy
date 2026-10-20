@@ -16,7 +16,9 @@ describe('nodeEnv', () => {
     it('uses VITE_SNAPCHAIN_HTTP_URL when it is the page’s own origin', () => {
       const env = { VITE_SNAPCHAIN_HTTP_URL: 'http://192.168.1.100:3381' };
       // Out of a browser (pageOrigin undefined) the URL is used as given.
-      expect(resolveNodeBaseUrl(env, undefined)).toBe('http://192.168.1.100:3381');
+      expect(resolveNodeBaseUrl(env, undefined)).toBe(
+        'http://192.168.1.100:3381',
+      );
       expect(resolveNodeBaseUrl(env, 'http://192.168.1.100:3381')).toBe(
         'http://192.168.1.100:3381',
       );
@@ -31,7 +33,9 @@ describe('nodeEnv', () => {
       // A browser cannot POST to a cross-origin node: the node does not answer
       // the preflight. The dev/preview relay is the working route.
       const env = { VITE_SNAPCHAIN_HTTP_URL: 'http://34.101.47.167:3381' };
-      expect(resolveNodeBaseUrl(env, 'https://localhost:5173')).toBe(NODE_PROXY_PATH);
+      expect(resolveNodeBaseUrl(env, 'https://localhost:5173')).toBe(
+        NODE_PROXY_PATH,
+      );
     });
 
     it('lets VITE_SNAPCHAIN_DIRECT=true force a cross-origin URL', () => {
@@ -39,17 +43,23 @@ describe('nodeEnv', () => {
         VITE_SNAPCHAIN_HTTP_URL: 'http://34.101.47.167:3381',
         VITE_SNAPCHAIN_DIRECT: 'true',
       };
-      expect(resolveNodeBaseUrl(env, 'https://localhost:5173')).toBe('http://34.101.47.167:3381');
+      expect(resolveNodeBaseUrl(env, 'https://localhost:5173')).toBe(
+        'http://34.101.47.167:3381',
+      );
     });
 
     it('falls back to proxy path when VITE_SNAPCHAIN_HTTP_URL is empty string', () => {
       const env = { VITE_SNAPCHAIN_HTTP_URL: '' };
-      expect(resolveNodeBaseUrl(env, 'https://localhost:5173')).toBe(NODE_PROXY_PATH);
+      expect(resolveNodeBaseUrl(env, 'https://localhost:5173')).toBe(
+        NODE_PROXY_PATH,
+      );
     });
 
     it('falls back to proxy path when VITE_SNAPCHAIN_HTTP_URL is unset', () => {
       const env = {};
-      expect(resolveNodeBaseUrl(env, 'https://localhost:5173')).toBe(NODE_PROXY_PATH);
+      expect(resolveNodeBaseUrl(env, 'https://localhost:5173')).toBe(
+        NODE_PROXY_PATH,
+      );
     });
   });
 

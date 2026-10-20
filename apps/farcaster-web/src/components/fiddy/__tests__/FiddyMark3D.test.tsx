@@ -18,11 +18,11 @@ vi.mock('~/components/fiddy/fiddyMarkScene', () => ({
   mountFiddyMark: scene.mount,
 }));
 
-import { FiddyMark3D } from '~/components/fiddy/FiddyMark3D';
 import {
   FIDDY_MARK_POSTER,
   markMotionAllowed,
 } from '~/components/fiddy/fiddyMark';
+import { FiddyMark3D } from '~/components/fiddy/FiddyMark3D';
 
 const setReducedMotion = (matches: boolean) => {
   window.matchMedia = ((query: string) =>

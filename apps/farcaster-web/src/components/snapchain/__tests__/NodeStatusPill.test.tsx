@@ -192,7 +192,12 @@ describe('NodeStatusPillView', () => {
     );
     // And the phone-length version still says which kind it was.
     render(
-      <NodeStatusPillView state="served" health={health(true)} kind="public" short />,
+      <NodeStatusPillView
+        state="served"
+        health={health(true)}
+        kind="public"
+        short
+      />,
     );
     expect(screen.getAllByRole('status')[1].textContent).toBe('Public');
   });

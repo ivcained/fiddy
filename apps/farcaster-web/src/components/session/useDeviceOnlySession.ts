@@ -17,8 +17,8 @@ import { useCachedOnboardingState } from 'farcaster-client-hooks';
 import { localApiEnabled } from '~/constants/api';
 import { useAuth } from '~/contexts/AuthProvider';
 import { isLocalSessionToken } from '~/lib/siwfSession';
-import { isNodeConfigured } from '~/snapchain/nodeChoice';
 import { isNodeBackedClientEnabled } from '~/snapchain/nodeApi/nodeBackedClientFlag';
+import { isNodeConfigured } from '~/snapchain/nodeChoice';
 import { useActiveNodeChoice } from '~/snapchain/useNodeChoice';
 
 type DeviceOnlySession =

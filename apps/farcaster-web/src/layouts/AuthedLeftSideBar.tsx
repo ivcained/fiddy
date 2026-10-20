@@ -155,7 +155,11 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
             ~/snapchain/nodeApi/hostedRoutes (the endpoint is classified
             `hosted` on purpose). */}
         {nodeBackedClient ? (
-          <div className="fiddy-nav-note" data-fiddy="dms-unavailable" role="status">
+          <div
+            className="fiddy-nav-note"
+            data-fiddy="dms-unavailable"
+            role="status"
+          >
             Direct Casts <span className="fiddy-soon">soon</span>
           </div>
         ) : (

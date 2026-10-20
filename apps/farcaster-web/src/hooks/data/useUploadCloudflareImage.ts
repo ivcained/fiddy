@@ -1,7 +1,10 @@
 import { useFetchImageUploadUrl } from 'farcaster-client-hooks';
 import { useCallback } from 'react';
 
-import { isOwnMediaUploadUrl, uploadMedia } from '~/snapchain/nodeApi/mediaUpload';
+import {
+  isOwnMediaUploadUrl,
+  uploadMedia,
+} from '~/snapchain/nodeApi/mediaUpload';
 
 import { IMAGE_UPLOAD_ANIMATION_TOO_LARGE_MESSAGE } from './useOptimisticUploadCloudflareImage';
 

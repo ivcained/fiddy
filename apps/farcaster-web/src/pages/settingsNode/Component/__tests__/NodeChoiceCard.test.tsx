@@ -18,6 +18,8 @@ import {
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// Tests render the component directly; the lazy-import rule guards the bundle.
+// eslint-disable-next-line no-restricted-imports
 import { NodeChoiceCard } from '~/pages/settingsNode/Component/NodeChoiceCard';
 import { type NodeChoice, PUBLIC_READ_NODES } from '~/snapchain/nodeChoice';
 
