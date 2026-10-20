@@ -35,8 +35,11 @@ import {
   ApiQuoteCastEmbed,
   ApiUser,
 } from 'farcaster-client-data';
-
-import type { NodeCastAddBody, NodeMessage, NodeUserDataBody } from 'farcaster-node-client';
+import type {
+  NodeCastAddBody,
+  NodeMessage,
+  NodeUserDataBody,
+} from 'farcaster-node-client';
 
 /** Zero-safe count with the caveat that produced it. */
 export interface NodeCount {
@@ -45,8 +48,14 @@ export interface NodeCount {
   isFloor: boolean;
 }
 
-export const exactCount = (value: number): NodeCount => ({ value, isFloor: false });
-export const floorCount = (value: number): NodeCount => ({ value, isFloor: true });
+export const exactCount = (value: number): NodeCount => ({
+  value,
+  isFloor: false,
+});
+export const floorCount = (value: number): NodeCount => ({
+  value,
+  isFloor: true,
+});
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|avif|bmp)(\?.*)?$/i;
 
@@ -58,7 +67,10 @@ const userDataValue = (
   // log, and the newest value is the current one.
   let value: string | undefined;
   for (const message of messages) {
-    if (message.userData?.userDataType === type && message.userData.value !== '') {
+    if (
+      message.userData?.userDataType === type &&
+      message.userData.value !== ''
+    ) {
       value = message.userData.value;
     }
   }
@@ -92,7 +104,10 @@ export const apiUserFromNode = ({
   const pfpUrl = userDataValue(userData, 'USER_DATA_TYPE_PFP');
   const url = userDataValue(userData, 'USER_DATA_TYPE_URL');
   const bannerImageUrl = userDataValue(userData, 'USER_DATA_TYPE_BANNER');
-  const locationDescription = userDataValue(userData, 'USER_DATA_TYPE_LOCATION');
+  const locationDescription = userDataValue(
+    userData,
+    'USER_DATA_TYPE_LOCATION',
+  );
 
   const user: ApiUser = {
     fid,
@@ -139,12 +154,16 @@ export const apiChannelMinimalFromParentUrl = (
   // `chain://eip155:7777777/erc721:0x…` (channels owned by an NFT). Only the
   // first has a name inside the URL; for the NFT form the key is the address,
   // which is what the node can prove and all this client will claim.
-  const urlKeyed = /^https?:\/\/[^/]+\/~\/(?:channel|fc)\/([^/?#]+)/.exec(parentUrl);
+  const urlKeyed = /^https?:\/\/[^/]+\/~\/(?:channel|fc)\/([^/?#]+)/.exec(
+    parentUrl,
+  );
   if (urlKeyed?.[1]) {
     return { key: urlKeyed[1], name: urlKeyed[1] };
   }
 
-  const chainKeyed = /^chain:\/\/eip155:\d+\/erc721:(0x[0-9a-f]{40})$/i.exec(parentUrl);
+  const chainKeyed = /^chain:\/\/eip155:\d+\/erc721:(0x[0-9a-f]{40})$/i.exec(
+    parentUrl,
+  );
   if (chainKeyed?.[1]) {
     return { key: parentUrl, name: `channel ${chainKeyed[1].slice(0, 10)}…` };
   }
@@ -185,7 +204,12 @@ export const castEmbedsFromNode = ({
   for (const embed of body.embeds) {
     if ('url' in embed && typeof embed.url === 'string' && embed.url !== '') {
       if (IMAGE_EXTENSIONS.test(embed.url)) {
-        images.push({ type: 'image', url: embed.url, sourceUrl: embed.url, alt: '' });
+        images.push({
+          type: 'image',
+          url: embed.url,
+          sourceUrl: embed.url,
+          alt: '',
+        });
       } else {
         urls.push({ type: 'url', openGraph: { url: embed.url } });
       }
@@ -262,7 +286,10 @@ export const apiCastFromNode = ({
     author,
     text: body.text,
     timestamp: message.timestampMs,
-    replies: { count: replies?.count ?? 0, ...(replies?.casts ? { casts: replies.casts } : {}) },
+    replies: {
+      count: replies?.count ?? 0,
+      ...(replies?.casts ? { casts: replies.casts } : {}),
+    },
     reactions: { count: reactions?.value ?? 0 },
     recasts: { count: recasts?.value ?? 0 },
     // View counts are the hosted indexer's; absent, not zero.

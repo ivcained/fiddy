@@ -37,21 +37,22 @@
  * Nothing secret lives here: the client knows a URL, never a key.
  */
 
-export const MEDIA_UPLOAD_PATH = '/api/fiddy/media'
+export const MEDIA_UPLOAD_PATH = '/api/fiddy/media';
 
 /** The production media host: fiddy.fun serves the client and the bytes. */
-export const DEFAULT_MEDIA_BASE_URL = 'https://fiddy.fun'
+export const DEFAULT_MEDIA_BASE_URL = 'https://fiddy.fun';
 
 /** Documented local fallback for a dev server started beside the client. */
-export const LOCAL_MEDIA_BASE_URL = 'http://localhost:3217'
+export const LOCAL_MEDIA_BASE_URL = 'http://localhost:3217';
 
 /** What a person is told when the upload does not work. */
-export const MEDIA_UPLOAD_FAILED_MESSAGE = "the photo didn't make it - try again."
+export const MEDIA_UPLOAD_FAILED_MESSAGE =
+  "the photo didn't make it - try again.";
 
 export class MediaUploadError extends Error {
   constructor(message: string = MEDIA_UPLOAD_FAILED_MESSAGE) {
-    super(message)
-    this.name = 'MediaUploadError'
+    super(message);
+    this.name = 'MediaUploadError';
   }
 }
 
@@ -59,25 +60,26 @@ export class MediaUploadError extends Error {
 export const resolveMediaBaseUrl = (
   env: Record<string, unknown> = import.meta.env,
 ): string => {
-  const configured = env.VITE_FIDDY_MEDIA_URL
+  const configured = env.VITE_FIDDY_MEDIA_URL;
   const candidate =
     typeof configured === 'string' && configured.trim().length > 0
       ? configured.trim()
-      : DEFAULT_MEDIA_BASE_URL
+      : DEFAULT_MEDIA_BASE_URL;
   try {
-    const url = new URL(candidate)
+    const url = new URL(candidate);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return DEFAULT_MEDIA_BASE_URL
+      return DEFAULT_MEDIA_BASE_URL;
     }
-    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
   } catch {
-    return DEFAULT_MEDIA_BASE_URL
+    return DEFAULT_MEDIA_BASE_URL;
   }
-}
+};
 
 /** The absolute URL the bytes are POSTed to. */
-export const mediaUploadUrl = (env: Record<string, unknown> = import.meta.env): string =>
-  `${resolveMediaBaseUrl(env)}${MEDIA_UPLOAD_PATH}`
+export const mediaUploadUrl = (
+  env: Record<string, unknown> = import.meta.env,
+): string => `${resolveMediaBaseUrl(env)}${MEDIA_UPLOAD_PATH}`;
 
 /**
  * Is this the upload URL our own media host handed out?
@@ -91,33 +93,35 @@ export const isOwnMediaUploadUrl = (
   env: Record<string, unknown> = import.meta.env,
 ): boolean => {
   try {
-    const requested = new URL(url)
-    const ours = new URL(mediaUploadUrl(env))
-    return requested.origin === ours.origin && requested.pathname === ours.pathname
+    const requested = new URL(url);
+    const ours = new URL(mediaUploadUrl(env));
+    return (
+      requested.origin === ours.origin && requested.pathname === ours.pathname
+    );
   } catch {
-    return false
+    return false;
   }
-}
+};
 
 export interface UploadedMedia {
   /** The absolute URL the stored bytes are readable at. */
-  url: string
-  sha256: string
-  bytes: number
-  contentType: string
-  ext: string
-  deduped: boolean
+  url: string;
+  sha256: string;
+  bytes: number;
+  contentType: string;
+  ext: string;
+  deduped: boolean;
 }
 
 interface MediaEndpointReply {
-  ok?: boolean
-  url?: string
-  sha256?: string
-  bytes?: number
-  contentType?: string
-  ext?: string
-  deduped?: boolean
-  message?: string
+  ok?: boolean;
+  url?: string;
+  sha256?: string;
+  bytes?: number;
+  contentType?: string;
+  ext?: string;
+  deduped?: boolean;
+  message?: string;
 }
 
 /**
@@ -132,24 +136,37 @@ export const uploadMedia = async ({
   uploadUrl,
   fetchImpl = fetch,
 }: {
-  file: File
+  file: File;
   /** Defaults to this build's media host. */
-  uploadUrl?: string
-  fetchImpl?: typeof fetch
+  uploadUrl?: string;
+  fetchImpl?: typeof fetch;
 }): Promise<UploadedMedia> => {
-  const body = new FormData()
-  body.append('file', file, file.name)
+  const body = new FormData();
+  body.append('file', file, file.name);
 
-  let response: Response
+  let response: Response;
   try {
-    response = await fetchImpl(uploadUrl ?? mediaUploadUrl(), { method: 'POST', body })
+    response = await fetchImpl(uploadUrl ?? mediaUploadUrl(), {
+      method: 'POST',
+      body,
+    });
   } catch {
-    throw new MediaUploadError(`we couldn't reach the photo host - ${MEDIA_UPLOAD_FAILED_MESSAGE}`)
+    throw new MediaUploadError(
+      `we couldn't reach the photo host - ${MEDIA_UPLOAD_FAILED_MESSAGE}`,
+    );
   }
 
-  const reply = (await response.json().catch(() => undefined)) as MediaEndpointReply | undefined
-  if (!response.ok || typeof reply?.url !== 'string' || reply.url.length === 0) {
-    throw new MediaUploadError(reply?.message?.trim() || MEDIA_UPLOAD_FAILED_MESSAGE)
+  const reply = (await response.json().catch(() => undefined)) as
+    | MediaEndpointReply
+    | undefined;
+  if (
+    !response.ok ||
+    typeof reply?.url !== 'string' ||
+    reply.url.length === 0
+  ) {
+    throw new MediaUploadError(
+      reply?.message?.trim() || MEDIA_UPLOAD_FAILED_MESSAGE,
+    );
   }
 
   return {
@@ -159,5 +176,5 @@ export const uploadMedia = async ({
     contentType: reply.contentType ?? file.type,
     ext: reply.ext ?? '',
     deduped: Boolean(reply.deduped),
-  }
-}
+  };
+};

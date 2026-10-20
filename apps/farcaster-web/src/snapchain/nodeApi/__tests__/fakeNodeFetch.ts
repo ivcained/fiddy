@@ -36,13 +36,16 @@ export interface FixtureNodeOptions {
   log?: string[];
 }
 
-const byName = (params: URLSearchParams): Json =>
+const byName = (_params: URLSearchParams): Json =>
   read('userNameProofByName.dwr.json') as Json;
 
 /**
  * A `fetch` that speaks the node's own routes, backed by the recorded pages.
  */
-export const createFixtureNodeFetch = ({ fallback, log }: FixtureNodeOptions = {}) => {
+export const createFixtureNodeFetch = ({
+  fallback,
+  log,
+}: FixtureNodeOptions = {}) => {
   const served = new Set<string>();
 
   const route = (request: FakeNodeRequest): Json | undefined => {
