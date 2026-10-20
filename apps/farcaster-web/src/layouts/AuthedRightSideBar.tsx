@@ -1,6 +1,7 @@
 import { FC, memo, Suspense, useMemo } from 'react';
 
 import { AgentRailPanel } from '~/components/agent/AgentRailPanel';
+import { ShellSectionErrorBoundary } from '~/components/errors/ShellSectionErrorBoundary';
 import {
   MinimizableWindowHost,
   MinimizableWindowHostVariant,
@@ -40,14 +41,36 @@ const AuthedRightSideBar: FC = memo(() => {
               the fork's widgets, which all stay below it. */}
           {routeName === 'homeFeed' && <AgentRailPanel />}
           {routeFamily === 'search' ? <></> : <Search showClearIcon={false} />}
+          {/* Every widget below reads from the hosted API, and some of those
+              reads are exactly the ones a read node cannot answer (explore is a
+              ranking, the channel directory and the mini-app catalog are
+              Warpcast's own). Each gets its own boundary so the honest refusal
+              lands in the rail, where that widget sits, instead of taking the
+              feed down with it. See ~/components/errors/ShellSectionErrorBoundary. */}
           {routeFamily !== 'profile' && routeFamily !== 'news' && (
-            <Suspense>
-              <ClankerSpotlight />
-            </Suspense>
+            <ShellSectionErrorBoundary label="Explore">
+              <Suspense>
+                <ClankerSpotlight />
+              </Suspense>
+            </ShellSectionErrorBoundary>
           )}
-          <MiniApps />
-          {routeName === 'homeFeed' && <LiveNowSpaces />}
-          <TrendingTopics />
+          <ShellSectionErrorBoundary label="Mini apps">
+            <Suspense>
+              <MiniApps />
+            </Suspense>
+          </ShellSectionErrorBoundary>
+          {routeName === 'homeFeed' && (
+            <ShellSectionErrorBoundary label="Spaces">
+              <Suspense>
+                <LiveNowSpaces />
+              </Suspense>
+            </ShellSectionErrorBoundary>
+          )}
+          <ShellSectionErrorBoundary label="Trending">
+            <Suspense>
+              <TrendingTopics />
+            </Suspense>
+          </ShellSectionErrorBoundary>
           <SupportAndTermsLinks />
         </RightSideBar>
       </>

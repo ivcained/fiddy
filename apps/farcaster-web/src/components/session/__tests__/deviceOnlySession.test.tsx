@@ -20,6 +20,9 @@ import { LOCAL_SESSION_SECRET_PREFIX } from '~/lib/siwfSession';
 const state = vi.hoisted(() => ({
   authToken: undefined as { secret: string; expiresAt: number } | undefined,
   localApiEnabled: false,
+  // The node-backed client: the adapter on, and a node actually named.
+  nodeBackedClient: false,
+  nodeNamed: false,
   user: undefined as
     | { fid?: number; username?: string; displayName?: string }
     | undefined,
@@ -40,6 +43,14 @@ vi.mock('~/constants/api', () => ({
   get localApiEnabled() {
     return state.localApiEnabled;
   },
+}));
+
+vi.mock('~/snapchain/nodeApi/nodeBackedClientFlag', () => ({
+  isNodeBackedClientEnabled: () => state.nodeBackedClient,
+}));
+
+vi.mock('~/snapchain/nodeEnv', () => ({
+  isNodeExplicitlyConfigured: () => state.nodeNamed,
 }));
 
 vi.mock('~/components/links/Link', () => ({
@@ -65,6 +76,8 @@ const serverToken = { secret: 'a-real-token', expiresAt: 0 };
 beforeEach(() => {
   state.authToken = undefined;
   state.localApiEnabled = false;
+  state.nodeBackedClient = false;
+  state.nodeNamed = false;
   state.user = undefined;
   state.signOut.mockClear();
 });
@@ -104,6 +117,42 @@ describe('useDeviceOnlySession', () => {
     const { result } = renderHook(() => useDeviceOnlySession());
 
     expect(result.current.isDeviceOnly).toBe(false);
+  });
+
+  it('is NOT device-only when the node is the data source and one is named', () => {
+    // The whole point of the node adapter: the shell no longer needs a
+    // farcaster.xyz session, so a local sign-in runs the real client.
+    state.authToken = localToken;
+    state.nodeBackedClient = true;
+    state.nodeNamed = true;
+    state.user = { fid: 4242, username: 'fiddy' };
+
+    const { result } = renderHook(() => useDeviceOnlySession());
+
+    expect(result.current.isDeviceOnly).toBe(false);
+  });
+
+  it('stays device-only when the adapter is on but no node is named', () => {
+    // Nothing to read from: the landing is still the honest screen.
+    state.authToken = localToken;
+    state.nodeBackedClient = true;
+    state.nodeNamed = false;
+    state.user = { fid: 4242, username: 'fiddy' };
+
+    const { result } = renderHook(() => useDeviceOnlySession());
+
+    expect(result.current.isDeviceOnly).toBe(true);
+  });
+
+  it('stays device-only when the node adapter is switched off', () => {
+    state.authToken = localToken;
+    state.nodeBackedClient = false;
+    state.nodeNamed = true;
+    state.user = { fid: 4242, username: 'fiddy' };
+
+    const { result } = renderHook(() => useDeviceOnlySession());
+
+    expect(result.current.isDeviceOnly).toBe(true);
   });
 
   it('survives a session with no cached identity at all', () => {

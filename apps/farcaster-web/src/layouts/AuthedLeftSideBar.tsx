@@ -28,8 +28,12 @@ import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import { useCurrentUserProfileCastsLinkProps } from '~/hooks/navigation/useCurrentUserProfileCastsLinkProps';
 import { LeftSideBar } from '~/layouts/LeftSideBar';
 import { LeftSideBarLogo } from '~/layouts/LeftSideBarLogo';
+import { isNodeBackedClientEnabled } from '~/snapchain/nodeApi/nodeBackedClientFlag';
 
 const AuthedLeftSideBar: React.FC = React.memo(() => {
+  // Whose data the rail is showing: with the node as the source, the DM entry
+  // has nothing behind it (see the note beside it further down).
+  const nodeBackedClient = isNodeBackedClientEnabled();
   const {
     notificationsCount,
     inboxCount,
@@ -144,20 +148,32 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
           <NavLinkLabel>Apps</NavLinkLabel>
           {/* <NavLinkBadge count={notificationsCount} subtle={false} /> */}
         </NavLink>
-        <NavLink
-          to="directCastsInbox"
-          params={{}}
-          searchParams={{}}
-          title="Inbox"
-        >
-          <NavLinkIcon>
-            <div className="translate-y-[-0.5px]">
-              <Send size={20} />
-            </div>
-          </NavLinkIcon>
-          <NavLinkLabel>Direct Casts</NavLinkLabel>
-          <NavLinkBadge className="ml-4" count={inboxCount} subtle={false} />
-        </NavLink>
+        {/* Direct messages are not on a Snapchain read node: the inbox is a
+            hosted-API product, and this client has no session for it. So the
+            link is not offered where it cannot work — the nav says what is
+            missing instead of routing to a surface that cannot load. See
+            ~/snapchain/nodeApi/hostedRoutes (the endpoint is classified
+            `hosted` on purpose). */}
+        {nodeBackedClient ? (
+          <div className="fiddy-nav-note" data-fiddy="dms-unavailable" role="status">
+            Direct Casts <span className="fiddy-soon">soon</span>
+          </div>
+        ) : (
+          <NavLink
+            to="directCastsInbox"
+            params={{}}
+            searchParams={{}}
+            title="Inbox"
+          >
+            <NavLinkIcon>
+              <div className="translate-y-[-0.5px]">
+                <Send size={20} />
+              </div>
+            </NavLinkIcon>
+            <NavLinkLabel>Direct Casts</NavLinkLabel>
+            <NavLinkBadge className="ml-4" count={inboxCount} subtle={false} />
+          </NavLink>
+        )}
         <NavLink
           to={'referrals'}
           params={{}}

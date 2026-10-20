@@ -377,6 +377,29 @@ export const decodeNodeMessage = (value: unknown): NodeMessage => {
   };
 };
 
+/**
+ * Is this page token the end of the results?
+ *
+ * MEASURED against a live read node: the last page comes back with the token
+ * `W251bGwsbnVsbF0=` (base64 of `[null,null]`), and asking *with* that token
+ * returns the FIRST page again rather than an empty one. So a pager that loops
+ * while a token is present loops for ever — and on a feed that means the follow
+ * list grows without limit until the tab dies. Every paging loop in this
+ * package must stop when this returns true.
+ */
+export const isTerminalPageToken = (token: string | undefined): boolean => {
+  if (!token) {
+    return true;
+  }
+  try {
+    return /\[\s*null\s*,\s*null\s*\]/.test(atob(token));
+  } catch {
+    // An unreadable token cannot be shown to be a cursor, and looping is worse
+    // than stopping one page early.
+    return true;
+  }
+};
+
 export const decodeMessagesPage = (value: unknown): NodeMessagesPage => {
   const json = asJson(value);
   return {

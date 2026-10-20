@@ -1,7 +1,8 @@
 # Client parity: the fork's surfaces vs where Fiddy is (Phase 1 audit)
 
 Status: **first pass, 2026-10-20**, measured against commit `041c593` (branch
-`main`). This document exists so the client work has one honest map: what the
+`main`); the second half of the day's work — what is node-backed *now* — is in
+"What is node-backed now" at the end of this file (card `t_c9861884`). This document exists so the client work has one honest map: what the
 fork can do, what our shell can do today, and what each gap costs.
 
 Read the "How this was measured" section before trusting any verdict in the
@@ -62,24 +63,24 @@ runs against a working backend.
 
 | Surface | Route | Where its data comes from | Status | What parity needs |
 | --- | --- | --- | --- | --- |
-| Home feed | `/` | `farcaster-client-hooks` → hosted `/v2/feed-items`, `/v2/feed` | gated; renders (mock, 20 calls) | node-backed feed (see `docs/CLIENT-NODE-GAP.md`) |
+| Home feed | `/` | **node-backed**: `POST /v2/feed-items` → `linksByFid` + `castsByFid` off your follow graph | **node-backed, verified** (real casts on screen) | done — see "What is node-backed now" |
 | Following feed | `/~/following` | hosted `/v2/feed` + `/v2/following` | gated; renders (mock) | same node feed, follow-graph filtered |
 | Trending / discover | `/~/apps/trending` | hosted feed + `rightSidebar/TrendingTopics.tsx` | gated; renders (mock) — window B threw here | re-measure; trending has no node endpoint today |
-| Cast detail + threads | `/~/conversations/:castHash` | hosted `/v2/casts` (conversation) | gated | node `castsByFid`/cast-by-hash reads already in `farcaster-node-client` |
+| Cast detail + threads | `/~/conversations/:castHash` | **node-backed**: `castById` for the ancestors + `castsByParent` for the replies | **node-backed, verified** | done |
 | Composer (text) | `/~/compose` | `mutation/useCreateCast.ts` → `POST /v2/casts` (`FarcasterApiClient.ts:…createCast`) | gated in window A; **error boundary in window B** | route on `submitMessage` (`packages/farcaster-node-client`) — the app-key path that already exists |
 | Composer — image | composer picker | `MediaComposerPicker` → `useFetchImageUploadUrl` → `POST /v1/generate-image-upload-url` (`FarcasterApiClient.ts:5019`), then upload to the returned host | **unusable** — endpoint is 401 for a third party (measured, see media section) | a media seam of our own; see "Media upload" |
 | Composer — video | composer picker | `useCastComposerEmbeds.ts:1253` → `POST /v1/upload-video-with-tus` (`FarcasterApiClient.ts:11719`) | **unusable** — same hosted gate | same media seam |
 | Quote / recast / reply | cast actions, `QuoteCastComposer` | hosted `/v2/casts` with embed | gated | node writes (`submitMessage`) |
 | Reactions (like / recast) | cast actions | `useCreateCastLike.ts` → hosted `/v2/cast-reactions`, `/v2/cast-recasters` | gated | node reactions (already in the node client) |
 | Follows | profile / lists | `useCreateFollow.ts` → hosted `/v2/follows`, `/v2/followers` | gated | node follows (already in the node client) |
-| Profiles — view | `/~/profiles/:fid` | hosted `/v2/user` | gated; renders (mock, 19 calls) | node `userData` reads |
+| Profiles — view | `/~/profiles/:fid` | **node-backed**: `userDataByFid` + counted `linksByFid`/`linksByTargetFid` | **node-backed, verified** | done |
 | Profiles — edit | settings/profile | hosted user update | gated | node `userData` writes (`submitMessage`) |
-| Notifications | `/~/notifications` | hosted `/v2/notification-group*` | gated | no node endpoint yet → derive from mentions/reactions/follows (NEEDS-NODE) |
+| Notifications | `/~/notifications` | **node-backed (derived)**: mentions (`castsByMention`), reactions (`reactionsByCast`/`reactionsByFid`) and follows (`linksByTargetFid`) to your FID; the group drill-down (`/v2/notification-group`) still 501s | **node-backed, verified**; group view is an honest gap | derive done; grouping needs an indexer |
 | Channels — browse | `/~/channels` | hosted `/v2/all-channels`, `/v2/highlighted-channels` | gated; renders (mock) | node channel reads; browse needs a channel list source |
-| Channels — page / post into | `/~/channel/:channelKey` | hosted `/v2/channel`, `/v2/channel-followers`, `/v2/casts` | gated; renders (mock, 22 calls) | node reads + `submitMessage` with channel parent |
+| Channels — page / post into | `/~/channel/:channelKey` | **node-backed for casts**: `castsByParent?url=…` (the channel's parent URL is computable from its key); name/image/viewer state are the hosted directory's and read neutral | **node-backed, verified** (casts) | directory needs an indexer |
 | Channels — join / create | channel settings | `useCreateChannel.ts`, join-by-code hooks | gated | `farcaster-node-client` as-is |
 | Search | `/~/search*`, top bar | hosted `searchUsers`, `searchChannels`, `searchMiniApps` | gated | NEEDS-NODE (no search endpoint on the node) |
-| Direct messages | `/~/inbox`, `/~/inbox/:conversationId` | hosted direct-cast endpoints (plaintext DC hooks) | gated; renders (mock, 16 calls) | no node endpoint exists for DMs → hide with an honest note rather than fake it |
+| Direct messages | `/~/inbox`, `/~/inbox/:conversationId` | hosted direct-cast endpoints | **hidden with an honest note**: the rail's entry is replaced by `Direct Casts · soon` (and the endpoint 501s for a direct URL) | done — see "What is node-backed now" |
 | Mini apps — browse | `/miniapps` | hosted app catalog (`/v2/…mini-app…`) | gated; renders (mock, 21 calls) | NEEDS-NODE for the catalog; launching is client-side |
 | Mini app / frame rendering in feed | cast embeds, `components/frames/`, `components/iframes/` | embed URL in the cast itself | renders (mock) — **unverified with a live frame** | verify once the feed is node-backed |
 | Wallet surfaces | `/~/settings/preferred-wallet`, mint, pay-user | wallet-connect + hosted wallet endpoints | gated; `Reown Config` fetch failed `403` in console (project id unset) | operator key + a decision on whether Fiddy ships a wallet at all |
@@ -129,6 +130,84 @@ go-ahead to add a small upload service on the VPS (that is a `services/` change,
 explicitly out of scope for this card → it wants its own card). Until then the
 honest state for both media buttons is a plain "media isn't ready yet" — not a
 hosted-API error toast.
+
+## What is node-backed now (card `t_c9861884`, measured same day)
+
+The signed-in client reads from **your Snapchain node**, not from
+`farcaster.xyz`: one `fetch` seam in `~/snapchain/nodeApi/nodeBackedFetch`
+classifies every hosted-API request and answers it from the node, locally, or
+with an honest 501 naming whose job it is. Pages, hooks and return shapes are
+untouched.
+
+**The gate moved with it.** `useDeviceOnlySession` used to send every local
+SIWF sign-in to the "nothing can serve this session" landing. The landing's own
+premise — that every surface is a `farcaster.xyz` read or write — is no longer
+true, so with the adapter on *and a node named* the session runs the real
+client. Adapter-without-node still lands on the honest landing.
+
+**Verified end-to-end, not by construction.** `scripts/verify-node-backed-client.mjs`
+(Playwright, headless Chrome, `ignoreHTTPSErrors`) signs in with a real SIWE
+message signed by a throwaway key — only the SIWF relay is stubbed, and it names
+`fid 3` (`dwr`) so the feed has a real follow graph — then drives the client
+against a live public read node through the dev server's `/snapchain-api` relay:
+
+| Check | Evidence |
+| --- | --- |
+| a completed sign-in lands in the client | `path=/`, not the setup, not the device-only landing |
+| the home feed reads the node | `GET 200 /v1/castsByFid?fid=…&pageSize=10&reverse=true` |
+| real casts are on screen | 27 of 480 node-returned cast texts found in the DOM |
+| a cast detail opens | `GET 200 /v1/castById` + `castsByParent?fid=3&hash=0x40a0…` |
+| a profile reads the node | `GET 200 /v1/userDataByFid?fid=3`, page names `dwr` |
+| a channel reads the node | `GET 200 /v1/castsByParent?url=…~/channel/dev` |
+| notifications are derived | `GET 200 /v1/castsByMention?fid=3`, `linksByTargetFid?target_fid=3` |
+| the rail is honest about DMs | `Direct Casts · soon` in place of the link |
+
+Node routes the client used in one run, all `200`: `castsByFid` (62),
+`linksByFid` (95), `linksByTargetFid` (73), `reactionsByCast` (60),
+`userDataByFid` (28), `castsByParent` (10), `castById` (6), `castsByMention` (3),
+`reactionsByFid` (2), `verificationsByFid` (1), `userNameProofByName` (1),
+`info` (6).
+
+### The 501s are the honest part
+
+These endpoints answer `501` with a sentence saying whose job they are; the UI
+shows the sentence where the surface sits, never an empty success:
+
+* `explore-feed`, `feeds` (feed summaries), `get-trending-topics` — ranking is
+  an indexer's job;
+* `highlighted-channels`, `user-following-channels`, `channel-streaks` — the
+  channel directory is Warpcast's;
+* `direct-cast-inbox`, `notification-group` — direct messages and notification
+  grouping are not on a read node;
+* `search-casts`/`search-*` — a read node keeps no search index;
+* `audio-rooms`, `favorite-frames`, `user-thread-casts`, `analytics-events`.
+
+### Two measured defects this card had to fix first
+
+1. **`fetch` needs its receiver.** Passing the bare `fetch` into the node client
+   produced `TypeError: Failed to execute 'fetch' on 'Window': Illegal
+   invocation`, so *every* read the adapter answered came back `502` while the
+   node was perfectly healthy. The adapter now binds it, and a unit test drives a
+   fake that refuses any other receiver.
+2. **A 501 in the rail took the page down.** `ClankerSpotlight` (explore) threw
+   through to the route boundary, so the feed column became "Error retrieving
+   data". Each fetched rail widget now has its own
+   `ShellSectionErrorBoundary`, and the honest refusal lands in the rail.
+
+### Latency, measured and bounded
+
+The first working version read 200 followed accounts × 25 casts at concurrency
+5 — **~55s** to answer the feed's first page (measured in the browser, one run:
+`POST /v2/feed-items` at +5.8s, 25 items at +60.4s). The fan-out is now 60
+accounts × 10 casts at concurrency 12: same shape, roughly an order of magnitude
+less wall clock. A large follow graph still means the feed is a bounded slice of
+it, not "everyone you follow" — worth saying out loud before a judge asks.
+
+### Still not node-backed
+
+Media upload (see "Media upload" above), the channel directory, search, mini-app
+catalogue, audio rooms, wallet surfaces, notification grouping and DMs — all
+hosted-API products with no node equivalent today.
 
 ## Fix order for Phase 2 (posting loop first)
 
