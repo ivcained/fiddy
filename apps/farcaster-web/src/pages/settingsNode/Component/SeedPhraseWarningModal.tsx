@@ -59,28 +59,30 @@ const SeedPhraseWarningModal = memo<SeedPhraseWarningModalProps>(
 
             <div>
               <strong>The phrase never leaves this browser tab.</strong> It is
-              never sent to the node or any server, and is not stored anywhere
-              by the client.
+              never sent to your setup or to any server, and is not stored
+              anywhere by the client.
             </div>
 
             <div>
-              <strong>The custody key signs exactly one thing:</strong> the
-              gasless KEY_ADD authorization (EIP-712). No transaction, no ETH,
-              no Optimism tx, no storage purchase.
+              <strong>Your own key signs exactly one thing:</strong> the
+              approval that lets an app key use this account. No transaction, no
+              ETH, no network fee, no storage purchase.
             </div>
 
             <div>
-              <strong>It does not do on-chain account creation.</strong> The key
-              is only used to authorize a gasless app key.
+              <strong>It does not create an account on a chain.</strong> It is
+              only used to approve an app key.
             </div>
           </div>
 
           <div className="mb-4 rounded border p-3 text-sm text-muted bg-tertiary border-default">
-            <strong className="text-primary">Scope &amp; TTL:</strong> the app
-            key you create will have a 90-day sliding TTL (renewed each time it
-            signs, so active use keeps it alive) and these scopes: post casts,
-            delete its own casts, like and recast, undo a reaction, follow,
-            unfollow, edit profile fields. Nothing else.
+            <strong className="text-primary">
+              What it can do, and how long:
+            </strong>{' '}
+            the app key you create asks again in 90 days — every time it signs,
+            the countdown restarts, so regular use keeps it alive. It can do
+            this and nothing else: post casts, delete its own casts, like and
+            recast, undo a reaction, follow, unfollow, edit profile fields.
           </div>
 
           <form onSubmit={handleSubmit}>

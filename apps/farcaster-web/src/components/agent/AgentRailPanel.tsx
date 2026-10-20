@@ -101,8 +101,8 @@ export const AgentRailPanel: React.FC = memo(() => {
           <div className="fiddy-agent-id">
             <IdCard size={16} aria-hidden="true" />
             <span>
-              Gets its own fid and profile — not a shared bot, not your account
-              with a prompt stapled on.
+              Gets its own account and profile — not a shared bot, not your
+              account with a prompt stapled on.
             </span>
           </div>
         </div>

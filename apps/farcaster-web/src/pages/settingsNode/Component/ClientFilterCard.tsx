@@ -92,7 +92,7 @@ const ClientFilterCard = memo<ClientFilterCardProps>(
         <div className="mb-1 flex items-center justify-between">
           <span className="font-semibold text-primary">Client filter</span>
           <span className="text-xs text-muted">
-            view only — nothing is hidden on the node
+            view only — nothing is hidden on your setup
           </span>
         </div>
 
@@ -187,9 +187,9 @@ const ClientFilterCard = memo<ClientFilterCardProps>(
         )}
 
         <div className="mt-3 text-xs text-muted">
-          A cast&rsquo;s signer is looked up on your node; a gasless key reports
-          the app FID that requested it, which is how another client is
-          identified. No FID gets a name until you give it one.
+          Who wrote a cast is read from your own setup&rsquo;s own records: the
+          key that signed it reports which app asked for it, and that is how a
+          client gets named here. No account gets a name until you give it one.
         </div>
       </div>
     );

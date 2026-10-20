@@ -67,8 +67,8 @@ const NodeFeed = memo<NodeFeedProps>(
             <span className="font-semibold text-primary">Feed</span>
             <span className="text-xs text-muted">
               {isFallback
-                ? 'Your own casts — the follow graph on this node is empty'
-                : 'Your follow graph, read from your node and merged locally'}
+                ? 'Your own casts — the follow graph on your setup is empty'
+                : 'Your follow graph, read from your own setup and merged locally'}
             </span>
           </div>
           <button

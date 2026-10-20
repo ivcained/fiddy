@@ -44,7 +44,7 @@ const NodeStatusCard = memo<NodeStatusCardProps>(
       return (
         <div className="solid-glass-pane rounded-lg border p-4 border-default">
           <div className="flex items-center justify-between">
-            <span className="font-semibold text-primary">Node status</span>
+            <span className="font-semibold text-primary">Your setup</span>
             <span className="text-sm text-muted">Checking…</span>
           </div>
         </div>
@@ -56,7 +56,7 @@ const NodeStatusCard = memo<NodeStatusCardProps>(
     return (
       <div className="solid-glass-pane rounded-lg border p-4 border-default">
         <div className="mb-4 flex items-center justify-between">
-          <span className="font-semibold text-primary">Node status</span>
+          <span className="font-semibold text-primary">Your setup</span>
           <button
             type="button"
             onClick={onRefresh}
@@ -81,7 +81,7 @@ const NodeStatusCard = memo<NodeStatusCardProps>(
           </div>
 
           <Row
-            label={showingRelay ? 'Path' : 'Node URL'}
+            label={showingRelay ? 'Path' : 'Its address'}
             value={
               <span className="font-mono text-xs">
                 {health.baseUrl || DEFAULT_NODE_URL}
@@ -91,10 +91,10 @@ const NodeStatusCard = memo<NodeStatusCardProps>(
 
           {showingRelay && (
             <div className="text-xs text-muted">
-              The browser cannot call a plain-HTTP node directly: the dev server
-              is HTTPS (mixed content) and the node does not answer CORS
-              preflight. This path is proxied server-side to your node&rsquo;s
-              URL.
+              A browser cannot call a plain-HTTP setup directly — this page is
+              HTTPS, and your setup does not answer the cross-origin check. So
+              Fiddy proxies this path on the server side, through to your
+              setup&rsquo;s address.
             </div>
           )}
 
@@ -116,8 +116,21 @@ const NodeStatusCard = memo<NodeStatusCardProps>(
 
           {!health.ok && health.error && (
             <div className="mt-2 rounded border p-3 text-xs bg-tertiary border-default">
-              <div className="font-semibold text-danger">Connection failed</div>
-              <div className="mt-1 text-muted">{health.error}</div>
+              <div className="font-semibold text-danger">
+                Your setup did not answer
+              </div>
+              {/* Plain words by default; the library's own message, which names
+                  the software, is one click away for whoever is debugging. */}
+              <div className="mt-1 text-muted">
+                Nothing is broken for you — Fiddy serves the feed itself while
+                your own setup is quiet.
+              </div>
+              <details className="mt-2 text-muted">
+                <summary className="cursor-pointer text-primary">
+                  Show the exact error
+                </summary>
+                <div className="font-mono mt-1">{health.error}</div>
+              </details>
               <div className="mt-2 text-muted">
                 <div className="mb-1 text-primary">Ways back:</div>
                 <ul className="list-inside list-disc space-y-1">

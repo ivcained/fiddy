@@ -1,10 +1,17 @@
 /**
- * App Key Card - the client's own gasless key, and what it can and cannot do.
+ * App Key Card - the client's own key, and what it can and cannot do.
  *
- * The scopes and the 90-day sliding TTL are spelled out here *at the moment the
- * key is created*, because that is the only moment the reader can decide whether
- * they want it: the key can cast, follow, react and edit profile on this FID, and
- * it stops working 90 days after its last use unless it is used again.
+ * What the key may do and how long it lasts are spelled out here *at the moment
+ * the key is created*, because that is the only moment the reader can decide
+ * whether they want it: it can cast, follow, react and edit profile on this
+ * account, and it stops working 90 days after its last use unless it is used
+ * again.
+ *
+ * Copy: this screen is Advanced, so it may name the things you configure
+ * ("app key", "your setup") — but the words that only make sense to whoever
+ * built the protocol (KEY_ADD, EIP-712, gasless, "scopes", "sliding TTL") are
+ * not shown. They are translated, in the same words the onboarding uses:
+ * "a signature, not a transaction", "can do", "asks again in 90 days".
  */
 
 import { MAX_KEY_TTL_SECONDS, type NodeSigner } from 'farcaster-node-client';
@@ -74,7 +81,7 @@ const AppKeyCard = memo<AppKeyCardProps>(
         <div className="mb-1 flex items-center justify-between">
           <span className="font-semibold text-primary">App key</span>
           <span className="text-xs text-muted">
-            gasless KEY_ADD — no transaction, no ETH
+            a signature, not a transaction — no ETH
           </span>
         </div>
 
@@ -83,18 +90,18 @@ const AppKeyCard = memo<AppKeyCardProps>(
             <>
               <div className="rounded border p-3 text-xs bg-tertiary border-default">
                 <div className="font-medium text-primary">
-                  No app key for this client yet
+                  No app key on this device yet
                 </div>
                 <div className="mt-1 text-muted">
-                  Your custody key signs one EIP-712 authorization and the app
-                  key does the rest. Nothing is bought, nothing is written
-                  on-chain, and the key can be revoked from here.
+                  Your own key signs one approval and the app key does the rest.
+                  Nothing is bought, nothing is written to a chain, and you can
+                  revoke it from here.
                 </div>
               </div>
               <div className="text-xs text-muted">
-                Scopes requested: {describeScopes(undefined)}. Expiry: {ttlDays}{' '}
-                days, sliding — refreshed every time the key signs, so active
-                use keeps it alive.
+                What it can do: {describeScopes(undefined)}. It asks again in{' '}
+                {ttlDays} days — and every time it signs, the countdown starts
+                over, so regular use keeps it alive.
               </div>
               <button
                 type="button"
@@ -107,13 +114,13 @@ const AppKeyCard = memo<AppKeyCardProps>(
               {loading && issueStep && (
                 <div className="text-xs text-muted">
                   {issueStep === 'reading-nonce' &&
-                    'Reading this FID’s nonce from your node…'}
+                    'Checking your account with your setup…'}
                   {issueStep === 'building' &&
-                    'Signing the authorization with your custody key…'}
+                    'Signing the approval with your own key…'}
                   {issueStep === 'submitting' &&
-                    'Submitting KEY_ADD to your node…'}
+                    'Asking your setup to accept the key…'}
                   {issueStep === 'confirming' &&
-                    'Waiting for the node to merge the key…'}
+                    'Waiting for your setup to keep the key…'}
                   {issueStep === 'done' && 'Key is live.'}
                 </div>
               )}
@@ -133,7 +140,7 @@ const AppKeyCard = memo<AppKeyCardProps>(
                 }
               />
               <Row
-                label="Scopes"
+                label="Can do"
                 value={
                   <span className="text-xs">
                     {describeScopes(signer?.scopes)}
@@ -141,10 +148,10 @@ const AppKeyCard = memo<AppKeyCardProps>(
                 }
               />
               <Row
-                label="Expiry"
+                label="Asks again in"
                 value={
                   <span className="text-xs">
-                    {ttlDays} days, sliding
+                    {ttlDays} days — restarts each time it signs
                     {signer?.lastUsedAt ? (
                       <>
                         {' · last used '}
@@ -157,7 +164,7 @@ const AppKeyCard = memo<AppKeyCardProps>(
                 }
               />
               <Row
-                label="Gasless keys on this FID"
+                label="Keys on this account"
                 value={
                   <span
                     className={
@@ -170,12 +177,12 @@ const AppKeyCard = memo<AppKeyCardProps>(
                   </span>
                 }
               />
-              <Row label="User nonce" value={currentUserNonce} />
+              <Row label="Times signed" value={currentUserNonce} />
               <div className="text-xs text-muted">
-                This key can only sign the scopes above, only for FID{' '}
-                {signer?.fid ?? ''}, and only until its sliding TTL lapses.
-                Revoking removes it immediately — no transaction needed, and
-                your custody key is not required.
+                This key can only do the things listed above, only for account{' '}
+                {signer?.fid ?? ''}, and only until the countdown runs out.
+                Revoking removes it immediately — no transaction, and your own
+                key is not needed.
               </div>
               <button
                 type="button"

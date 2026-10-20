@@ -60,7 +60,7 @@ const NodeComposer = memo<NodeComposerProps>(
         <div className="mb-3 flex items-center justify-between">
           <span className="font-semibold text-primary">Composer</span>
           <span className="text-xs text-muted">
-            signed by your app key → your node → gossip
+            signed with your app key → through your own setup → out
           </span>
         </div>
 
@@ -74,7 +74,7 @@ const NodeComposer = memo<NodeComposerProps>(
           value={text}
           onChange={(event) => setText(event.target.value)}
           disabled={disabled || posting}
-          placeholder="Say something through your own node…"
+          placeholder="Say something through your own setup…"
           className="w-full resize-none rounded border bg-transparent p-3 text-sm text-primary border-default focus:outline-none disabled:opacity-50"
           rows={3}
         />
