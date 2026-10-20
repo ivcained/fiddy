@@ -11,7 +11,7 @@ import { FiddyMobileTabBar } from '~/components/fiddy/FiddyMobileTabBar';
 import { FiddyTopBar } from '~/components/fiddy/FiddyTopBar';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { PreloadAuthedResources } from '~/components/PrefetchAuthedResources';
-import { DeviceOnlySessionPage } from '~/components/session/DeviceOnlySessionPage';
+import { DeviceOnlySessionLanding } from '~/components/session/DeviceOnlySessionLanding';
 import { useDeviceOnlySession } from '~/components/session/useDeviceOnlySession';
 import { EnsureCachedCurrentUser } from '~/components/users/EnsureCachedCurrentUser';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
@@ -252,10 +252,11 @@ const AuthedLayout: FC = () => {
   // surface below is a farcaster.xyz read or write, and this session has no
   // token for any of them. Landing the user here — named, explained, with the
   // account-free surfaces one tap away — is the honest outcome; mounting the
-  // shell would only produce a broken client. See
-  // ~/components/session/DeviceOnlySessionPage.
+  // shell would only produce a broken client. The two account-free surfaces
+  // themselves are the exception, and the landing links to them; see
+  // ~/components/session/DeviceOnlySessionLanding.
   if (deviceOnlySession.isDeviceOnly) {
-    return <DeviceOnlySessionPage />;
+    return <DeviceOnlySessionLanding />;
   }
 
   return (

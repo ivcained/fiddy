@@ -11,8 +11,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, renderHook } from '@testing-library/react';
 import React from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { routes } from '~/constants/routes';
 import { LOCAL_SESSION_SECRET_PREFIX } from '~/lib/siwfSession';
 
 const state = vi.hoisted(() => ({
@@ -51,6 +53,8 @@ const { DeviceOnlySessionPage } =
   await import('~/components/session/DeviceOnlySessionPage');
 const { ShellSectionErrorBoundary } =
   await import('~/components/errors/ShellSectionErrorBoundary');
+const { DeviceOnlySessionLanding, isAccountFreeDeviceOnlyPath } =
+  await import('~/components/session/DeviceOnlySessionLanding');
 
 const localToken = {
   secret: `${LOCAL_SESSION_SECRET_PREFIX}4242:abc`,
@@ -209,5 +213,89 @@ describe('ShellSectionErrorBoundary', () => {
 
     expect(getByText('Channels couldn’t load')).toBeTruthy();
     expect(getByText(/Try again/)).toBeTruthy();
+  });
+});
+
+describe('a device-only session on the two account-free surfaces', () => {
+  /**
+   * The defect this guards (review round 1, measured on the real API): the
+   * landing offered "Add a brain" and "Connect apps" while the layout's
+   * device-only short-circuit swallowed both routes, so clicking one changed
+   * the URL to /~/agent/brains and re-rendered the landing, byte for byte. The
+   * old test asserted the label was present — presence of copy is not
+   * reachability, and the layout that swallowed the route was not mounted. So:
+   * mount the layout, at the real route paths, and assert the *surface* comes
+   * up.
+   */
+  beforeEach(() => {
+    state.authToken = localToken;
+    state.localApiEnabled = false;
+    state.user = { fid: 4242, username: 'fiddy', displayName: 'Fiddy' };
+  });
+
+  const renderAt = (path: string) =>
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route element={<DeviceOnlySessionLanding />}>
+              <Route
+                path={routes.fiddyBrains.path}
+                element={<div>THE BRAINS SURFACE</div>}
+              />
+              <Route
+                path={routes.fiddyApps.path}
+                element={<div>THE APPS SURFACE</div>}
+              />
+              <Route
+                path={routes.homeFeed.path}
+                element={<div>THE FEED SURFACE</div>}
+              />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+  it('renders the brains surface itself instead of the landing again', () => {
+    const { getByText, queryByText } = renderAt(routes.fiddyBrains.path);
+
+    expect(getByText('THE BRAINS SURFACE')).toBeTruthy();
+    expect(queryByText(/Not reachable from this device yet/)).toBeNull();
+  });
+
+  it('renders the apps surface itself instead of the landing again', () => {
+    const { getByText, queryByText } = renderAt(routes.fiddyApps.path);
+
+    expect(getByText('THE APPS SURFACE')).toBeTruthy();
+    expect(queryByText(/Not reachable from this device yet/)).toBeNull();
+  });
+
+  it('keeps the account and one way back on screen around the surface', () => {
+    const { getByText, queryByText } = renderAt(routes.fiddyBrains.path);
+
+    expect(getByText('@fiddy · fid 4242')).toBeTruthy();
+    expect(getByText(/Signed in on this device/)).toBeTruthy();
+    expect(queryByText(/Could not reach Farcaster/)).toBeNull();
+  });
+
+  it('still lands on the device-only screen everywhere else', () => {
+    const { getByText, queryByText } = renderAt(routes.homeFeed.path);
+
+    expect(getByText(/Not reachable from this device yet/)).toBeTruthy();
+    expect(queryByText('THE FEED SURFACE')).toBeNull();
+  });
+
+  it('licenses exactly those two paths, read off the route table', () => {
+    expect(isAccountFreeDeviceOnlyPath(routes.fiddyBrains.path)).toBe(true);
+    expect(isAccountFreeDeviceOnlyPath(routes.fiddyApps.path)).toBe(true);
+    // Same screen, written with a trailing slash.
+    expect(isAccountFreeDeviceOnlyPath(`${routes.fiddyApps.path}/`)).toBe(true);
+
+    expect(isAccountFreeDeviceOnlyPath(routes.agent.path)).toBe(false);
+    expect(isAccountFreeDeviceOnlyPath(routes.homeFeed.path)).toBe(false);
+    expect(
+      isAccountFreeDeviceOnlyPath(`${routes.fiddyBrains.path}/anything`),
+    ).toBe(false);
   });
 });

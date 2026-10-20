@@ -52,3 +52,63 @@
   padding: 0 14px;
   font-size: 12.5px;
 }
+
+/* ---------- the frame a device-only session gets on the two account-free
+   surfaces ("Add a brain", "Connect apps") ----------
+
+   Those screens need nothing from Farcaster, so a device-only session renders
+   them for real (see ~/components/session/DeviceOnlySessionLanding). This is
+   the smallest frame that can carry one: a line saying whose session this is —
+   the account stays on screen, and there is one way back to the screen that
+   explains the session — and then the page itself. It carries no provider that
+   fetches, so nothing here can fail the way the authed shell does.
+
+   Values come from the tokens in fiddy-shell.css, not invented. */
+
+.fiddy-device-only-surface {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--fiddy-bg);
+  color: var(--fiddy-ink);
+  font-family: var(--fiddy-font);
+}
+
+.fiddy-device-only-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  min-height: 46px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--fiddy-glass-border);
+  background: color-mix(in oklab, var(--fiddy-bg), var(--fiddy-bg-raise) 30%);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.fiddy-device-only-bar .fiddy-brand {
+  font-size: 15px;
+  gap: 6px;
+}
+
+.fiddy-device-only-account {
+  color: var(--fiddy-ink);
+}
+
+.fiddy-device-only-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--fiddy-ink-dim);
+}
+
+.fiddy-device-only-back svg {
+  width: 15px;
+  height: 15px;
+}
+
+.fiddy-device-only-back:hover {
+  color: var(--fiddy-ink);
+}
