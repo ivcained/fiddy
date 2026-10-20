@@ -33,7 +33,7 @@
  * pipeline (video transcoding, attachment resolution) still says so.
  */
 
-import { SnapchainNodeClient, type FetchLike } from 'farcaster-node-client';
+import { type FetchLike, SnapchainNodeClient } from 'farcaster-node-client';
 
 import { classifyHostedRequest, type HostedRouteMatch } from './hostedRoutes';
 import { mediaUploadUrl } from './mediaUpload';
@@ -163,7 +163,10 @@ const parseRequest = async (
       : input instanceof URL
         ? input.toString()
         : input.url;
-  const method = (init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET'))
+  const method = (
+    init?.method ??
+    (typeof input === 'object' && 'method' in input ? input.method : 'GET')
+  )
     .toString()
     .toUpperCase();
 
@@ -199,12 +202,45 @@ const requestSignal = (
   return undefined;
 };
 
+export interface RequestLogEntry {
+  method: string;
+  path: string;
+  kind: HostedRouteMatch['kind'];
+  /** The status this adapter answered with, when it answered locally. */
+  status?: number;
+  /**
+   * A bounded preview of the request body for a request this adapter answered
+   * (or refused) itself — what a write asked for, e.g. the embeds a composer
+   * submitted. Only kept when the debug surface is on; never sent anywhere.
+   */
+  bodyPreview?: string;
+}
+
 export interface NodeBackedFetchHandle {
   fetch: typeof fetch;
   reads: NodeBackedReads;
   /** Every classification made, newest last — evidence for the parity doc. */
-  log: { method: string; path: string; kind: HostedRouteMatch['kind'] }[];
+  log: RequestLogEntry[];
 }
+
+/** How much of a write's body the debug log keeps. */
+export const REQUEST_BODY_PREVIEW_LIMIT = 2000;
+
+/**
+ * A probe surface for the page, off unless a build asks for it.
+ *
+ * `VITE_SNAPCHAIN_DEBUG=true` puts the classification log on
+ * `window.__nodeBackedRequests`, which is how `scripts/verify-media-upload.mjs`
+ * reads back the cast payload the composer built: the adapter answers writes
+ * inside the page, so no network trace can show what was submitted. Nothing
+ * leaves the tab, and a normal build never sets the flag.
+ */
+export const isRequestDebugEnabled = (
+  env: Record<string, unknown> = import.meta.env,
+): boolean =>
+  String(env.VITE_SNAPCHAIN_DEBUG ?? '')
+    .trim()
+    .toLowerCase() === 'true';
 
 /**
  * Build the adapter. The returned `fetch` has the platform's signature, so it
@@ -242,10 +278,12 @@ export const createNodeBackedFetch = ({
       timedOut = true;
       controller.abort();
     }, readTimeoutMs);
-    return (boundFetch(input, {
-      ...(init ?? {}),
-      signal: controller.signal,
-    }) as Promise<Response>)
+    return (
+      boundFetch(input, {
+        ...(init ?? {}),
+        signal: controller.signal,
+      }) as Promise<Response>
+    )
       .catch((error: unknown) => {
         // Our deadline, or the node client's identical one, cut the read.
         if (timedOut || init?.signal?.aborted) {
@@ -273,7 +311,13 @@ export const createNodeBackedFetch = ({
       ...(countCap ? { countCap } : {}),
     });
 
-  const log: NodeBackedFetchHandle['log'] = [];
+  const log: RequestLogEntry[] = [];
+  // Off unless a build sets VITE_SNAPCHAIN_DEBUG=true; see isRequestDebugEnabled.
+  const debugEnabled = isRequestDebugEnabled();
+  if (debugEnabled) {
+    (globalThis as unknown as Record<string, unknown>).__nodeBackedRequests =
+      log;
+  }
 
   /**
    * The media pipeline: the hosted API mints a signed CDN URL here, and we hand
@@ -289,12 +333,13 @@ export const createNodeBackedFetch = ({
       result: {
         url: mediaUploadTarget,
         optimisticImageId:
-          globalThis.crypto?.randomUUID?.() ?? `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          globalThis.crypto?.randomUUID?.() ??
+          `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       },
     });
 
   const answer = async (
-    { url, method, body }: ParsedRequest,
+    { url, method: _method, body }: ParsedRequest,
     route: HostedRouteMatch,
   ): Promise<Response> => {
     const searchParams = url.searchParams;
@@ -307,7 +352,12 @@ export const createNodeBackedFetch = ({
         return mediaAnswer();
 
       case 'local':
-        return localAnswer({ path: route.path, searchParams, body, reads: reader });
+        return localAnswer({
+          path: route.path,
+          searchParams,
+          body,
+          reads: reader,
+        });
 
       case 'node':
         break;
@@ -327,14 +377,19 @@ export const createNodeBackedFetch = ({
           if (!Number.isFinite(fid)) {
             return errorResponse(400, 'This read needs a fid.');
           }
-          return jsonResponse({ result: userProfile(await reader.readUser(fid), fid) });
+          return jsonResponse({
+            result: userProfile(await reader.readUser(fid), fid),
+          });
         }
 
         case '/v2/user-by-username': {
           const username = searchParams.get('username') ?? '';
           const user = await reader.readUserByUsername(username);
           if (!user) {
-            return errorResponse(404, `No account holds the handle ${username}.`);
+            return errorResponse(
+              404,
+              `No account holds the handle ${username}.`,
+            );
           }
           return jsonResponse({ result: userProfile(user, user.fid) });
         }
@@ -355,7 +410,9 @@ export const createNodeBackedFetch = ({
         case '/v2/thread-casts': {
           const castHash = searchParams.get('castHash') ?? '';
           const limit = Number(searchParams.get('limit') ?? 15);
-          return jsonResponse({ result: await reader.readThread({ castHash, limit }) });
+          return jsonResponse({
+            result: await reader.readThread({ castHash, limit }),
+          });
         }
 
         case '/v2/unseen':
@@ -368,7 +425,9 @@ export const createNodeBackedFetch = ({
 
         case '/v2/channel': {
           const key = searchParams.get('key') ?? '';
-          return jsonResponse({ result: { channel: channelFromKey(key, reader) } });
+          return jsonResponse({
+            result: { channel: channelFromKey(key, reader) },
+          });
         }
 
         case '/v2/feed-items': {
@@ -382,9 +441,15 @@ export const createNodeBackedFetch = ({
           const result = await reader.readFeed({
             feedKey: requestBody.feedKey ?? 'home',
             ...(requestBody.feedType ? { feedType: requestBody.feedType } : {}),
-            ...(requestBody.olderThan !== undefined ? { olderThan: requestBody.olderThan } : {}),
-            ...(requestBody.limit !== undefined ? { limit: requestBody.limit } : {}),
-            ...(requestBody.updateState !== undefined ? { updateState: requestBody.updateState } : {}),
+            ...(requestBody.olderThan !== undefined
+              ? { olderThan: requestBody.olderThan }
+              : {}),
+            ...(requestBody.limit !== undefined
+              ? { limit: requestBody.limit }
+              : {}),
+            ...(requestBody.updateState !== undefined
+              ? { updateState: requestBody.updateState }
+              : {}),
           });
           return jsonResponse({ result });
         }
@@ -409,7 +474,10 @@ export const createNodeBackedFetch = ({
         return errorResponse(502, nodeDidNotAnswerWithin(readTimeoutMs));
       }
       const message = error instanceof Error ? error.message : String(error);
-      return errorResponse(502, `Your node did not answer this read: ${message}`);
+      return errorResponse(
+        502,
+        `Your node did not answer this read: ${message}`,
+      );
     }
   };
 
@@ -448,7 +516,9 @@ export const createNodeBackedFetch = ({
     }
     return new Promise<Response>((resolve, reject) => {
       const onAbort = () => {
-        resolve(errorResponse(502, nodeDidNotAnswerWithin(Date.now() - startedAt)));
+        resolve(
+          errorResponse(502, nodeDidNotAnswerWithin(Date.now() - startedAt)),
+        );
       };
       signal.addEventListener('abort', onAbort, { once: true });
       work.then(
@@ -464,12 +534,42 @@ export const createNodeBackedFetch = ({
     });
   };
 
-  const nodeBackedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const nodeBackedFetch = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
     const startedAt = Date.now();
     const parsed = await parseRequest(input, init);
-    const route = classifyHostedRequest({ method: parsed.method, path: parsed.url.pathname });
-    log.push({ method: parsed.method, path: parsed.url.pathname, kind: route.kind });
-    return await raceClientDeadline(answer(parsed, route), requestSignal(input, init), startedAt);
+    const route = classifyHostedRequest({
+      method: parsed.method,
+      path: parsed.url.pathname,
+    });
+    const entry: RequestLogEntry = {
+      method: parsed.method,
+      path: parsed.url.pathname,
+      kind: route.kind,
+    };
+    log.push(entry);
+    const response = await raceClientDeadline(
+      answer(parsed, route),
+      requestSignal(input, init),
+      startedAt,
+    );
+    entry.status = response.status;
+    // What a request the adapter answered itself actually carried. The request
+    // never leaves the page, so this is the only way a probe can see the cast
+    // payload a composer built.
+    if (debugEnabled && route.kind !== 'node' && parsed.body !== undefined) {
+      try {
+        entry.bodyPreview = JSON.stringify(parsed.body).slice(
+          0,
+          REQUEST_BODY_PREVIEW_LIMIT,
+        );
+      } catch {
+        /* a body that cannot be serialised is not worth failing the request for */
+      }
+    }
+    return response;
   }) as typeof fetch;
 
   return { fetch: nodeBackedFetch, reads: reader, log };
@@ -516,7 +616,7 @@ const channelFromKey = (key: string, reader: NodeBackedReads) => ({
 
 const localAnswer = async ({
   path,
-  searchParams,
+  searchParams: _searchParams,
   body,
   reads,
 }: {
@@ -546,7 +646,8 @@ const localAnswer = async ({
     }
 
     case '/v2/feed-seen': {
-      const feeds = ((body ?? {}) as { feeds?: { feedKey?: string }[] }).feeds ?? [];
+      const feeds =
+        ((body ?? {}) as { feeds?: { feedKey?: string }[] }).feeds ?? [];
       const fid = reads.requireFid();
       for (const feed of feeds) {
         reads.markSeen(fid, feed.feedKey ?? 'home');

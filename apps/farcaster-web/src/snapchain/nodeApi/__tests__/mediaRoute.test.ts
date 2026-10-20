@@ -21,7 +21,9 @@ import {
 
 const MEDIA_ENV = { VITE_FIDDY_MEDIA_URL: 'http://localhost:3217' };
 
-const buildHarness = ({ mediaUploadUrl: injected }: { mediaUploadUrl?: string } = {}) => {
+const buildHarness = ({
+  mediaUploadUrl: injected,
+}: { mediaUploadUrl?: string } = {}) => {
   const nodeFetch = vi.fn(async () => new Response('{}', { status: 200 }));
   const handle = createNodeBackedFetch({
     nodeBaseUrl: 'http://node.test',
@@ -34,50 +36,62 @@ const buildHarness = ({ mediaUploadUrl: injected }: { mediaUploadUrl?: string } 
 
 describe('the media pipeline through the adapter', () => {
   it('answers the image upload URL with our own media host, not a 501', async () => {
-    const { fetch: nodeBackedFetch, nodeFetch, log } = buildHarness({
+    const {
+      fetch: nodeBackedFetch,
+      nodeFetch,
+      log,
+    } = buildHarness({
       mediaUploadUrl: 'http://localhost:3217/api/fiddy/media',
     });
 
-    const response = await nodeBackedFetch('https://farcaster.xyz/~api/v1/generate-image-upload-url', {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    const response = await nodeBackedFetch(
+      'https://farcaster.xyz/~api/v1/generate-image-upload-url',
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       result: { url: string; optimisticImageId: string };
     };
-    expect(body.result.url).toBe('http://localhost:3217/api/fiddy/media')
-    expect(body.result.optimisticImageId.length).toBeGreaterThan(0)
+    expect(body.result.url).toBe('http://localhost:3217/api/fiddy/media');
+    expect(body.result.optimisticImageId.length).toBeGreaterThan(0);
     // The composer decides which pipeline it is in from this URL alone.
-    expect(isOwnMediaUploadUrl(body.result.url, MEDIA_ENV)).toBe(true)
+    expect(isOwnMediaUploadUrl(body.result.url, MEDIA_ENV)).toBe(true);
     // Nothing was asked of the node: this answer is not a node read.
-    expect(nodeFetch).not.toHaveBeenCalled()
-    expect(log.at(-1)?.kind).toBe('media')
-  })
+    expect(nodeFetch).not.toHaveBeenCalled();
+    expect(log.at(-1)?.kind).toBe('media');
+  });
 
   it('mints a fresh id per request, and never the Cloudflare shape it replaced', async () => {
     const { fetch: nodeBackedFetch } = buildHarness({
       mediaUploadUrl: 'http://localhost:3217/api/fiddy/media',
     });
-    const ids = new Set<string>()
+    const ids = new Set<string>();
     for (let i = 0; i < 3; i += 1) {
       const body = (await (
-        await nodeBackedFetch('https://farcaster.xyz/~api/v1/generate-image-upload-url', {
-          method: 'POST',
-          body: JSON.stringify({}),
-        })
-      ).json()) as { result: { url: string; optimisticImageId: string } }
-      ids.add(body.result.optimisticImageId)
-      expect(body.result.url).not.toMatch(/imagedelivery\.net/)
+        await nodeBackedFetch(
+          'https://farcaster.xyz/~api/v1/generate-image-upload-url',
+          {
+            method: 'POST',
+            body: JSON.stringify({}),
+          },
+        )
+      ).json()) as { result: { url: string; optimisticImageId: string } };
+      ids.add(body.result.optimisticImageId);
+      expect(body.result.url).not.toMatch(/imagedelivery\.net/);
     }
-    expect(ids.size).toBe(3)
-  })
+    expect(ids.size).toBe(3);
+  });
 
   it('uses this build’s configured host when none is injected', () => {
-    expect(mediaUploadUrl(MEDIA_ENV)).toBe('http://localhost:3217/api/fiddy/media')
-    expect(mediaUploadUrl({})).toBe('https://fiddy.fun/api/fiddy/media')
-  })
+    expect(mediaUploadUrl(MEDIA_ENV)).toBe(
+      'http://localhost:3217/api/fiddy/media',
+    );
+    expect(mediaUploadUrl({})).toBe('https://fiddy.fun/api/fiddy/media');
+  });
 
   it('classifies the mint as media for every URL shape the client builds', () => {
     for (const url of [
@@ -85,17 +99,22 @@ describe('the media pipeline through the adapter', () => {
       '/~api/v1/generate-image-upload-url',
       'http://localhost:8080/v1/generate-image-upload-url',
     ]) {
-      expect(classifyHostedRequest({ method: 'POST', path: url })).toMatchObject({
+      expect(
+        classifyHostedRequest({ method: 'POST', path: url }),
+      ).toMatchObject({
         kind: 'media',
         path: '/v1/generate-image-upload-url',
-      })
+      });
     }
     // A GET on the same path is not the endpoint we know: it stays unclassified
     // rather than being answered with a media URL nobody asked for.
-    expect(classifyHostedRequest({ method: 'GET', path: '/v1/generate-image-upload-url' }).kind).toBe(
-      'hosted',
-    )
-  })
+    expect(
+      classifyHostedRequest({
+        method: 'GET',
+        path: '/v1/generate-image-upload-url',
+      }).kind,
+    ).toBe('hosted');
+  });
 
   it('still says whose job the rest of the media pipeline is', async () => {
     const expectations: [string, string, RegExp][] = [
@@ -104,14 +123,52 @@ describe('the media pipeline through the adapter', () => {
       ['GET', '/v1/uploaded-video', /Warpcast’s pipeline/],
       ['DELETE', '/v1/uploaded-video', /Warpcast’s pipeline/],
       ['PUT', '/v2/cast-attachments', /hosted indexer/],
-    ]
+    ];
 
     for (const [method, path, message] of expectations) {
-      const { fetch: nodeBackedFetch, nodeFetch } = buildHarness()
-      const response = await nodeBackedFetch(`https://farcaster.xyz/~api${path}`, { method })
-      expect(response.status).toBe(501)
-      expect(JSON.stringify(await response.json())).toMatch(message)
-      expect(nodeFetch).not.toHaveBeenCalled()
+      const { fetch: nodeBackedFetch, nodeFetch } = buildHarness();
+      const response = await nodeBackedFetch(
+        `https://farcaster.xyz/~api${path}`,
+        { method },
+      );
+      expect(response.status).toBe(501);
+      expect(JSON.stringify(await response.json())).toMatch(message);
+      expect(nodeFetch).not.toHaveBeenCalled();
     }
-  })
-})
+  });
+
+  it('keeps a write’s body readable for a probe only when the debug surface is on', async () => {
+    const embed = 'http://localhost:3217/api/fiddy/media/abc123.jpg';
+    vi.stubEnv('VITE_SNAPCHAIN_DEBUG', 'true');
+    const loud = buildHarness({
+      mediaUploadUrl: 'http://localhost:3217/api/fiddy/media',
+    });
+    await loud.fetch('https://farcaster.xyz/~api/v2/casts', {
+      method: 'POST',
+      body: JSON.stringify({ text: 'a photo', embeds: [embed] }),
+    });
+
+    const write = loud.log.at(-1);
+    expect(write).toMatchObject({
+      method: 'POST',
+      path: '/~api/v2/casts',
+      kind: 'hosted',
+      status: 501,
+    });
+    expect(write?.bodyPreview).toContain(embed);
+    // The probe's handle on the same array: adapter-answered writes never leave
+    // the page, so this is the only trace of what a composer submitted.
+    expect(
+      (globalThis as unknown as Record<string, unknown>).__nodeBackedRequests,
+    ).toBe(loud.log);
+
+    vi.stubEnv('VITE_SNAPCHAIN_DEBUG', '');
+    const quiet = buildHarness();
+    await quiet.fetch('https://farcaster.xyz/~api/v2/casts', {
+      method: 'POST',
+      body: JSON.stringify({ text: 'a photo', embeds: [embed] }),
+    });
+    expect(quiet.log.at(-1)?.bodyPreview).toBeUndefined();
+    vi.unstubAllEnvs();
+  });
+});
