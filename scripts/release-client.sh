@@ -90,7 +90,10 @@ echo "  node     ok ($NODE_URL)"
 # index.html (the theme bootstrap used to be one) or an inline on*= handler (the
 # font sheet used to have one) is inline script, and that CSP refuses it — in
 # the browser, on the live page, after the release. Refuse to ship it instead.
-node "$STAGE/base/apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs" "$APP/index.html" \
+# The checker is taken from the FROZEN tree, not the working clone: the rule
+# that governs a release is the rule at the commit being released.
+CHECK_SHELL="$STAGE/base/apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs"
+node "$CHECK_SHELL" "$APP/index.html" \
   || { echo "REFUSING to ship: the built shell needs script-src 'unsafe-inline'" >&2; exit 1; }
 
 say "4/8 assemble web/ + server/ + the preview it must keep"
@@ -163,7 +166,7 @@ curl -fsS https://fiddy.fun/ -o "$STAGE/served-index.html"
 # The served shell is what the browser runs, so check THAT file and not the one
 # the build produced: an inline <script> or an inline on*= handler in it is
 # refused by the host's script-src 'self'.
-node "$REPO/apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs" "$STAGE/served-index.html" \
+node "$CHECK_SHELL" "$STAGE/served-index.html" \
   || { rollback_on_failure; exit 1; }
 ASSET=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$STAGE/served-index.html" | head -1)
 echo "  index.html names $ASSET"
