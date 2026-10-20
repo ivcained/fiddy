@@ -26,6 +26,7 @@ export const useNodeClient = (): SnapchainNodeClient | undefined => {
   const baseUrl = useMemo(
     () => resolveEffectiveNodeBaseUrl(),
     // The chosen server is the only input that can change under a running tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [choice],
   );
   return useMemo(() => new SnapchainNodeClient({ baseUrl }), [baseUrl]);
