@@ -111,6 +111,22 @@ const readTiming = (page) =>
     };
   });
 
+/** The nav's own mark, and whether a Farcaster logo is still left in the shell. */
+const readNavMark = (page) =>
+  page.evaluate(() => {
+    const img = document.querySelector('.fiddy-nav-mark');
+    const rect = img ? img.getBoundingClientRect() : null;
+    return {
+      src: img ? img.getAttribute('src') : null,
+      size: rect
+        ? `${Math.round(rect.width)}x${Math.round(rect.height)}`
+        : null,
+      painted: Boolean(img && img.complete && img.naturalWidth > 0),
+      // The fork's mark was a #6A3CFF rounded square: any survivor is a leftover.
+      farcasterFill: Boolean(document.querySelector('[fill="#6A3CFF"]')),
+    };
+  });
+
 const webglAvailable = (page) =>
   page.evaluate(() => {
     try {
@@ -265,11 +281,42 @@ const run = async () => {
 
   await signIn(page);
   const webgl = await webglAvailable(page);
-  // The model is fetched on a timer after first paint; give it that much.
+
+  // How long the authed shell takes to paint at all, from a cold load of the
+  // feed. Reported, not asserted: that number belongs to the feed's own
+  // boundary, not to the mark, and it is here so the run says what a reader
+  // waits for before anything can be seen.
+  const shellStart = Date.now();
+  await page.goto(`${SERVER}/`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60000,
+  });
+  let homeShellMs = null;
+  for (let i = 0; i < 45; i += 1) {
+    if (await page.$('[data-fiddy="topbar"]')) {
+      homeShellMs = Date.now() - shellStart;
+      break;
+    }
+    await page.waitForTimeout(1000);
+  }
+  console.log(`the feed's shell painted after ${homeShellMs ?? '>45000'} ms`);
+  // ── 3-7. the mark and the picker, on the page the status pill opens ───────
+  // Measured here rather than on the feed: the same component, on a page whose
+  // first paint is not waiting on a follow graph.
+  await page.goto(`${SERVER}${SETTINGS_PATH}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60000,
+  });
+  await page.waitForSelector('[data-fiddy="topbar"]', { timeout: 60000 });
+  await page.waitForSelector('[data-fiddy="node-choice"]', { timeout: 60000 });
+  // The model is fetched on a timer after the shell is up; give it that much.
   await page.waitForTimeout(6000);
   const mark = await readMark(page);
   const timing = await readTiming(page);
+  const navMark = await readNavMark(page);
   await page.screenshot({ path: `${OUT}/fiddy-mark-topbar-1440.png` });
+  const picker = await readPicker(page);
+  await page.screenshot({ path: `${OUT}/node-picker-1440.png` });
 
   check(
     'the top bar carries the mark, at the design’s 36px',
@@ -300,15 +347,14 @@ const run = async () => {
     pageErrors.length === 0,
     pageErrors.join(' | ') || 'no page errors',
   );
-
-  // ── 4-7. the picker, on the page the pill opens ───────────────────────────
-  await page.goto(`${SERVER}${SETTINGS_PATH}`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 60000,
-  });
-  await page.waitForSelector('[data-fiddy="node-choice"]', { timeout: 60000 });
-  const picker = await readPicker(page);
-  await page.screenshot({ path: `${OUT}/node-picker-1440.png` });
+  check(
+    'the nav carries the same baby, and no Farcaster logo is left in the shell',
+    navMark.painted &&
+      navMark.src === '/fiddy-mark-poster.png' &&
+      navMark.size === '24x24' &&
+      !navMark.farcasterFill,
+    JSON.stringify(navMark),
+  );
 
   check(
     'the picker is on the page the status pill opens',
@@ -501,6 +547,11 @@ const run = async () => {
     }
   });
   await signIn(stillPage);
+  await stillPage.goto(`${SERVER}${SETTINGS_PATH}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60000,
+  });
+  await stillPage.waitForSelector('[data-fiddy="topbar"]', { timeout: 60000 });
   await stillPage.waitForTimeout(6000);
   const stillMark = await readMark(stillPage);
   await stillPage.screenshot({
