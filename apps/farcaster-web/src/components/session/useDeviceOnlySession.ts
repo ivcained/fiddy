@@ -17,8 +17,9 @@ import { useCachedOnboardingState } from 'farcaster-client-hooks';
 import { localApiEnabled } from '~/constants/api';
 import { useAuth } from '~/contexts/AuthProvider';
 import { isLocalSessionToken } from '~/lib/siwfSession';
+import { isNodeConfigured } from '~/snapchain/nodeChoice';
 import { isNodeBackedClientEnabled } from '~/snapchain/nodeApi/nodeBackedClientFlag';
-import { isNodeExplicitlyConfigured } from '~/snapchain/nodeEnv';
+import { useActiveNodeChoice } from '~/snapchain/useNodeChoice';
 
 type DeviceOnlySession =
   | { isDeviceOnly: false }
@@ -32,6 +33,11 @@ type DeviceOnlySession =
 const useDeviceOnlySession = (): DeviceOnlySession => {
   const { authToken } = useAuth();
   const user = useCachedOnboardingState().result.state.user;
+
+  // Subscribe to the chosen server: it is restored from storage a tick after
+  // mount, and it can be changed on the Advanced screen, either of which
+  // decides this question differently — without a reload.
+  useActiveNodeChoice();
 
   // A local token is the marker. `localApiEnabled` is the exception that keeps
   // the dev escape hatch usable: with the mock API on, this session IS served,
@@ -51,11 +57,12 @@ const useDeviceOnlySession = (): DeviceOnlySession => {
    * configured node, so the same session CAN run the client — and sending it to
    * a landing that says otherwise is now the dishonest answer.
    *
-   * Two conditions, deliberately: the adapter on AND a node actually named.
-   * Adapter-but-no-node has nowhere to read from, and the landing is then still
+   * Two conditions, deliberately: the adapter on AND a server actually named —
+   * by this build's configuration, or by the reader on the Advanced screen.
+   * Adapter-but-nowhere-to-read-from has no feed, and the landing is then still
    * the truth.
    */
-  if (isNodeBackedClientEnabled() && isNodeExplicitlyConfigured()) {
+  if (isNodeBackedClientEnabled() && isNodeConfigured()) {
     return { isDeviceOnly: false };
   }
 

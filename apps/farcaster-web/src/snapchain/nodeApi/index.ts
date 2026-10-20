@@ -10,6 +10,7 @@
  *   reads.ts          the node-backed readers (feed, profile, thread, …)
  *   fromNode.ts       node messages → the shapes the fork's components read
  *   nodeBackedFetch.ts  the `fetch` that ties the three together
+ *   mediaUpload.ts    the media pipeline (bytes → our own host, not Warpcast's CDN)
  *
  * Writes (posting, reactions, follows) are already node-backed elsewhere:
  * `~/snapchain/useNodeClient` + the gasless app-key flow in
@@ -18,6 +19,7 @@
 
 export * from './fromNode';
 export * from './hostedRoutes';
+export * from './mediaUpload';
 export * from './nodeBackedClientFlag';
 export * from './nodeBackedFetch';
 export * from './nodeCannotAnswer';

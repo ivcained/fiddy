@@ -4,14 +4,28 @@ import {
   OnError,
   OnFetchStart,
 } from 'farcaster-client-data';
-import { FarcasterApiClientProvider, useCachedOnboardingState } from 'farcaster-client-hooks';
-import React, { FC, memo, ReactNode, useCallback, useMemo, useRef } from 'react';
+import {
+  FarcasterApiClientProvider,
+  useCachedOnboardingState,
+} from 'farcaster-client-hooks';
+import React, {
+  FC,
+  memo,
+  ReactNode,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 
 import { baseApiUrl, localApiEnabled, wsUrl } from '~/constants/api';
 import { isDev } from '~/constants/env';
 import { useRecentFetch } from '~/contexts/RecentFetchProvider';
-import { resolveNodeBaseUrl } from '~/snapchain/nodeEnv';
-import { createNodeBackedFetch, isNodeBackedClientEnabled } from '~/snapchain/nodeApi';
+import { resolveEffectiveNodeBaseUrl } from '~/snapchain/nodeChoice';
+import {
+  createNodeBackedFetch,
+  isNodeBackedClientEnabled,
+} from '~/snapchain/nodeApi';
+import { useNodeChoice } from '~/snapchain/useNodeChoice';
 import { Analytics } from '~/utils/analyticsUtils';
 import { getPersistedDeviceId } from '~/utils/deviceIdUtils';
 
@@ -48,6 +62,12 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
     const signedInFidRef = useRef<number | undefined>(signedInFid);
     signedInFidRef.current = signedInFid;
 
+    // The server this reader chose (a public one, or their own) is restored
+    // here, once, and every node-backed surface below reads it from the same
+    // store — the reads adapter, the writes client and the status pill can
+    // never disagree about where answers came from.
+    const nodeChoice = useNodeChoice(signedInFid);
+
     /**
      * The node-backed read adapter.
      *
@@ -66,11 +86,14 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         return undefined;
       }
       return createNodeBackedFetch({
-        nodeBaseUrl: resolveNodeBaseUrl(),
+        nodeBaseUrl: resolveEffectiveNodeBaseUrl(),
         getSignedInFid: () => signedInFidRef.current,
         fetchImpl: fetch,
       }).fetch;
-    }, []);
+      // The address is the only input that can change under a running tab, and
+      // it has to rebuild the adapter: the alternative is a feed read from a
+      // server the reader has already replaced.
+    }, [nodeChoice]);
 
     const onFetchStart: OnFetchStart = useCallback(() => {
       trackFetch();

@@ -23,11 +23,20 @@
  * - It never falls through to `farcaster.xyz` when the node fails. Falling
  *   through would silently mix two data sources and hand the user someone
  *   else's session requirement half way through a page.
+ *
+ * THE ONE WRITE IT ANSWERS
+ *
+ * `POST /v1/generate-image-upload-url` is the media pipeline, not a read. The
+ * answer names our own media host (`mediaUploadUrl`, see `mediaUpload.ts`),
+ * which really stores the bytes; the composer then uploads to it and keeps the
+ * URL it gets back. Everything else about media that belongs to Warpcast's
+ * pipeline (video transcoding, attachment resolution) still says so.
  */
 
 import { SnapchainNodeClient, type FetchLike } from 'farcaster-node-client';
 
 import { classifyHostedRequest, type HostedRouteMatch } from './hostedRoutes';
+import { mediaUploadUrl } from './mediaUpload';
 import { NodeBackedReads, NodeCannotAnswerError } from './reads';
 
 export interface NodeBackedFetchOptions {
@@ -41,7 +50,62 @@ export interface NodeBackedFetchOptions {
   reads?: NodeBackedReads;
   /** Cap on paged counts. */
   countCap?: number;
+  /** How long one read to the node may take. Defaults to NODE_READ_TIMEOUT_MS. */
+  readTimeoutMs?: number;
+  /**
+   * Where our own media host takes uploads. Defaults to this build's media
+   * host (`VITE_FIDDY_MEDIA_URL`, else https://fiddy.fun); injectable so a test
+   * can point at a local instance without an env.
+   */
+  mediaUploadUrl?: string;
 }
+
+/**
+ * How long a single read to your node may take before the adapter stops waiting.
+ *
+ * MEASURED (2026-10-20, a live public read node, exactly the feed's fan-out: 60
+ * accounts × `pageSize=10` at concurrency 12): p50 **258 ms**, p90 759 ms,
+ * p95 **773 ms**, p99 986 ms, max **986 ms**; a cold first read 819 ms. Ten
+ * seconds is an order of magnitude above the worst healthy read, so a read that
+ * has not been answered in ten seconds is a read the node is not answering —
+ * while still leaving room for a slow-but-alive node.
+ *
+ * This is the *second* deadline, not the first: the client already times every
+ * endpoint out itself (`DEFAULT_TIMEOUT_FEED_ITEMS` = 5 s, threads/notifications
+ * 10 s — see `farcaster-client-data`'s `constants/endpointTimeouts`) and passes
+ * that `AbortSignal` in. This one only covers reads the client gives no deadline
+ * for, and any read still in flight after the client has stopped waiting.
+ */
+export const NODE_READ_TIMEOUT_MS = 10_000;
+
+/** The sentence a read that ran out of time is answered with. */
+export const nodeDidNotAnswerWithin = (ms: number): string => {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  return `Your node did not answer this read within ${seconds} s.`;
+};
+
+/** A read the adapter stopped waiting for. */
+export class NodeReadTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`no reply within ${timeoutMs}ms`);
+    this.name = 'NodeReadTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * Is this failure the read's deadline running out?
+ *
+ * The node client answers a failed fetch with `NodeUnreachableError`
+ * (`packages/farcaster-node-client/src/errors.ts`), which folds the cause's
+ * message into its own and does not keep the cause object — so the timeout is
+ * also recognised by the sentence this file writes, not only by its type.
+ */
+export const isNodeReadTimeout = (error: unknown): boolean =>
+  error instanceof NodeReadTimeoutError ||
+  (error instanceof Error && /no reply within \d+ms/.test(error.message));
 
 /** The hosted API's error envelope. */
 const errorResponse = (status: number, message: string): Response =>
@@ -116,6 +180,25 @@ const parseRequest = async (
   return { url: new URL(rawUrl, 'http://localhost'), method, body };
 };
 
+/**
+ * The caller's own deadline, whether it was handed in as `init.signal` or on a
+ * `Request` object. The fork's client always uses the `init` form; a `Request`
+ * is accepted too because `fetch` accepts one and dropping its signal here would
+ * silently restore the old "never settles" behaviour for that caller.
+ */
+const requestSignal = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): AbortSignal | undefined => {
+  if (init?.signal) {
+    return init.signal;
+  }
+  if (typeof input === 'object' && input !== null && 'signal' in input) {
+    return (input as Request).signal;
+  }
+  return undefined;
+};
+
 export interface NodeBackedFetchHandle {
   fetch: typeof fetch;
   reads: NodeBackedReads;
@@ -133,6 +216,8 @@ export const createNodeBackedFetch = ({
   fetchImpl,
   reads,
   countCap,
+  readTimeoutMs = NODE_READ_TIMEOUT_MS,
+  mediaUploadUrl: mediaUploadUrlOption,
 }: NodeBackedFetchOptions): NodeBackedFetchHandle => {
   const nodeFetch = fetchImpl ?? fetch;
   // `window.fetch` has to be called with `this === window`: passing the bare
@@ -145,24 +230,68 @@ export const createNodeBackedFetch = ({
   const boundFetch = (nodeFetch as (...args: unknown[]) => unknown).bind(
     globalThis,
   ) as typeof fetch;
+  // Every read to the node goes out under this deadline, so a node that never
+  // answers fails as a read instead of holding a socket open: the abort reaches
+  // the fetch, and the failure is named as a timeout rather than as whatever
+  // the engine calls an abort. The node client's own timeout is set to the same
+  // number below, so a read has one deadline, from one place.
+  const readFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const controller = new AbortController();
+    let timedOut = false;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, readTimeoutMs);
+    return (boundFetch(input, {
+      ...(init ?? {}),
+      signal: controller.signal,
+    }) as Promise<Response>)
+      .catch((error: unknown) => {
+        // Our deadline, or the node client's identical one, cut the read.
+        if (timedOut || init?.signal?.aborted) {
+          throw new NodeReadTimeoutError(readTimeoutMs);
+        }
+        throw error;
+      })
+      .finally(() => clearTimeout(deadline));
+  }) as typeof fetch;
   // The node client takes its own narrow fetch signature (a string URL and a
   // `Uint8Array` body for protobuf writes). A platform `fetch` satisfies it at
   // runtime; the cast is the shape difference, not a behaviour one.
   const nodeClient = new SnapchainNodeClient({
     baseUrl: nodeBaseUrl,
-    fetch: boundFetch as unknown as FetchLike,
+    fetch: readFetch as unknown as FetchLike,
+    timeoutMs: readTimeoutMs,
   });
   const reader =
     reads ??
     new NodeBackedReads({
       node: nodeClient,
       nodeBaseUrl,
-      fetchImpl: boundFetch,
+      fetchImpl: readFetch,
       getSignedInFid,
       ...(countCap ? { countCap } : {}),
     });
 
   const log: NodeBackedFetchHandle['log'] = [];
+
+  /**
+   * The media pipeline: the hosted API mints a signed CDN URL here, and we hand
+   * back our own upload endpoint instead. The shape is kept (`url` +
+   * `optimisticImageId`) because that is what `useFetchImageUploadUrl` and the
+   * composer read; the id is a fresh random value that our own path never uses -
+   * the composer recognises this URL as ours and reads the final URL back from
+   * the upload response (`mediaUpload.ts`).
+   */
+  const mediaUploadTarget = mediaUploadUrlOption ?? mediaUploadUrl();
+  const mediaAnswer = (): Response =>
+    jsonResponse({
+      result: {
+        url: mediaUploadTarget,
+        optimisticImageId:
+          globalThis.crypto?.randomUUID?.() ?? `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      },
+    });
 
   const answer = async (
     { url, method, body }: ParsedRequest,
@@ -173,6 +302,9 @@ export const createNodeBackedFetch = ({
     switch (route.kind) {
       case 'hosted':
         return errorResponse(501, route.why);
+
+      case 'media':
+        return mediaAnswer();
 
       case 'local':
         return localAnswer({ path: route.path, searchParams, body, reads: reader });
@@ -270,16 +402,74 @@ export const createNodeBackedFetch = ({
         // an error branch can show it as written.
         return errorResponse(501, error.message);
       }
+      if (isNodeReadTimeout(error)) {
+        // A node that never answers is the one failure the generic 502 sentence
+        // reads badly for: say how long the wait was, because that is the fact
+        // the user needs (the node is not slow, it is silent).
+        return errorResponse(502, nodeDidNotAnswerWithin(readTimeoutMs));
+      }
       const message = error instanceof Error ? error.message : String(error);
       return errorResponse(502, `Your node did not answer this read: ${message}`);
     }
   };
 
+  /**
+   * Wait for `work`, but stop when the caller's own deadline fires.
+   *
+   * The fork's client times every endpoint out itself: it builds an
+   * `AbortController`, hands the signal to the fetch it was given, and aborts at
+   * the endpoint's configured timeout (`DEFAULT_TIMEOUT_FEED_ITEMS` = 5 s, and
+   * 10 s for threads and notifications — `farcaster-client-data`'s
+   * `constants/endpointTimeouts`). MEASURED, at the state of this card: that
+   * abort did nothing at all, because this adapter never looked at
+   * `init.signal` — the client's own promise never settled, no request ever
+   * failed, and the feed stayed in its loading state for as long as the page was
+   * open. Honouring it is what makes the client's deadline real.
+   *
+   * The read itself is not cancelled mid-flight: it is already bounded by the
+   * per-read deadline above, and its failure (or its success) is simply no
+   * longer what the caller is waiting for.
+   */
+  const raceClientDeadline = (
+    work: Promise<Response>,
+    signal: AbortSignal | undefined,
+    startedAt: number,
+  ): Promise<Response> => {
+    if (!signal) {
+      return work;
+    }
+    if (signal.aborted) {
+      // Nobody is waiting for this read any more, so its outcome is only
+      // interesting to the log; it must not surface as an unhandled rejection.
+      void work.catch(() => undefined);
+      return Promise.resolve(
+        errorResponse(502, nodeDidNotAnswerWithin(Date.now() - startedAt)),
+      );
+    }
+    return new Promise<Response>((resolve, reject) => {
+      const onAbort = () => {
+        resolve(errorResponse(502, nodeDidNotAnswerWithin(Date.now() - startedAt)));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      work.then(
+        (response) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(response);
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+      );
+    });
+  };
+
   const nodeBackedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const startedAt = Date.now();
     const parsed = await parseRequest(input, init);
     const route = classifyHostedRequest({ method: parsed.method, path: parsed.url.pathname });
     log.push({ method: parsed.method, path: parsed.url.pathname, kind: route.kind });
-    return await answer(parsed, route);
+    return await raceClientDeadline(answer(parsed, route), requestSignal(input, init), startedAt);
   }) as typeof fetch;
 
   return { fetch: nodeBackedFetch, reads: reader, log };

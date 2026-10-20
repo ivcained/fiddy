@@ -15,6 +15,11 @@
  *   - `local`     — it was never Farcaster's data: it is this device's own
  *                   state (preferences, blocklists) or a protocol constant.
  *                   Answering it locally is the truthful answer.
+ *   - `media`     — it is the media pipeline. The hosted API mints a signed
+ *                   Cloudflare upload URL here; our own media host
+ *                   (`POST /api/fiddy/media`, see `mediaUpload.ts`) takes the
+ *                   bytes instead. Nothing is invented: the answer names a real
+ *                   endpoint that really stores the file.
  *   - `hosted`    — your node cannot answer it: ranking, search, direct
  *                   messages, channel directories and the other indexer
  *                   features are Warpcast's own. The request fails with a
@@ -31,6 +36,7 @@
 export type HostedRoutePolicy =
   | { kind: 'node'; why: string }
   | { kind: 'local'; why: string }
+  | { kind: 'media'; why: string }
   | { kind: 'hosted'; why: string };
 
 export type HostedRouteMatch = HostedRoutePolicy & {
@@ -136,11 +142,44 @@ const LOCAL_ROUTES: { method: string; path: string; why: string }[] = [
   },
 ];
 
+const MEDIA_ROUTES: { method: string; path: string; why: string }[] = [
+  {
+    method: 'POST',
+    path: '/v1/generate-image-upload-url',
+    why: 'the media pipeline is ours now: the bytes go to POST /api/fiddy/media, not to Warpcast’s CDN',
+  },
+];
+
 const HOSTED_ROUTES: { method: string; path: string; why: string }[] = [
   {
     method: 'GET',
     path: '/v2/feeds',
     why: 'feed summaries are the hosted indexer’s own lists',
+  },
+  {
+    method: 'PUT',
+    path: '/v2/cast-attachments',
+    why: 'attachments are resolved by the hosted indexer (image sizes, link previews)',
+  },
+  {
+    method: 'POST',
+    path: '/v1/prepare-video-upload',
+    why: 'a clip needs Warpcast’s own transcoding pipeline; we host images and raw clips only',
+  },
+  {
+    method: 'POST',
+    path: '/v1/upload-video-with-tus',
+    why: 'that resumable protocol speaks to Warpcast’s Cloudflare bucket, not to ours',
+  },
+  {
+    method: 'GET',
+    path: '/v1/uploaded-video',
+    why: 'the state of a video lives in Warpcast’s pipeline',
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/uploaded-video',
+    why: 'abandoning a video is a call to Warpcast’s pipeline',
   },
   {
     method: 'GET',
@@ -244,6 +283,11 @@ export const classifyHostedRequest = ({
     return { kind: 'local', path: endpoint, method: normalizedMethod, why: local.why };
   }
 
+  const media = find(MEDIA_ROUTES, normalizedMethod, endpoint);
+  if (media) {
+    return { kind: 'media', path: endpoint, method: normalizedMethod, why: media.why };
+  }
+
   const hosted = find(HOSTED_ROUTES, normalizedMethod, endpoint);
   if (hosted) {
     return { kind: 'hosted', path: endpoint, method: normalizedMethod, why: hosted.why };
@@ -270,4 +314,5 @@ export const classifyHostedRequest = ({
 
 export const nodeBackedRoutes = NODE_ROUTES.map((entry) => `${entry.method} ${entry.path}`);
 export const localRoutes = LOCAL_ROUTES.map((entry) => `${entry.method} ${entry.path}`);
+export const mediaRoutes = MEDIA_ROUTES.map((entry) => `${entry.method} ${entry.path}`);
 export const hostedOnlyRoutes = HOSTED_ROUTES.map((entry) => `${entry.method} ${entry.path}`);

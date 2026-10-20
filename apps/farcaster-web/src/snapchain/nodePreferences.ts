@@ -1,8 +1,10 @@
 /**
  * View-layer preferences for the node-backed surfaces, stored per FID.
  *
- * Two things live here, and neither is a protocol claim:
+ * Three things live here, and none is a protocol claim:
  *
+ *   - which server this reader chose to read and write through (a public one,
+ *     or the one they run),
  *   - the include/exclude client filter policy (which clients' casts to show),
  *   - the labels you give other clients, keyed by the app FID that requested
  *     their key. Labels are yours: this client never invents a name for an app
@@ -15,9 +17,11 @@ import { deleteItem, getItem, setItem } from '~/utils/storageUtils';
 
 const FILTER_POLICY_NAMESPACE = 'snapchain_filter_policy';
 const CLIENT_LABELS_NAMESPACE = 'snapchain_client_labels';
+const NODE_CHOICE_NAMESPACE = 'snapchain_node_choice';
 
 const policyKey = (fid: number): string => `${FILTER_POLICY_NAMESPACE}_${fid}`;
 const labelsKey = (fid: number): string => `${CLIENT_LABELS_NAMESPACE}_${fid}`;
+const choiceKey = (fid: number): string => `${NODE_CHOICE_NAMESPACE}_${fid}`;
 
 export const DEFAULT_FILTER_POLICY: ClientFilterPolicy = {
   mode: 'all',
@@ -131,3 +135,65 @@ export const toKnownClients = (
   }
   return known;
 };
+
+/**
+ * Which server this reader reads and writes through.
+ *
+ * `public` is a server somebody else runs and keeps open to read from;
+ * `own` is one the reader runs. The distinction is not cosmetic: it is what
+ * lets the status pill say which of the two answered, instead of implying the
+ * reader's own machine when a stranger's server did the work.
+ */
+export type NodeChoiceKind = 'public' | 'own';
+
+export interface NodeChoice {
+  kind: NodeChoiceKind;
+  /** Absolute http(s) address, as the reader gave it. */
+  url: string;
+}
+
+/**
+ * A stored address is user-editable and survives upgrades, so it is checked
+ * before it is trusted: a choice that is not a usable http(s) address is no
+ * choice at all, and the client falls back rather than reading from nowhere.
+ */
+export const isNodeChoice = (value: unknown): value is NodeChoice => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as Partial<NodeChoice>;
+  if (candidate.kind !== 'public' && candidate.kind !== 'own') {
+    return false;
+  }
+  if (typeof candidate.url !== 'string' || candidate.url.trim().length === 0) {
+    return false;
+  }
+  try {
+    const parsed = new URL(candidate.url.trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+/** The stored choice for a FID, or null when the reader has not chosen one. */
+export const loadNodeChoice = async (
+  fid: number,
+): Promise<NodeChoice | null> => {
+  const stored = await getItem<NodeChoice | null>({
+    key: choiceKey(fid),
+    fallback: null,
+  });
+  return isNodeChoice(stored) ? stored : null;
+};
+
+export const saveNodeChoice = async (
+  fid: number,
+  choice: NodeChoice,
+): Promise<void> => {
+  await setItem({ key: choiceKey(fid), value: choice });
+};
+
+/** Back to "nothing of yours configured": Fiddy serves the feed again. */
+export const clearNodeChoice = (fid: number): Promise<void> =>
+  deleteItem(choiceKey(fid));

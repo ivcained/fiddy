@@ -10,21 +10,25 @@
 import { type NodeHealth, SnapchainNodeClient } from 'farcaster-node-client';
 import React, { useCallback, useMemo, useState } from 'react';
 
-import { resolveNodeBaseUrl } from './nodeEnv';
+import { resolveEffectiveNodeBaseUrl } from './nodeChoice';
+import { useActiveNodeChoice } from './useNodeChoice';
 
 /**
  * Memoized SnapchainNodeClient instance.
- * Uses the resolved base URL (proxy path or direct URL).
+ *
+ * The address is resolved through the reader's chosen server (public, or the
+ * one they run) and re-resolved when that choice changes, so switching it on
+ * the Advanced screen takes effect without a reload — and every surface that
+ * writes through this client follows the same server the reader picked.
  */
 export const useNodeClient = (): SnapchainNodeClient | undefined => {
-  const baseUrl = useMemo(() => resolveNodeBaseUrl(), []);
-  return useMemo(() => {
-    // Return undefined during SSR or if no URL is configured
-    if (!baseUrl) {
-      return undefined;
-    }
-    return new SnapchainNodeClient({ baseUrl });
-  }, [baseUrl]);
+  const choice = useActiveNodeChoice();
+  const baseUrl = useMemo(
+    () => resolveEffectiveNodeBaseUrl(),
+    // The chosen server is the only input that can change under a running tab.
+    [choice],
+  );
+  return useMemo(() => new SnapchainNodeClient({ baseUrl }), [baseUrl]);
 };
 
 /**

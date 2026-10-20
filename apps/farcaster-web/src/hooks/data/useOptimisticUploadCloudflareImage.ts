@@ -4,6 +4,11 @@ import {
 } from 'farcaster-client-hooks';
 import { useCallback } from 'react';
 
+import {
+  isOwnMediaUploadUrl,
+  uploadMedia,
+} from '~/snapchain/nodeApi/mediaUpload';
+
 const IMAGE_EMBED_MAX_DIMENSIONS = {
   // We will never render an image above this resolution on any of our clients.
   // Opportunity for another client around image being centered. (NFT feeds etc.)
@@ -188,6 +193,46 @@ const useOptimisticUploadCloudflareImage = () => {
       }
 
       const imageUploadUrl = fetchImageUploadUrlResponse.url;
+
+      // OUR OWN MEDIA HOST
+      //
+      // The hosted API hands out a Cloudflare CDN URL and the composer guesses
+      // the final image URL from `optimisticImageId` before the bytes leave the
+      // browser. Our own host names a file after its content hash, so the URL
+      // cannot be guessed - it is read back from the upload. The upload is
+      // therefore awaited here, and the embed is registered with the URL the
+      // server confirmed. The local preview still shows immediately (the
+      // composer's own optimistic media embeds paint it), so nothing looks
+      // slower than it is: only the canonical URL waits.
+      if (isOwnMediaUploadUrl(imageUploadUrl)) {
+        const finalFileToUpload =
+          file.type.indexOf('gif') === -1
+            ? await compressImage({ file })
+            : file;
+
+        const uploaded = await uploadMedia({
+          file: finalFileToUpload,
+          uploadUrl: imageUploadUrl,
+        });
+
+        return {
+          version: 'v2',
+          previewUrl: URL.createObjectURL(file),
+          imageUrl: uploaded.url,
+          uploadPromise: Promise.resolve(
+            new Response(JSON.stringify({ ok: true, url: uploaded.url }), {
+              status: 201,
+              headers: { 'content-type': 'application/json' },
+            }),
+          ),
+        } as {
+          version: 'v2';
+          previewUrl: string;
+          imageUrl: string;
+          uploadPromise: Promise<Response>;
+        };
+      }
+
       const imageUrl = `${WARPCAST_CLOUDFLARE_CDN_PREFIX}/${fetchImageUploadUrlResponse.optimisticImageId}/original`;
 
       const uploadPromise = new Promise<Response>((resolve, reject) => {
