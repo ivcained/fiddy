@@ -58,6 +58,14 @@ export interface NodeBackedFetchOptions {
    * can point at a local instance without an env.
    */
   mediaUploadUrl?: string;
+  /**
+   * Where this adapter appends what it classified. Defaults to an array of its
+   * own. The provider layer passes one shared sink here so that whichever layer
+   * answered a request — the node adapter, or the provider seam above it — the
+   * page's debug surface reads one continuous log (`scripts/verify-media-upload.mjs`
+   * depends on that: the cast payload is only visible there).
+   */
+  log?: RequestLogEntry[];
 }
 
 /**
@@ -243,6 +251,35 @@ export const isRequestDebugEnabled = (
     .toLowerCase() === 'true';
 
 /**
+ * The media pipeline's answer, in one place.
+ *
+ * The hosted API mints a signed CDN upload URL here (`POST
+ * /v1/generate-image-upload-url`); we hand back our own upload endpoint
+ * instead. The shape is kept (`url` + `optimisticImageId`) because that is what
+ * `useFetchImageUploadUrl` and the composer read; the id is a fresh random
+ * value that our own path never uses — the composer recognises this URL as ours
+ * and reads the final URL back from the upload response (`mediaUpload.ts`).
+ *
+ * Exported because two layers can be the one that answers: the node adapter's
+ * `case 'media'`, and the provider seam above it (`providers/providerFetch`),
+ * which is where a request lands when the reader's live server is not a node.
+ * The media pipeline belongs to neither: the same bytes must go to the same
+ * host whichever machine answers today's feed, so both layers must give exactly
+ * this answer, and a test can assert it without a page.
+ */
+export const mediaUploadAnswer = (
+  target: string = mediaUploadUrl(),
+): Response =>
+  jsonResponse({
+    result: {
+      url: target,
+      optimisticImageId:
+        globalThis.crypto?.randomUUID?.() ??
+        `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    },
+  });
+
+/**
  * Build the adapter. The returned `fetch` has the platform's signature, so it
  * drops straight into the client's options.
  */
@@ -254,6 +291,7 @@ export const createNodeBackedFetch = ({
   countCap,
   readTimeoutMs = NODE_READ_TIMEOUT_MS,
   mediaUploadUrl: mediaUploadUrlOption,
+  log: logOption,
 }: NodeBackedFetchOptions): NodeBackedFetchHandle => {
   const nodeFetch = fetchImpl ?? fetch;
   // `window.fetch` has to be called with `this === window`: passing the bare
@@ -311,7 +349,7 @@ export const createNodeBackedFetch = ({
       ...(countCap ? { countCap } : {}),
     });
 
-  const log: RequestLogEntry[] = [];
+  const log: RequestLogEntry[] = logOption ?? [];
   // Off unless a build sets VITE_SNAPCHAIN_DEBUG=true; see isRequestDebugEnabled.
   const debugEnabled = isRequestDebugEnabled();
   if (debugEnabled) {
@@ -319,24 +357,8 @@ export const createNodeBackedFetch = ({
       log;
   }
 
-  /**
-   * The media pipeline: the hosted API mints a signed CDN URL here, and we hand
-   * back our own upload endpoint instead. The shape is kept (`url` +
-   * `optimisticImageId`) because that is what `useFetchImageUploadUrl` and the
-   * composer read; the id is a fresh random value that our own path never uses -
-   * the composer recognises this URL as ours and reads the final URL back from
-   * the upload response (`mediaUpload.ts`).
-   */
   const mediaUploadTarget = mediaUploadUrlOption ?? mediaUploadUrl();
-  const mediaAnswer = (): Response =>
-    jsonResponse({
-      result: {
-        url: mediaUploadTarget,
-        optimisticImageId:
-          globalThis.crypto?.randomUUID?.() ??
-          `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      },
-    });
+  const mediaAnswer = (): Response => mediaUploadAnswer(mediaUploadTarget);
 
   const answer = async (
     { url, method: _method, body }: ParsedRequest,
@@ -558,8 +580,15 @@ export const createNodeBackedFetch = ({
     entry.status = response.status;
     // What a request the adapter answered itself actually carried. The request
     // never leaves the page, so this is the only way a probe can see the cast
-    // payload a composer built.
-    if (debugEnabled && route.kind !== 'node' && parsed.body !== undefined) {
+    // payload a composer built. A write is kept even when the node is the one
+    // asked: what a write was going to submit is the question a probe has, and
+    // reading it costs nothing when the debug surface is on.
+    const isWrite = parsed.method !== 'GET' && parsed.method !== 'HEAD';
+    if (
+      debugEnabled &&
+      parsed.body !== undefined &&
+      (route.kind !== 'node' || isWrite)
+    ) {
       try {
         entry.bodyPreview = JSON.stringify(parsed.body).slice(
           0,

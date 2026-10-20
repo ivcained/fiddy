@@ -12,6 +12,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  mediaUploadAnswer,
+  type RequestLogEntry,
+} from '~/snapchain/nodeApi/nodeBackedFetch';
+import {
   farcasterPublicProvider,
   neynarProvider,
   ownNodeProvider,
@@ -245,5 +249,112 @@ describe('createProviderBackedFetch: Neynar', () => {
     };
     expect(body.result.user.username).toBe('dwr');
     expect(handle.log[0]!.kind).toBe('neynar');
+  });
+});
+
+/**
+ * The media pipeline, where the user-visible failure was.
+ *
+ * MEASURED (2026-10-21, headless Chrome, the real composer): when the failover
+ * engine's live provider was not a node, `POST /v1/generate-image-upload-url`
+ * hit that provider's write guard and answered 501 — so the `media` route in the
+ * node adapter was never reached and "post a photo" failed exactly as it did
+ * before that route existed. These tests hold the answer where it can no longer
+ * depend on which provider happens to be live.
+ */
+describe('createProviderBackedFetch: the media pipeline', () => {
+  const MINT = 'https://farcaster.xyz/~api/v1/generate-image-upload-url';
+
+  it('mints OUR upload URL when the live server is one that takes no writes', async () => {
+    vi.stubEnv('VITE_FIDDY_MEDIA_URL', 'https://media.test');
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(url);
+      return jsonResponse({});
+    }) as unknown as typeof fetch;
+    const requestLog: RequestLogEntry[] = [];
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => farcasterPublicProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl,
+      requestLog,
+    });
+
+    const response = await handle.fetch(MINT, { method: 'POST' });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      result: { url: string; optimisticImageId: string };
+    };
+    expect(body.result.url).toBe('https://media.test/api/fiddy/media');
+    expect(typeof body.result.optimisticImageId).toBe('string');
+    // The provider was never asked: this is not one of its reads, and its own
+    // write guard is exactly what produced the user-visible 501.
+    expect(calls).toEqual([]);
+    expect(requestLog.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/~api/v1/generate-image-upload-url',
+      kind: 'media',
+      status: 200,
+    });
+    vi.unstubAllEnvs();
+  });
+
+  it('answers the mint itself even when a node is live, so the bytes always reach the same host', async () => {
+    const { calls, factory } = stubNodeAdapter();
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => ownNodeProvider('https://mine.example'),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: fetch,
+      createNodeAdapter: factory,
+    });
+
+    const response = await handle.fetch(MINT, { method: 'POST' });
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([]);
+  });
+
+  it('both layers give the same mint answer, from one function', async () => {
+    const response = mediaUploadAnswer('https://media.test/api/fiddy/media');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      result: { url: 'https://media.test/api/fiddy/media' },
+    });
+  });
+
+  it('still refuses a write no reader has been written for, keeping what it carried on the debug surface', async () => {
+    vi.stubEnv('VITE_SNAPCHAIN_DEBUG', 'true');
+    const embed = 'https://media.test/api/fiddy/media/abc123.png';
+    const requestLog: RequestLogEntry[] = [];
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => farcasterPublicProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
+      requestLog,
+    });
+
+    const response = await handle.fetch('https://farcaster.xyz/~api/v2/casts', {
+      method: 'POST',
+      body: JSON.stringify({ text: 'a photo', embeds: [embed] }),
+    });
+
+    expect(response.status).toBe(501);
+    expect(requestLog.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/~api/v2/casts',
+      kind: 'hosted',
+      status: 501,
+    });
+    // This is how scripts/verify-media-upload.mjs reads the payload a composer
+    // built: the request never leaves the page, so the log is the only trace.
+    expect(requestLog.at(-1)?.bodyPreview).toContain(embed);
+    expect(
+      (globalThis as unknown as Record<string, unknown>).__nodeBackedRequests,
+    ).toBe(requestLog);
+    vi.unstubAllEnvs();
   });
 });
