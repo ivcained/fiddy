@@ -20,11 +20,14 @@ import React, {
 import { baseApiUrl, localApiEnabled, wsUrl } from '~/constants/api';
 import { isDev } from '~/constants/env';
 import { useRecentFetch } from '~/contexts/RecentFetchProvider';
+import { isNodeBackedClientEnabled } from '~/snapchain/nodeApi';
 import { resolveEffectiveNodeBaseUrl } from '~/snapchain/nodeChoice';
 import {
-  createNodeBackedFetch,
-  isNodeBackedClientEnabled,
-} from '~/snapchain/nodeApi';
+  createProviderBackedFetch,
+  getActiveProvider,
+  noteProviderReadResult,
+  useProviderWatch,
+} from '~/snapchain/providers';
 import { useNodeChoice } from '~/snapchain/useNodeChoice';
 import { Analytics } from '~/utils/analyticsUtils';
 import { getPersistedDeviceId } from '~/utils/deviceIdUtils';
@@ -68,12 +71,22 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
     // never disagree about where answers came from.
     const nodeChoice = useNodeChoice(signedInFid);
 
+    // The reader's servers, and which one is live right now.
+    //
+    // The watch starts here because this provider wraps every signed-in
+    // surface: the fetch seam below reads the live choice synchronously, and a
+    // surface that renders before the first check lands reads from the build's
+    // own node exactly as it did before any of this existed.
+    useProviderWatch(signedInFid);
+
     /**
-     * The node-backed read adapter.
+     * The read adapter the client is handed, now provider-aware.
      *
      * It replaces the hosted API as the client's data source: same `fetch`
-     * signature, same request paths, answers read from the configured
-     * Snapchain node instead of from `farcaster.xyz`. See
+     * signature, same request paths, and the answer comes from whichever server
+     * the failover engine currently considers live — your own node, a public
+     * one, Neynar, or Farcaster's own public server as a last resort. See
+     * `~/snapchain/providers` for how that choice is measured and moved, and
      * `~/snapchain/nodeApi` for what is node-backed, what is local, and what
      * the node genuinely cannot answer.
      *
@@ -85,14 +98,24 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
       if (localApiEnabled || !isNodeBackedClientEnabled()) {
         return undefined;
       }
-      return createNodeBackedFetch({
-        nodeBaseUrl: resolveEffectiveNodeBaseUrl(),
+      return createProviderBackedFetch({
+        // Asked fresh on every request, so a switch mid-session takes effect
+        // on the very next read instead of needing the app to rebuild.
+        getActiveProvider: () => getActiveProvider(),
         getSignedInFid: () => signedInFidRef.current,
+        nodeBaseUrl: resolveEffectiveNodeBaseUrl(),
         fetchImpl: fetch,
+        // Repeated read failures are part of the switch rule: a server that
+        // passes its status check and fails every read still has to lose its
+        // place.
+        onRead: (providerId, ok) => noteProviderReadResult({ providerId, ok }),
       }).fetch;
-      // The address is the only input that can change under a running tab, and
-      // it has to rebuild the adapter: the alternative is a feed read from a
-      // server the reader has already replaced.
+      // The address the build was configured with is the only input that can
+      // change under a running tab and needs the adapter rebuilt; the live
+      // provider is read per request, above. `nodeChoice` is read through the
+      // store inside `resolveEffectiveNodeBaseUrl`, which the linter cannot
+      // follow — it is still the input that decides the fallback address.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [nodeChoice]);
 
     const onFetchStart: OnFetchStart = useCallback(() => {
