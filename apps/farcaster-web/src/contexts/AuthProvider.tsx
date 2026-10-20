@@ -27,6 +27,7 @@ import React, {
 
 import { authTokenKey, getOnboardingStateKey } from '~/constants/storage';
 import { useClearKeyTransport } from '~/hooks/useClearKeyTransport';
+import { isLocalSessionToken } from '~/lib/siwfSession';
 import { Analytics } from '~/utils/analyticsUtils';
 import { trackError } from '~/utils/errorUtils';
 import { getItem, setItem } from '~/utils/storageUtils';
@@ -147,6 +148,13 @@ const AuthProvider: FC<AuthProviderProps> = memo(({ children }) => {
   // Wrapper that persists onboardingState to localStorage after refresh
   const refreshAndPersistOnboardingState = useCallback(
     async (token: string) => {
+      // A local SIWF session has no server-side token to refresh. Asking would
+      // 401 and start the sign-out cascade, so it is skipped by design rather
+      // than by accident. See ~/lib/siwfSession.
+      if (isLocalSessionToken({ secret: token })) {
+        return undefined;
+      }
+
       let result: ApiGetOnboardingState200Response | undefined;
 
       try {
@@ -293,6 +301,15 @@ const AuthProvider: FC<AuthProviderProps> = memo(({ children }) => {
       // 'invalid' branch below.
       const tokenAtProbeStart = authTokenRef.current;
       if (!tokenAtProbeStart) {
+        return;
+      }
+
+      // A local SIWF session is never validated against the server: it has no
+      // server token to validate, so a 401 from it is expected rather than a
+      // revocation to act on. Without this the user is ejected from the session
+      // they just completed, on the first authed request that 401s.
+      // See ~/lib/siwfSession.
+      if (isLocalSessionToken(tokenAtProbeStart)) {
         return;
       }
       isRevalidatingRef.current = true;
@@ -449,9 +466,17 @@ const AuthProvider: FC<AuthProviderProps> = memo(({ children }) => {
               buildOnboardingStateKey(),
               cachedOnboardingState,
             );
-            // Refresh in background (non-blocking)
-            refreshAndPersistOnboardingState(persistedAuthToken.secret);
-          } else {
+
+            if (isLocalSessionToken(persistedAuthToken)) {
+              // Local SIWF session: the stored state is the whole session. Do
+              // not refresh it — there is no server token behind it, and the
+              // refresh would 401 the user out of the session they just
+              // completed. See ~/lib/siwfSession.
+            } else {
+              // Refresh in background (non-blocking)
+              refreshAndPersistOnboardingState(persistedAuthToken.secret);
+            }
+          } else if (!isLocalSessionToken(persistedAuthToken)) {
             // No cache - must block for first-time users
             await refreshAndPersistOnboardingState(persistedAuthToken.secret);
           }
