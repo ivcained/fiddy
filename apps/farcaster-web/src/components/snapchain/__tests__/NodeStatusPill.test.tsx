@@ -88,36 +88,73 @@ describe('nodePillState', () => {
 });
 
 describe('NodeStatusPillView', () => {
-  it('names your node, with the version and shard count', () => {
+  it('names your own setup, with the version and no shard count', () => {
     render(
       <NodeStatusPillView state="served" health={health(true, '0.13.4')} />,
     );
     expect(
-      screen.getByText('Served by your node · v0.13.4 · 2 shards'),
+      screen.getByText('Answers come from your own setup · v0.13.4'),
     ).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toContain('Served');
+    expect(screen.getByRole('status').textContent).toContain('your own setup');
   });
 
-  it('says public relay, and does not mention your node, when there is none', () => {
+  it('never uses infrastructure words a first-time owner would not know', () => {
+    const seen = new Set<string>();
+    for (const state of [
+      'checking',
+      'served',
+      'unreachable',
+      'relay',
+    ] as const) {
+      const { unmount } = render(
+        <NodeStatusPillView
+          state={state}
+          health={health(state === 'served')}
+        />,
+      );
+      seen.add(
+        `${screen.getByRole('status').textContent ?? ''} ${
+          screen.getByRole('link').getAttribute('title') ?? ''
+        }`,
+      );
+      unmount();
+    }
+    const all = [...seen].join(' ').toLowerCase();
+    for (const jargon of [
+      'node',
+      'snapchain',
+      'relay',
+      'shard',
+      'scope',
+      'ttl',
+      'signer',
+      'gasless',
+      '/v1/',
+    ]) {
+      expect(all).not.toContain(jargon);
+    }
+  });
+
+  it('says Fiddy serves it, and never claims your own, when there is none', () => {
     render(<NodeStatusPillView state="relay" health={null} />);
     const text = screen.getByRole('status').textContent ?? '';
-    expect(text).toBe('Public relay');
-    expect(text.toLowerCase()).not.toContain('your node');
+    expect(text).toBe('Answers come from Fiddy');
+    expect(text.toLowerCase()).not.toContain('your own');
   });
 
   it('says unreachable in words, so a fallback is never silent', () => {
     render(<NodeStatusPillView state="unreachable" health={health(false)} />);
     expect(screen.getByRole('status').textContent).toBe(
-      'Your node unreachable',
+      'Your own setup is offline',
     );
   });
 
   it('shortens to one word for the phone top bar', () => {
     render(<NodeStatusPillView state="served" health={health(true)} short />);
-    expect(screen.getByRole('status').textContent).toBe('Your node');
+    expect(screen.getByRole('status').textContent).toBe('Your own');
   });
 
-  it('links to the node surface in every state', () => {
+  it('links to the advanced surface in every state', () => {
     render(<NodeStatusPillView state="relay" health={null} />);
     expect(screen.getByRole('link').getAttribute('href')).toBe(
       '/~/settings/node',

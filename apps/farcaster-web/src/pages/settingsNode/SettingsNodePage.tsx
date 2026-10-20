@@ -1,5 +1,14 @@
 /**
- * Settings Node Page - Your node settings for Snapchain
+ * Your own setup — the Advanced screen.
+ *
+ * The positioning pivot demoted this surface on purpose: it still works, it is
+ * still linked from the status pill and from Advanced in the nav, and it is
+ * deliberately absent from onboarding. Everything on it is optional, and the
+ * product works without it.
+ *
+ * The vocabulary here is the precise one (node, app key, scope, TTL) because
+ * these are the names of the things you are configuring — but the screen says
+ * "Advanced" out loud, and every entry point into it uses plain words.
  *
  * Provides:
  * - Node status (health check, version, shards)
@@ -576,11 +585,14 @@ const SettingsNodePage = memo(() => {
 
   if (!fid) {
     return (
-      <Page meta={{ title: 'Your node / Fiddy' }}>
+      <Page meta={{ title: 'Your own setup (Advanced) / Fiddy' }}>
         <div className="border-default sm:border-x">
           <PageHeader hideCastButton>
-            <div className="flex items-center">
-              <PageTitle>Your node</PageTitle>
+            <div className="flex items-center gap-2">
+              <PageTitle>Your own setup</PageTitle>
+              <span className="rounded-full border border-[rgba(255,255,255,0.09)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+                Advanced
+              </span>
             </div>
           </PageHeader>
         </div>
@@ -590,7 +602,7 @@ const SettingsNodePage = memo(() => {
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <span className="text-lg font-semibold">No account</span>
               <span className="text-sm text-muted">
-                Sign in to use your Snapchain node
+                Sign in to use the setup you run
               </span>
             </div>
           </SettingsPageContent>
@@ -600,11 +612,14 @@ const SettingsNodePage = memo(() => {
   }
 
   return (
-    <Page meta={{ title: 'Your node / Fiddy' }}>
+    <Page meta={{ title: 'Your own setup (Advanced) / Fiddy' }}>
       <div className="border-default sm:border-x">
         <PageHeader hideCastButton>
-          <div className="flex items-center">
-            <PageTitle>Your node</PageTitle>
+          <div className="flex items-center gap-2">
+            <PageTitle>Your own setup</PageTitle>
+            <span className="rounded-full border border-[rgba(255,255,255,0.09)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+              Advanced
+            </span>
           </div>
         </PageHeader>
       </div>
@@ -612,6 +627,14 @@ const SettingsNodePage = memo(() => {
         <SettingsNav />
         <SettingsPageContent>
           <div className="flex flex-col gap-6">
+            {/* Plain words first: nothing on this screen is needed to use
+                Fiddy, and the precise words below are the ones you configure. */}
+            <p className="text-sm text-muted">
+              This is the Advanced part. Point Fiddy at the server you run and
+              everything you read and write goes through it — the rest of Fiddy
+              works without it, and nothing here is needed to get started.
+            </p>
+
             {/* Node Status Card */}
             <NodeStatusCard
               health={nodeHealth}
@@ -638,7 +661,7 @@ const SettingsNodePage = memo(() => {
               disabled={!appKey}
               disabledMessage={
                 !appKey
-                  ? 'Issue an app key first to post casts through your node'
+                  ? 'Issue an app key first to post casts through your own setup'
                   : undefined
               }
               onPost={handlePostCast}

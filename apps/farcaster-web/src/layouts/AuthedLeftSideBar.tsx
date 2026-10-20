@@ -160,20 +160,22 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
           </NavLinkIcon>
           <NavLinkLabel>Saved</NavLinkLabel>
         </NavLink>
-        {/* Your own node is a first-class surface, not a buried settings page:
-            the status pill and this entry land on the same place. */}
+        {/* Demoted on purpose by the positioning pivot: reading through your
+            own setup still works and is still honest chrome, but it is not
+            what Fiddy leads with, so it lives under Advanced in plain words. */}
+        <div className="fiddy-nav-caption">Advanced</div>
         <NavLink
           to="settingsNode"
           params={{}}
           searchParams={{}}
-          title="Your node"
+          title="Your own setup (Advanced)"
         >
           <NavLinkIcon>
             <div className="relative translate-y-[-0.75px]">
               <Server size={20} />
             </div>
           </NavLinkIcon>
-          <NavLinkLabel>Your node</NavLinkLabel>
+          <NavLinkLabel>Your own setup</NavLinkLabel>
         </NavLink>
         {developerModeEnabled && (
           <NavLink

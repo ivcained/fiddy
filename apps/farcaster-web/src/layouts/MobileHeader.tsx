@@ -161,7 +161,9 @@ const useMobileNavState = () => {
       return 'Fiddy Agent';
     }
     if (active.node) {
-      return 'Your node';
+      // Plain words: the technical name of the software lives on that screen
+      // (Advanced), not in the chrome everyone sees.
+      return 'Your own setup';
     }
     if (active.apps) {
       return 'Apps';
@@ -339,7 +341,7 @@ const MobileNavDropdown: FC<MobileNavDropdownProps> = memo(
             />
             <DropdownItem
               href={hrefs.node}
-              label="Your node"
+              label="Your own setup"
               icon={<ServerIcon size={16} />}
               isActive={active.node}
               onClose={onClose}

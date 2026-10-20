@@ -96,9 +96,9 @@ const SettingsNav: FC = memo(() => {
         to="settingsNode"
         params={{}}
         searchParams={{}}
-        title="Your node"
+        title="Your own setup (Advanced)"
       >
-        <SettingsNavLinkLabel>Your node</SettingsNavLinkLabel>
+        <SettingsNavLinkLabel>Your own setup</SettingsNavLinkLabel>
       </SettingsNavLink>
       <SettingsNavLink
         to="settingsDeveloperTools"

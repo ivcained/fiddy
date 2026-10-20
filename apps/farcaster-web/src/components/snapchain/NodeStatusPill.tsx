@@ -1,15 +1,20 @@
 /**
- * Node status pill — the one piece of chrome that says where your feed comes
- * from. It is persistent on purpose: reading your own infrastructure is the
- * point of this client, so the client never hides whose node answered.
+ * The one piece of chrome that says where your feed comes from.
  *
- * States (and nothing else — no state may claim "your node" when the relay
- * answered):
+ * It is persistent on purpose: reading your own infrastructure is a real thing
+ * this client does, so the client never hides whose server answered. What it
+ * must not do is make you learn a protocol to understand a dot. The words here
+ * are the plain ones from the positioning brief — "the setup you run", never the
+ * name of the software it runs — and the pill links to the Advanced screen where
+ * the precise version of the same fact lives.
  *
- *   checking     your node is configured, first health call still in flight
- *   served       your node answered: version, shards, sync height
- *   unreachable  your node is configured but silent, so reads fall back
- *   relay        no node configured in this build: public relay only
+ * States (and nothing else — no state may claim your own server when Fiddy's
+ * shared one answered):
+ *
+ *   checking     your own server is configured, first health call still in flight
+ *   served       your own server answered: version, shards, sync height
+ *   unreachable  your own server is configured but silent, so reads fall back
+ *   relay        nothing configured in this build: Fiddy's shared server only
  */
 
 import { type NodeHealth, SnapchainNodeClient } from 'farcaster-node-client';
@@ -73,45 +78,45 @@ const label = (
   if (short) {
     switch (state) {
       case 'served':
-        return 'Your node';
+        return 'Your own';
       case 'unreachable':
-        return 'Node offline';
+        return 'Offline';
       case 'relay':
-        return 'Relay';
+        return 'Shared';
       default:
-        return 'Node…';
+        return 'Checking…';
     }
   }
   switch (state) {
     case 'served': {
-      const shards = health?.info?.numShards;
       const version = health?.info?.version;
-      const detail = [version && `v${version}`, shards && `${shards} shards`]
-        .filter(Boolean)
-        .join(' · ');
-      return detail ? `Served by your node · ${detail}` : 'Served by your node';
+      // Shard counts are infrastructure vocabulary; the version is the one
+      // detail that helps someone compare against what they run.
+      return version
+        ? `Answers come from your own setup · v${version}`
+        : 'Answers come from your own setup';
     }
     case 'unreachable':
-      return 'Your node unreachable';
+      return 'Your own setup is offline';
     case 'relay':
-      return 'Public relay';
+      return 'Answers come from Fiddy';
     case 'checking':
     default:
-      return 'Checking your node…';
+      return 'Checking your setup…';
   }
 };
 
 const title = (state: NodePillState): string => {
   switch (state) {
     case 'served':
-      return 'Reads and writes are going to the Snapchain node you configured. Open your node.';
+      return 'Everything you read and write here goes through the setup you run. Open it in Advanced.';
     case 'unreachable':
-      return 'Your node did not answer the last health check. Open your node to see why; reads fall back to the public relay until it does.';
+      return 'Your own setup did not answer the last check. Open it in Advanced to see why; reading falls back to Fiddy until it does.';
     case 'relay':
-      return 'This build has no node configured, so reads come from a public relay. Point it at your own node.';
+      return 'This build has nothing of yours configured, so Fiddy serves the feed for you. Point it at your own setup in Advanced.';
     case 'checking':
     default:
-      return 'Asking your node for /v1/info…';
+      return 'Asking your setup whether it is up…';
   }
 };
 
