@@ -20,4 +20,5 @@ export * from './fromNode';
 export * from './hostedRoutes';
 export * from './nodeBackedClientFlag';
 export * from './nodeBackedFetch';
+export * from './nodeCannotAnswer';
 export * from './reads';

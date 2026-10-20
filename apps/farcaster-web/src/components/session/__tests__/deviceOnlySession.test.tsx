@@ -10,6 +10,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, renderHook } from '@testing-library/react';
+import { ApiErrorResponse, HandledFetchError } from 'farcaster-client-data';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -232,11 +233,53 @@ describe('ShellSectionErrorBoundary', () => {
     throw new Error('the region could not load');
   };
 
+  /**
+   * The node adapter's own refusals, built the way the client builds them
+   * (`HandledFetchError` with the hosted API's error envelope).
+   */
+  const makeNodeRefusal = (message: string, status: number) =>
+    new HandledFetchError('a read your node cannot answer', {
+      absoluteUrl: undefined,
+      body: undefined,
+      endpointName: 'searchCasts',
+      hasTimedOut: false,
+      isHandled: true,
+      isNetworkError: false,
+      isOffline: false,
+      method: 'GET',
+      relativeUrl: '/v2/search-casts',
+      resolvedTimeout: 1000,
+      response: undefined,
+      responseData: { errors: [{ message }] } as unknown as ApiErrorResponse,
+      status,
+      timeout: 1000,
+    });
+
+  const ThrowNodeCannotAnswer = () => {
+    throw makeNodeRefusal('a read node keeps no search index', 501);
+  };
+
+  const ThrowNodeDidNotAnswer = () => {
+    throw makeNodeRefusal(
+      'Your node did not answer this read: fetch failed',
+      502,
+    );
+  };
+
   const renderBoundary = (label: string) =>
     render(
       <QueryClientProvider client={new QueryClient()}>
         <ShellSectionErrorBoundary label={label}>
           <Thrower />
+        </ShellSectionErrorBoundary>
+      </QueryClientProvider>,
+    );
+
+  const renderBoundaryAround = (label: string, child: React.ReactNode) =>
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ShellSectionErrorBoundary label={label}>
+          {child}
         </ShellSectionErrorBoundary>
       </QueryClientProvider>,
     );
@@ -261,6 +304,37 @@ describe('ShellSectionErrorBoundary', () => {
     const { getByText } = renderBoundary('Channels');
 
     expect(getByText('Channels couldn’t load')).toBeTruthy();
+    expect(getByText(/Try again/)).toBeTruthy();
+  });
+
+  it('shows the node’s own sentence for a read the node cannot answer', () => {
+    // MEASURED against a live node (search, /~/channels, /~/apps/trending):
+    // the region used to say "Error retrieving data. Please try again." and
+    // never the reason the adapter wrote. The sentence is the honest answer.
+    state.authToken = serverToken;
+
+    const { getByText, queryByText } = renderBoundaryAround(
+      'Search',
+      <ThrowNodeCannotAnswer />,
+    );
+
+    expect(getByText('Search isn’t on your node')).toBeTruthy();
+    expect(getByText(/A read node keeps no search index/)).toBeTruthy();
+    expect(queryByText(/Error retrieving data/)).toBeNull();
+    // Nothing about a node that cannot answer this read improves on a retry.
+    expect(queryByText(/Try again/)).toBeNull();
+  });
+
+  it('keeps a real retry when the node did not answer at all', () => {
+    // A node that is down is a different thing: the retry is honest there.
+    state.authToken = serverToken;
+
+    const { getByText } = renderBoundaryAround(
+      'Feed',
+      <ThrowNodeDidNotAnswer />,
+    );
+
+    expect(getByText(/Your node did not answer this read/)).toBeTruthy();
     expect(getByText(/Try again/)).toBeTruthy();
   });
 });

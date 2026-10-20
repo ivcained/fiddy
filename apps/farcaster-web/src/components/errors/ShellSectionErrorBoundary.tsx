@@ -28,7 +28,9 @@ import React, { FC, memo, ReactNode } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 
 import { useDeviceOnlySession } from '~/components/session/useDeviceOnlySession';
+import { NodeCannotAnswerPanel } from '~/components/snapchain/NodeCannotAnswerPanel';
 import { useAuth } from '~/contexts/AuthProvider';
+import { nodeCannotAnswer } from '~/snapchain/nodeApi/nodeCannotAnswer';
 import { getErrorDescription } from '~/utils/errorUtils';
 
 type ShellSectionErrorBoundaryProps = {
@@ -47,6 +49,23 @@ const ShellSectionFallback: FC<ShellSectionFallbackProps> = memo(
   ({ label, error, resetErrorBoundary }) => {
     const session = useDeviceOnlySession();
     const { signOut } = useAuth();
+
+    // The node adapter said, in its own words, that your node cannot answer
+    // this read. MEASURED (search, /~/channels, /~/apps/trending against a live
+    // node): that sentence used to be thrown away and the region said "Error
+    // retrieving data. Please try again." — a retry for a read no retry can
+    // fix, with the reason the adapter wrote nowhere on screen. The sentence is
+    // the honest answer, so it is what the region shows.
+    const refusal = nodeCannotAnswer(error);
+    if (refusal) {
+      return (
+        <NodeCannotAnswerPanel
+          label={label}
+          reason={refusal.message}
+          {...(refusal.retryable ? { onRetry: resetErrorBoundary } : {})}
+        />
+      );
+    }
 
     // A device-only session reaches nothing over the network, so a retry would
     // be a lie. Say what is actually missing and offer the one action that can
