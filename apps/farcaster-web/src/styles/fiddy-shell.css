@@ -111,6 +111,51 @@ html.fiddy-dark-shell body {
   color: var(--fiddy-accent);
 }
 
+/* The baby Fiddy mark in the brand slot: a still that paints first and a canvas
+   that takes over once the model is up. Both fill the same box, so the swap is
+   invisible as a layout event — the still fades out under the drawn model. */
+.fiddy-brand-mark3d {
+  position: relative;
+  display: block;
+  flex: none;
+  line-height: 0;
+}
+
+.fiddy-brand-mark3d-still,
+.fiddy-brand-mark3d-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.fiddy-brand-mark3d-still {
+  object-fit: contain;
+  transition: opacity 180ms ease-out;
+}
+
+.fiddy-brand-mark3d-canvas {
+  pointer-events: none;
+}
+
+.fiddy-brand-mark3d-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.fiddy-brand-mark3d[data-fiddy-mark='moving'] .fiddy-brand-mark3d-still {
+  opacity: 0;
+}
+
+/* Stillness stays still: a cross-fade is motion too. */
+@media (prefers-reduced-motion: reduce) {
+  .fiddy-brand-mark3d-still {
+    transition: none;
+  }
+}
+
 .fiddy-grow {
   flex: 1;
 }

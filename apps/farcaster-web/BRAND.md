@@ -123,10 +123,10 @@ same key Settings already reads — the choice stays visible and reversible.
 1. **Welcome screen** (`/` unauthenticated) — `FiddyWelcomePage`: the Fiddy
    lockup, the tagline *"the agentic farcaster client"*, the four differentiators,
    and the fork's own Farcaster sign-in modals behind our buttons.
-2. **Shell chrome** — `FiddyTopBar` (brand dot + wordmark, node-status pill,
-   avatar), left nav ordered Feed → Agent → Wallet → Settings then the rest of
-   the fork's surfaces under "More", and the agent panel at the top of the right
-   column on the feed (`AgentRailPanel`, honest `soon` tags intact).
+2. **Shell chrome** — `FiddyTopBar` (the 3D baby mark + wordmark, node-status
+   pill, avatar), left nav ordered Feed → Agent → Wallet → Settings then the rest
+   of the fork's surfaces under "More", and the agent panel at the top of the
+   right column on the feed (`AgentRailPanel`, honest `soon` tags intact).
 3. **Phone** — `FiddyMobileTabBar`: Feed / Agent / Wallet / Settings on a fixed
    bottom bar; the node pill stays in `MobileHeader`'s top bar.
 

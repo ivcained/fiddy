@@ -2,11 +2,16 @@
  * The shell's top chrome: the fiddy mark on the left, and on the right the two
  * things this client refuses to hide — whose node answered (the pill) and who
  * you are (the avatar). Desktop only: phones keep MobileHeader's compact bar.
+ *
+ * The mark is the 3D baby (`FiddyMark3D`): it paints as a still of its own
+ * first frame and animates once the model is fetched and drawn, which is why the
+ * brand here is a component and not an <img>.
  */
 
 import { FC, memo } from 'react';
 
 import { AvatarImage } from '~/components/avatar/AvatarImage';
+import { FiddyMark3D } from '~/components/fiddy/FiddyMark3D';
 import { Link } from '~/components/links/Link';
 import { NodeStatusPill } from '~/components/snapchain/NodeStatusPill';
 import { useCurrentUser } from '~/hooks/data/useCurrentUser';
@@ -27,9 +32,7 @@ const FiddyTopBar: FC = memo(() => {
         title="fiddy — home feed"
         className="fiddy-brand"
       >
-        <span className="fiddy-dot" aria-hidden="true">
-          ●
-        </span>
+        <FiddyMark3D />
         fiddy
       </Link>
       <div className="fiddy-grow" />
