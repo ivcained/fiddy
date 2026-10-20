@@ -16,12 +16,16 @@
 //        FIDDY_MEDIA_PUBLIC_URL=https://localhost:5174 \
 //        npx next dev --port 3217
 //
-//   2. the client, built with the media host it should upload to, and with
-//      `/api/fiddy/media` proxied to the service (see
+//   2. the client, built with the media host it should upload to, a server
+//      actually named (the shell only runs the node-backed client when one is —
+//      `isNodeConfigured()`, so `VITE_SNAPCHAIN_HTTP_URL` or a chosen server in
+//      storage; without it a signed-in session lands on the device-only
+//      landing), and with `/api/fiddy/media` proxied to the service (see
 //      `scripts/probe.vite.config.mjs`: the app's config plus a `cacheDir` of
 //      its own and this proxy):
 //        cd apps/farcaster-web
 //        SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
+//        VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
 //        VITE_FIDDY_MEDIA_URL=https://localhost:5174 VITE_SNAPCHAIN_DEBUG=true \
 //        npx vite --config scripts/probe.vite.config.mjs --port 5174
 //
@@ -44,8 +48,10 @@
 //      bytes really are, an immutable cache header, and served bytes whose
 //      sha256 is the name in the URL
 //   4. the composer rendered the photo, with no upload-failure copy
-//   5. the cast payload the composer built (the `POST /v2/casts` the adapter
-//      logged) references that URL as an embed
+//   5. the payload the composer handed to the adapter (the write that carries
+//      the uploaded URL — `POST /v2/casts`, or the `POST /v2/draft-caststorms`
+//      the fork stores first when there is no hosted session) references that
+//      URL as an embed
 //   6. nothing was posted to Farcaster from this probe (posting stays behind
 //      the existing app-key flow)
 //
@@ -164,13 +170,18 @@ const readSurface = (page) =>
     return {
       path: window.location.pathname,
       text,
-      onboardingSheet: Boolean(document.querySelector('[data-fiddy="onboarding"]')),
-      deviceOnlyLanding: Boolean(document.querySelector('[data-fiddy="device-only-session"]')),
+      onboardingSheet: Boolean(
+        document.querySelector('[data-fiddy="onboarding"]'),
+      ),
+      deviceOnlyLanding: Boolean(
+        document.querySelector('[data-fiddy="device-only-session"]'),
+      ),
       // The shell itself: a signed-in client draws its frame and a Cast
       // control. Without this a blank page would look like a landed sign-in.
       shellMounted: Boolean(document.querySelector('.fiddy-shell-frame')),
       castControl: Array.from(document.querySelectorAll('button')).some(
-        (button) => (button.innerText || '').trim() === 'Cast' && button.offsetParent,
+        (button) =>
+          (button.innerText || '').trim() === 'Cast' && button.offsetParent,
       ),
     };
   });
@@ -197,10 +208,14 @@ const run = async () => {
     window.__mediaFetchLog = [];
     window.fetch = async (...args) => {
       const url =
-        typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || String(args[0]);
+        typeof args[0] === 'string'
+          ? args[0]
+          : (args[0] && args[0].url) || String(args[0]);
       const method = (args[1] && args[1].method) || 'GET';
       const response = await orig(...args);
-      window.__mediaFetchLog.push(`${method} ${response.status} ${String(url).slice(0, 200)}`);
+      window.__mediaFetchLog.push(
+        `${method} ${response.status} ${String(url).slice(0, 200)}`,
+      );
       return response;
     };
   });
@@ -211,7 +226,9 @@ const run = async () => {
       consoleErrors.push(m.text().replace(/\s+/g, ' ').slice(0, 240));
     }
   });
-  page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${String(e).slice(0, 240)}`));
+  page.on('pageerror', (e) =>
+    consoleErrors.push(`pageerror: ${String(e).slice(0, 240)}`),
+  );
 
   await page.route('https://relay.farcaster.xyz/**', async (route) => {
     const method = route.request().method();
@@ -245,8 +262,13 @@ const run = async () => {
   });
 
   // ── 1. a signed-in client ─────────────────────────────────────────────────
-  await page.goto(`${SERVER}/welcome/ready`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForFunction(() => document.body.innerText.trim().length > 40, { timeout: 60000 });
+  await page.goto(`${SERVER}/welcome/ready`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60000,
+  });
+  await page.waitForFunction(() => document.body.innerText.trim().length > 40, {
+    timeout: 60000,
+  });
 
   for (const el of await page.$$('button, a, [role=button]')) {
     const text = ((await el.innerText()) || '').replace(/\s+/g, ' ').trim();
@@ -258,7 +280,12 @@ const run = async () => {
 
   let surface = await readSurface(page);
   for (let i = 0; i < 60; i += 1) {
-    if (surface.path === '/' && surface.shellMounted && !surface.onboardingSheet && !surface.deviceOnlyLanding) {
+    if (
+      surface.path === '/' &&
+      surface.shellMounted &&
+      !surface.onboardingSheet &&
+      !surface.deviceOnlyLanding
+    ) {
       break;
     }
     await page.waitForTimeout(1000);
@@ -277,7 +304,9 @@ const run = async () => {
   // The shell keeps a second Cast control in the DOM for narrow screens; only
   // one of them is on screen, and clicking the hidden one would never open
   // anything, so ask for the visible one.
-  const castButtons = await page.locator('button:has-text("Cast"):visible').all();
+  const castButtons = await page
+    .locator('button:has-text("Cast"):visible')
+    .all();
   let opened = false;
   for (const button of castButtons) {
     const text = ((await button.innerText()) || '').trim();
@@ -294,7 +323,9 @@ const run = async () => {
   let editorOpen = false;
   let placeholderSeen = false;
   try {
-    await page.waitForSelector(`${MODAL_ROOT} [contenteditable="true"]`, { timeout: 30000 });
+    await page.waitForSelector(`${MODAL_ROOT} [contenteditable="true"]`, {
+      timeout: 30000,
+    });
     editorOpen = true;
     placeholderSeen = await page
       .locator(`${MODAL_ROOT}`)
@@ -310,7 +341,10 @@ const run = async () => {
   // what it found either way).
   const scopedInput = page.locator(`${MODAL_ROOT} input[type=file]`);
   const anywhereInput = page.locator('input[type=file]');
-  const picks = { scoped: await scopedInput.count(), anywhere: await anywhereInput.count() };
+  const picks = {
+    scoped: await scopedInput.count(),
+    anywhere: await anywhereInput.count(),
+  };
 
   await page.screenshot({ path: `${OUT}/media-composer-open.png` });
   check(
@@ -327,17 +361,21 @@ const run = async () => {
   const uploadResponse = page
     .waitForResponse(
       (response) =>
-        response.url().includes('/api/fiddy/media') && response.request().method() === 'POST',
+        response.url().includes('/api/fiddy/media') &&
+        response.request().method() === 'POST',
       { timeout: 45000 },
     )
     .catch(() => null);
-  const fileInput = picks.scoped > 0 ? scopedInput.first() : anywhereInput.first();
+  const fileInput =
+    picks.scoped > 0 ? scopedInput.first() : anywhereInput.first();
   let uploaded = null;
   // Pick the photo the way a person does: press the composer's Media button and
   // answer the file dialog it opens. Setting the input directly misses the
   // picker's own click step (the mint it prefetches), and a pick can land on a
   // node React is about to replace.
-  const mediaButton = page.locator(`${MODAL_ROOT} button[title="Media"]`).first();
+  const mediaButton = page
+    .locator(`${MODAL_ROOT} button[title="Media"]`)
+    .first();
   try {
     let picked = false;
     if ((await mediaButton.count()) > 0) {
@@ -363,8 +401,12 @@ const run = async () => {
     );
   }
   if (!uploaded) {
-    const adapterLog = await page.evaluate(() => window.__nodeBackedRequests ?? []);
-    const mint = adapterLog.find((entry) => /generate-image-upload-url$/.test(entry.path));
+    const adapterLog = await page.evaluate(
+      () => window.__nodeBackedRequests ?? [],
+    );
+    const mint = adapterLog.find((entry) =>
+      /generate-image-upload-url$/.test(entry.path),
+    );
     check(
       'the upload-URL request the composer made was answered by the MEDIA route, not a 501',
       mint?.kind === 'media' && mint?.status === 200,
@@ -373,12 +415,15 @@ const run = async () => {
     check(
       'the browser POSTed the picked bytes to OUR media host',
       false,
-      mediaRequests.join(' | ') || 'no POST to the media host within 90s of picking the photo',
+      mediaRequests.join(' | ') ||
+        'no POST to the media host within 90s of picking the photo',
     );
     const left = await page.evaluate(() => window.__mediaFetchLog ?? []);
     console.log('\n── failed run: what the adapter classified ──');
     for (const entry of adapterLog.slice(-14)) {
-      console.log(`  ${entry.method} ${entry.path} kind=${entry.kind} status=${entry.status}`);
+      console.log(
+        `  ${entry.method} ${entry.path} kind=${entry.kind} status=${entry.status}`,
+      );
     }
     console.log('\n── failed run: requests that left the page ──');
     for (const line of left.slice(-20)) console.log(`  ${line}`);
@@ -386,15 +431,20 @@ const run = async () => {
     for (const line of consoleErrors.slice(0, 8)) console.log(`  ${line}`);
     await page.screenshot({ path: `${OUT}/media-upload-failed.png` });
     await browser.close();
-    throw new Error('no upload to the media host — the checks and dump above are the evidence');
+    throw new Error(
+      'no upload to the media host — the checks and dump above are the evidence',
+    );
   }
   const uploadedBody = await uploaded.json().catch(() => ({}));
   const mediaRequest = uploaded.request();
 
-  mediaRequests.push(`${mediaRequest.method()} ${uploaded.status()} ${mediaRequest.url()}`);
+  mediaRequests.push(
+    `${mediaRequest.method()} ${uploaded.status()} ${mediaRequest.url()}`,
+  );
   check(
     'the browser POSTed the picked bytes to OUR media host',
-    mediaRequest.url().startsWith(`${MEDIA}/api/fiddy/media`) && uploaded.status() === 201,
+    mediaRequest.url().startsWith(`${MEDIA}/api/fiddy/media`) &&
+      uploaded.status() === 201,
     mediaRequests.join(' | ') || 'no request seen',
   );
   const mediaUrl = typeof uploadedBody.url === 'string' ? uploadedBody.url : '';
@@ -405,23 +455,28 @@ const run = async () => {
   );
   check(
     'the media host reported the type it really stored',
-    uploadedBody.contentType === 'image/jpeg' || uploadedBody.contentType === 'image/png',
+    uploadedBody.contentType === 'image/jpeg' ||
+      uploadedBody.contentType === 'image/png',
     `contentType=${uploadedBody.contentType} ext=${uploadedBody.ext} bytes=${uploadedBody.bytes}`,
   );
 
   // ── 4. the URL round-trips from another client ─────────────────────────────
   const fetched = await ctx.request.get(mediaUrl);
   const served = await fetched.body();
-  const nameHash = /\/api\/fiddy\/media\/([0-9a-f]{64})\./.exec(mediaUrl)?.[1] ?? '';
+  const nameHash =
+    /\/api\/fiddy\/media\/([0-9a-f]{64})\./.exec(mediaUrl)?.[1] ?? '';
   const servedHash = createHash('sha256').update(served).digest('hex');
   check(
     'the stored photo is readable at that URL by anyone, with the honest type',
-    fetched.status() === 200 && (fetched.headers()['content-type'] ?? '').startsWith('image/'),
+    fetched.status() === 200 &&
+      (fetched.headers()['content-type'] ?? '').startsWith('image/'),
     `status=${fetched.status()} type=${fetched.headers()['content-type']} bytes=${served.length}`,
   );
   check(
     'the served bytes hash to the name in the URL (the file is its own address)',
-    nameHash.length === 64 && nameHash === servedHash && nameHash === uploadedBody.sha256,
+    nameHash.length === 64 &&
+      nameHash === servedHash &&
+      nameHash === uploadedBody.sha256,
     `name=${nameHash.slice(0, 12)}… served=${servedHash.slice(0, 12)}… reported=${String(
       uploadedBody.sha256,
     ).slice(0, 12)}…`,
@@ -437,21 +492,24 @@ const run = async () => {
   const composer = await page.evaluate((root) => {
     const container = document.querySelector(root);
     const text = container ? container.innerText.replace(/\s+/g, ' ') : '';
-    const images = Array.from(container ? container.querySelectorAll('img') : []).map(
-      (img) => img.currentSrc || img.src,
-    );
-    const buttons = Array.from(container ? container.querySelectorAll('button') : []).map(
-      (button) => ({
-        label: (button.innerText || '').trim(),
-        disabled: button.disabled,
-        y: button.getBoundingClientRect().top,
-      }),
-    );
+    const images = Array.from(
+      container ? container.querySelectorAll('img') : [],
+    ).map((img) => img.currentSrc || img.src);
+    const buttons = Array.from(
+      container ? container.querySelectorAll('button') : [],
+    ).map((button) => ({
+      label: (button.innerText || '').trim(),
+      disabled: button.disabled,
+      y: button.getBoundingClientRect().top,
+    }));
     return { text, images, buttons };
   }, MODAL_ROOT);
 
   const previewed = composer.images.some(
-    (src) => src.startsWith('blob:') || src.startsWith(mediaUrl) || src.startsWith(MEDIA),
+    (src) =>
+      src.startsWith('blob:') ||
+      src.startsWith(mediaUrl) ||
+      src.startsWith(MEDIA),
   );
   check(
     'the composer shows the photo it uploaded',
@@ -475,32 +533,86 @@ const run = async () => {
   const submit = composer.buttons
     .filter((button) => button.label === 'Cast' && !button.disabled)
     .sort((a, b) => b.y - a.y)[0];
-  check('the cast button is ready to submit', Boolean(submit), JSON.stringify(composer.buttons));
+  check(
+    'the cast button is ready to submit',
+    Boolean(submit),
+    JSON.stringify(composer.buttons),
+  );
 
   let castEntry;
+  let payloadEntry;
   if (submit) {
     await page.evaluate((y) => {
       const container = document.querySelector('#modal-root');
-      const buttons = Array.from(container ? container.querySelectorAll('button') : []);
+      const buttons = Array.from(
+        container ? container.querySelectorAll('button') : [],
+      );
       const target = buttons
         .filter((button) => (button.innerText || '').trim() === 'Cast')
-        .sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)
+        .sort(
+          (a, b) =>
+            b.getBoundingClientRect().top - a.getBoundingClientRect().top,
+        )
         .find((button) => Math.abs(button.getBoundingClientRect().top - y) < 1);
       target?.click();
     }, submit.y);
 
     for (let i = 0; i < 60; i += 1) {
-      castEntry = await page.evaluate(() => {
+      const seen = await page.evaluate((url) => {
         const log = window.__nodeBackedRequests ?? [];
-        return log.find((entry) => entry.method === 'POST' && /\/v2\/casts$/.test(entry.path));
-      });
-      if (castEntry) {
+        const writes = log.filter(
+          (entry) =>
+            entry.method === 'POST' &&
+            typeof entry.bodyPreview === 'string' &&
+            entry.bodyPreview.includes(url),
+        );
+        return {
+          cast: writes.find((entry) => /\/v2\/casts$/.test(entry.path)) ?? null,
+          // The fork's composer stores the whole caststorm as a DRAFT before
+          // anything is cast (`POST /v2/draft-caststorms`, a hosted endpoint),
+          // so a client with no hosted session is answered 501 there and never
+          // reaches `/v2/casts`. The payload is the same either way — this is
+          // the last write that carried it.
+          payload: writes.at(-1) ?? null,
+        };
+      }, mediaUrl);
+      castEntry = seen.cast;
+      payloadEntry = seen.payload;
+      if (payloadEntry) {
         break;
       }
       await page.waitForTimeout(500);
     }
   }
   await page.screenshot({ path: `${OUT}/media-composer-submitted.png` });
+
+  // A submit that never reached the adapter has to say why: the adapter's own
+  // log (every write that was answered inside the page) and what the composer
+  // said afterwards. Without this the only report is "never built a cast
+  // payload", which names the symptom and none of the cause.
+  if (!payloadEntry) {
+    const writes = await page.evaluate(() =>
+      (window.__nodeBackedRequests ?? []).map(
+        (entry) =>
+          `${entry.method} ${entry.path} kind=${entry.kind} status=${entry.status} body=${(entry.bodyPreview ?? '').slice(0, 120)}`,
+      ),
+    );
+    console.log(
+      '\n── the composer never built a cast payload: every adapter entry ──',
+    );
+    for (const line of writes.slice(-20)) console.log(`  ${line}`);
+    const afterClick = await page.evaluate((root) => {
+      const container = document.querySelector(root);
+      return (container ? container.innerText : '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 400);
+    }, MODAL_ROOT);
+    console.log(
+      `── the composer after the click ──\n  ${JSON.stringify(afterClick)}`,
+    );
+    console.log('── console errors after the click ──');
+    for (const line of consoleErrors.slice(-6)) console.log(`  ${line}`);
+  }
 
   const mintEntry = await page.evaluate(() => {
     const log = window.__nodeBackedRequests ?? [];
@@ -512,37 +624,49 @@ const run = async () => {
     `log entry: ${JSON.stringify(mintEntry)?.slice(0, 200)}`,
   );
 
-  const payloadEmbeds = (() => {
+  /** The embeds of either shape the composer submits: a cast, or its caststorm. */
+  const embedsIn = (body) => {
     try {
-      return JSON.parse(castEntry?.bodyPreview ?? '{}').embeds ?? [];
+      const parsed = JSON.parse(body ?? '{}');
+      if (Array.isArray(parsed.embeds)) {
+        return parsed.embeds;
+      }
+      const cast = parsed?.caststorm?.casts?.[0];
+      return Array.isArray(cast?.embeds) ? cast.embeds : [];
     } catch {
       return [];
     }
-  })();
+  };
+  const payloadEmbeds = embedsIn(payloadEntry?.bodyPreview);
   check(
     'the cast payload the composer built references the media URL',
-    Array.isArray(payloadEmbeds) && payloadEmbeds.includes(mediaUrl),
-    castEntry
-      ? `POST /v2/casts embeds=${JSON.stringify(payloadEmbeds)}`
-      : 'the composer never built a cast payload',
+    payloadEmbeds.includes(mediaUrl),
+    payloadEntry
+      ? `${payloadEntry.method} ${payloadEntry.path} (status ${payloadEntry.status}) embeds=${JSON.stringify(payloadEmbeds)}${castEntry ? ' — and the submit reached POST /v2/casts' : ''}`
+      : 'the composer never handed a payload to the adapter',
   );
 
   const leftThePage = await page.evaluate(() => window.__mediaFetchLog ?? []);
   check(
     'nothing was posted to Farcaster from this probe (posting stays behind the app-key flow)',
     !leftThePage.some((line) => /farcaster\.xyz.*\/v2\/casts/.test(line)),
-    leftThePage.filter((line) => line.includes('/v2/casts')).join(' | ') || 'no cast request left the page',
+    leftThePage.filter((line) => line.includes('/v2/casts')).join(' | ') ||
+      'no cast request left the page',
   );
 
   // Read the adapter's own tally while the page is still alive.
-  const adapterWrites = await page.evaluate(() => (window.__nodeBackedRequests ?? []).length);
+  const adapterWrites = await page.evaluate(
+    () => (window.__nodeBackedRequests ?? []).length,
+  );
 
   await ctx.request.dispose();
   await browser.close();
 
   console.log('── a photo, from the composer, to our own media host ──');
   for (const c of checks) {
-    console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
+    console.log(
+      `${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? ` — ${c.detail}` : ''}`,
+    );
   }
   const clip = (line) => line.replace(/([0-9a-f]{12})[0-9a-f]{40,}/, '$1…');
   console.log('\n── requests that left the page ──');
@@ -553,13 +677,17 @@ const run = async () => {
   for (const line of mediaRequests) {
     console.log(`  ${clip(line)}`);
   }
-  console.log(`\nadapter classifications this run: ${adapterWrites} (debug surface)`);
+  console.log(
+    `\nadapter classifications this run: ${adapterWrites} (debug surface)`,
+  );
   console.log(
     `\nconsole errors: ${consoleErrors.length}${consoleErrors.length ? ` (first: ${consoleErrors[0]})` : ''}`,
   );
 
   const failed = checks.filter((c) => !c.ok);
-  console.log(`\n${checks.length - failed.length}/${checks.length} checks passed; screenshots in ${OUT}`);
+  console.log(
+    `\n${checks.length - failed.length}/${checks.length} checks passed; screenshots in ${OUT}`,
+  );
   if (failed.length > 0) {
     process.exitCode = 1;
   }
@@ -570,7 +698,9 @@ try {
 } catch (error) {
   console.log(`\nPROBE threw before finishing: ${String(error).slice(0, 300)}`);
   for (const c of checks) {
-    console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
+    console.log(
+      `${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? ` — ${c.detail}` : ''}`,
+    );
   }
   process.exitCode = 1;
 }
