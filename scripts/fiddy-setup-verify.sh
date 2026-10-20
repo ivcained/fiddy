@@ -83,7 +83,10 @@ if [[ -z "$neynar_key" ]]; then
   skip "Neynar: no key saved (it is optional)"
 else
   out="$(mktemp)"
-  status="$(probe_request 'https://api.neynar.com/v2/farcaster/user/bulk?fids=3' 'x-api-key' "$neynar_key" "$out" 2>/dev/null || printf '000')"
+  # `|| status="000"` rather than `|| printf '000'`: curl prints its own 000
+  # when it cannot connect, so the old form could report "000000" — a status no
+  # server ever sent, in a sentence a human has to read.
+  status="$(probe_request 'https://api.neynar.com/v2/farcaster/user/bulk?fids=3' 'x-api-key' "$neynar_key" "$out" 2>/dev/null)" || status="000"
   rm -f "$out"
   case "$status" in
     200) ok "Neynar: your key is accepted" ;;
@@ -99,7 +102,7 @@ if [[ -z "$pinata_jwt" ]]; then
   skip "Pinata: nothing saved (it is optional, and Fiddy does not use it yet)"
 else
   out="$(mktemp)"
-  status="$(probe_request 'https://api.pinata.cloud/data/testAuthentication' 'Authorization' "Bearer $pinata_jwt" "$out" 2>/dev/null || printf '000')"
+  status="$(probe_request 'https://api.pinata.cloud/data/testAuthentication' 'Authorization' "Bearer $pinata_jwt" "$out" 2>/dev/null)" || status="000"
   rm -f "$out"
   case "$status" in
     200) ok "Pinata: your key is accepted" ;;
@@ -128,7 +131,7 @@ if [[ -z "$node_url" ]]; then
   skip "Your node: none configured (Fiddy reads from the public node, chosen in the app)"
 else
   out="$(mktemp)"
-  status="$(probe_request "${node_url%/}/v1/info?dbstats=0" '' '' "$out" 2>/dev/null || printf '000')"
+  status="$(probe_request "${node_url%/}/v1/info?dbstats=0" '' '' "$out" 2>/dev/null)" || status="000"
   if [[ "$status" == "200" ]] && grep -q 'maxHeight' "$out" 2>/dev/null; then
     version="$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$out" | head -n1 | sed -E 's/.*"([^"]*)"$/\1/')"
     delay="$(grep -o '"blockDelay"[[:space:]]*:[[:space:]]*[0-9]*' "$out" | head -n1 | grep -o '[0-9]*$')"

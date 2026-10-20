@@ -316,8 +316,11 @@ _probe_request() {
 neynar_probe() {
   local key="$1" out status
   out="$(mktemp)"
+  # `|| status="000"` rather than `|| printf '000'`: curl prints its own 000 when
+  # it cannot connect, so the old form could report "000000" — a status no server
+  # ever sent, in a sentence a human has to read.
   status="$(_probe_request \
-    'https://api.neynar.com/v2/farcaster/user/bulk?fids=3' 'x-api-key' "$key" "$out" 2>/dev/null || printf '000')"
+    'https://api.neynar.com/v2/farcaster/user/bulk?fids=3' 'x-api-key' "$key" "$out" 2>/dev/null)" || status="000"
   rm -f "$out"
   NEYNAR_LAST_STATUS="$status"
   [[ "$status" == "200" ]]
@@ -328,7 +331,7 @@ pinata_probe() {
   local jwt="$1" out status
   out="$(mktemp)"
   status="$(_probe_request \
-    'https://api.pinata.cloud/data/testAuthentication' 'Authorization' "Bearer $jwt" "$out" 2>/dev/null || printf '000')"
+    'https://api.pinata.cloud/data/testAuthentication' 'Authorization' "Bearer $jwt" "$out" 2>/dev/null)" || status="000"
   rm -f "$out"
   PINATA_LAST_STATUS="$status"
   [[ "$status" == "200" ]]
@@ -339,7 +342,7 @@ node_probe() {
   local url="$1" out status version
   url="${url%/}"
   out="$(mktemp)"
-  status="$(_probe_request "$url/v1/info?dbstats=0" '' '' "$out" 2>/dev/null || printf '000')"
+  status="$(_probe_request "$url/v1/info?dbstats=0" '' '' "$out" 2>/dev/null)" || status="000"
   NODE_LAST_STATUS="$status"
   if [[ "$status" == "200" ]] && grep -q 'maxHeight' "$out" 2>/dev/null; then
     version="$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$out" 2>/dev/null | head -n1 | sed -E 's/.*"([^"]*)"$/\1/')"
