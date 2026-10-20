@@ -48,6 +48,9 @@ import {
   DirectCastsInvitePage,
   DownloadPage,
   FarcasterConnectPage,
+  FiddyAppsPage,
+  FiddyBrainsPage,
+  FiddyOnboardingPage,
   FollowersWithoutUsernamePage,
   FollowersWithUsernamePage,
   FollowersYouKnowWithoutUsernamePage,
@@ -909,6 +912,61 @@ const routes = {
     search: {},
     family: family('default'),
     Component: AgentPage,
+  },
+  /* Add a brain / Connect apps: the two sheets the positioning pivot is built
+     on. They are reachable signed in (from the agent surface) and signed out,
+     because neither needs an account. */
+  fiddyBrains: {
+    path: `${appPathPrefix}/agent/brains`,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyBrainsPage,
+  },
+  fiddyApps: {
+    path: `${appPathPrefix}/agent/apps`,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyAppsPage,
+  },
+  /* The setup flow. One route per screen: a step can be linked, reloaded and
+     re-entered, and the front door (`routes.homeFeed` signed out) renders the
+     first one. */
+  fiddyWelcome: {
+    path: '/welcome',
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyOnboardingPage,
+  },
+  fiddyWelcomeName: {
+    path: '/welcome/name',
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyOnboardingPage,
+  },
+  fiddyWelcomeBrain: {
+    path: '/welcome/brain',
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyOnboardingPage,
+  },
+  fiddyWelcomeApps: {
+    path: '/welcome/apps',
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyOnboardingPage,
+  },
+  fiddyWelcomeReady: {
+    path: '/welcome/ready',
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyOnboardingPage,
   },
   savedStarterPacks: {
     path: `${appPathPrefix}/saved/starter-packs`,

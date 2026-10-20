@@ -254,9 +254,21 @@ export const ComposePage = lazyWithPreload(() =>
   })),
 );
 
-export const FiddyWelcomePage = lazyWithPreload(() =>
-  import('~/pages/fiddyWelcome/FiddyWelcomePage').then((res) => ({
-    default: res.FiddyWelcomePage,
+export const FiddyOnboardingPage = lazyWithPreload(() =>
+  import('~/pages/fiddyOnboarding/FiddyOnboardingPage').then((res) => ({
+    default: res.FiddyOnboardingPage,
+  })),
+);
+
+export const FiddyBrainsPage = lazyWithPreload(() =>
+  import('~/pages/fiddyBrains/FiddyBrainsPage').then((res) => ({
+    default: res.FiddyBrainsPage,
+  })),
+);
+
+export const FiddyAppsPage = lazyWithPreload(() =>
+  import('~/pages/fiddyApps/FiddyAppsPage').then((res) => ({
+    default: res.FiddyAppsPage,
   })),
 );
 

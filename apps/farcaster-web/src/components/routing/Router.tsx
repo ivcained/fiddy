@@ -12,7 +12,7 @@ import { OnCurrentNavLinkClickedProvider } from '~/contexts/OnCurrentNavLinkClic
 import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
 import { AuthedLayout } from '~/layouts/AuthedLayout';
 import { UnauthedLayout } from '~/layouts/UnauthedLayout';
-import { FiddyWelcomePage, HomeFeedPage } from '~/lazy/pages';
+import { FiddyOnboardingPage, HomeFeedPage } from '~/lazy/pages';
 import { trackError } from '~/utils/errorUtils';
 import { getItem } from '~/utils/storageUtils';
 
@@ -392,6 +392,17 @@ const Router: React.FC = () => {
                 path={routes.trendingTopic.path}
                 element={<routes.trendingTopic.Component />}
               />
+              {/* The two pivot surfaces. Deliberately not gated behind sign-in:
+                  they work signed out too, and inside the Fiddy shell once
+                  you are in. */}
+              <Route
+                path={routes.fiddyBrains.path}
+                element={<routes.fiddyBrains.Component />}
+              />
+              <Route
+                path={routes.fiddyApps.path}
+                element={<routes.fiddyApps.Component />}
+              />
               {/* Unauthed Routes */}
               <Route
                 path={routes.news.path}
@@ -627,11 +638,36 @@ const Router: React.FC = () => {
                   isSignedIn ? (
                     <routes.homeFeed.Component />
                   ) : (
-                    <FiddyWelcomePage />
+                    /* The front door is the setup flow's first screen, not a
+                       sign-in wall. Signing in is the last step of it. */
+                    <FiddyOnboardingPage step="hi" />
                   )
                 }
               />
             </Route>
+            {/* The setup flow. Each screen is its own route so a step can be
+                linked and reloaded; none of them needs a signed-in session,
+                which is the whole point of the pivot. */}
+            <Route
+              path={routes.fiddyWelcome.path}
+              element={<FiddyOnboardingPage step="hi" />}
+            />
+            <Route
+              path={routes.fiddyWelcomeName.path}
+              element={<FiddyOnboardingPage step="name" />}
+            />
+            <Route
+              path={routes.fiddyWelcomeBrain.path}
+              element={<FiddyOnboardingPage step="brain" />}
+            />
+            <Route
+              path={routes.fiddyWelcomeApps.path}
+              element={<FiddyOnboardingPage step="apps" />}
+            />
+            <Route
+              path={routes.fiddyWelcomeReady.path}
+              element={<FiddyOnboardingPage step="ready" />}
+            />
             <Route
               path={routes.download.path}
               element={<routes.download.Component />}
