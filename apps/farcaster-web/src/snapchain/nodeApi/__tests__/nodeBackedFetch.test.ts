@@ -42,11 +42,15 @@ const buildHarness = ({ fid }: { fid?: number } = { fid: 3 }): Harness => {
 const json = async (response: Response): Promise<Json> =>
   (await response.json()) as Json;
 
-const messagesOf = (name: string): { hash: string; text: string; timestampMs: number }[] =>
-  (fixture(name).messages as {
-    hash: string;
-    data: { timestamp: number; castAddBody?: { text: string } };
-  }[])
+const messagesOf = (
+  name: string,
+): { hash: string; text: string; timestampMs: number }[] =>
+  (
+    fixture(name).messages as {
+      hash: string;
+      data: { timestamp: number; castAddBody?: { text: string } };
+    }[]
+  )
     .filter((message) => message.data.castAddBody)
     .map((message) => ({
       hash: message.hash,
@@ -60,10 +64,17 @@ describe('the node-backed fetch', () => {
     it('answers POST /v2/feed-items with real casts from the node', async () => {
       const { fetch: nodeBackedFetch, log } = buildHarness();
 
-      const response = await nodeBackedFetch('https://farcaster.xyz/~api/v2/feed-items', {
-        method: 'POST',
-        body: JSON.stringify({ feedKey: 'home', feedType: 'default', updateState: true }),
-      });
+      const response = await nodeBackedFetch(
+        'https://farcaster.xyz/~api/v2/feed-items',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            feedKey: 'home',
+            feedType: 'default',
+            updateState: true,
+          }),
+        },
+      );
 
       expect(response.status).toBe(200);
       const body = await json(response);
@@ -78,19 +89,28 @@ describe('the node-backed fetch', () => {
       expect(first.id).toBe(expected[0]!.hash);
       expect((first.cast as { text: string }).text).toBe(expected[0]!.text);
       expect((first.cast as { author: { fid: number } }).author.fid).toBe(3);
-      expect((first.cast as { timestamp: number }).timestamp).toBe(expected[0]!.timestampMs);
+      expect((first.cast as { timestamp: number }).timestamp).toBe(
+        expected[0]!.timestampMs,
+      );
 
       // The read really went to the node's own routes.
-      expect(log).toContain('/v1/castsByFid?fid=3&pageSize=25&reverse=true');
-      expect(log.some((entry) => entry.startsWith('/v1/linksByFid?fid=3'))).toBe(true);
+      // The feed's per-author read is bounded to 10 casts (measured: 25 was part
+      // of a ~55s first page); the merge below still takes the newest 25.
+      expect(log).toContain('/v1/castsByFid?fid=3&pageSize=10&reverse=true');
+      expect(
+        log.some((entry) => entry.startsWith('/v1/linksByFid?fid=3')),
+      ).toBe(true);
     });
 
     it('refuses a ranked feed instead of serving the follow graph under its name', async () => {
       const { fetch: nodeBackedFetch } = buildHarness();
-      const response = await nodeBackedFetch('https://farcaster.xyz/~api/v2/feed-items', {
-        method: 'POST',
-        body: JSON.stringify({ feedKey: 'home', feedType: 'for-you' }),
-      });
+      const response = await nodeBackedFetch(
+        'https://farcaster.xyz/~api/v2/feed-items',
+        {
+          method: 'POST',
+          body: JSON.stringify({ feedKey: 'home', feedType: 'for-you' }),
+        },
+      );
 
       expect(response.status).toBe(501);
       const body = await json(response);
@@ -101,18 +121,24 @@ describe('the node-backed fetch', () => {
   describe('profiles', () => {
     it('answers GET /v2/user from user data plus counted links', async () => {
       const { fetch: nodeBackedFetch } = buildHarness();
-      const response = await nodeBackedFetch('https://farcaster.xyz/~api/v2/user?fid=3');
+      const response = await nodeBackedFetch(
+        'https://farcaster.xyz/~api/v2/user?fid=3',
+      );
       const body = await json(response);
       const user = (body.result as { user: Json }).user;
 
       expect(user.fid).toBe(3);
       // The handle and bio are the account's own user-data messages.
       expect(user.username).toBe('dwr');
-      expect((user.profile as { bio: { text: string } }).bio.text.length).toBeGreaterThan(0);
+      expect(
+        (user.profile as { bio: { text: string } }).bio.text.length,
+      ).toBeGreaterThan(0);
 
       // Counts are counted, not invented: they are what the fixture pages hold.
-      const followers = fixture('linksByTargetFid.fid3.follow.json').messages as unknown[];
-      const following = fixture('linksByFid.fid3.follow.json').messages as unknown[];
+      const followers = fixture('linksByTargetFid.fid3.follow.json')
+        .messages as unknown[];
+      const following = fixture('linksByFid.fid3.follow.json')
+        .messages as unknown[];
       expect(user.followerCount).toBe(followers.length);
       expect(user.followingCount).toBe(following.length);
     });
@@ -128,9 +154,13 @@ describe('the node-backed fetch', () => {
 
     it('answers GET /v2/me with the signed-in account', async () => {
       const { fetch: nodeBackedFetch } = buildHarness();
-      const body = await json(await nodeBackedFetch('https://farcaster.xyz/~api/v2/me'));
+      const body = await json(
+        await nodeBackedFetch('https://farcaster.xyz/~api/v2/me'),
+      );
       expect((body.result as { user: { fid: number } }).user.fid).toBe(3);
-      expect((body.result as { enabledFeatureFlags: string[] }).enabledFeatureFlags).toEqual([]);
+      expect(
+        (body.result as { enabledFeatureFlags: string[] }).enabledFeatureFlags,
+      ).toEqual([]);
     });
   });
 
@@ -138,9 +168,12 @@ describe('the node-backed fetch', () => {
     it('maps the node’s verification messages to the API’s shape', async () => {
       const { fetch: nodeBackedFetch } = buildHarness();
       const body = await json(
-        await nodeBackedFetch('https://farcaster.xyz/~api/v2/verifications?fid=2&limit=15'),
+        await nodeBackedFetch(
+          'https://farcaster.xyz/~api/v2/verifications?fid=2&limit=15',
+        ),
       );
-      const verifications = (body.result as { verifications: Json[] }).verifications;
+      const verifications = (body.result as { verifications: Json[] })
+        .verifications;
 
       const recorded = fixture('verificationsByFid.fid2.json').messages as {
         data: { verificationAddAddressBody?: { address: string } };
@@ -186,21 +219,26 @@ describe('the node-backed fetch', () => {
 
       expect(response.status).toBe(501);
       const body = await json(response);
-      expect(JSON.stringify(body)).toContain('addresses a cast by its author and its hash');
+      expect(JSON.stringify(body)).toContain(
+        'addresses a cast by its author and its hash',
+      );
     });
   });
 
   describe('unseen counts', () => {
     it('derives them from mentions and follows, and sums the tab', async () => {
       const { fetch: nodeBackedFetch } = buildHarness();
-      const body = await json(await nodeBackedFetch('https://farcaster.xyz/~api/v2/unseen'));
+      const body = await json(
+        await nodeBackedFetch('https://farcaster.xyz/~api/v2/unseen'),
+      );
       const result = body.result as {
         notificationsCount: number;
         notificationTabs: { tab: string; unseenCount: number }[];
         inboxCount: number;
       };
 
-      const mentions = fixture('castsByMention.fid3.json').messages as unknown[];
+      const mentions = fixture('castsByMention.fid3.json')
+        .messages as unknown[];
       expect(result.notificationsCount).toBeGreaterThanOrEqual(mentions.length);
       expect(
         result.notificationTabs.reduce((sum, tab) => sum + tab.unseenCount, 0),
@@ -219,7 +257,9 @@ describe('the node-backed fetch', () => {
       const context = (body.result as { context: Json }).context;
 
       expect(context.regularCastByteLimit).toBe(320);
-      expect(context.notificationTabsV2).toEqual([{ id: 'default', name: 'All' }]);
+      expect(context.notificationTabsV2).toEqual([
+        { id: 'default', name: 'All' },
+      ]);
       // Nothing was asked of the node for this.
       expect(log).toEqual([]);
     });
@@ -244,10 +284,14 @@ describe('the node-backed fetch', () => {
   describe('what the node cannot answer', () => {
     it('names whose job the ranked feeds are, and touches no node route', async () => {
       const { fetch: nodeBackedFetch, log } = buildHarness();
-      const response = await nodeBackedFetch('https://farcaster.xyz/~api/v2/explore-feed');
+      const response = await nodeBackedFetch(
+        'https://farcaster.xyz/~api/v2/explore-feed',
+      );
 
       expect(response.status).toBe(501);
-      expect(JSON.stringify(await json(response))).toContain('ranking is an indexer’s job');
+      expect(JSON.stringify(await json(response))).toContain(
+        'ranking is an indexer’s job',
+      );
       expect(log).toEqual([]);
     });
 
@@ -262,9 +306,13 @@ describe('the node-backed fetch', () => {
 
     it('answers an unclassified endpoint honestly instead of with empty data', async () => {
       const { fetch: nodeBackedFetch } = buildHarness();
-      const response = await nodeBackedFetch('https://farcaster.xyz/~api/v1/creator-rewards');
+      const response = await nodeBackedFetch(
+        'https://farcaster.xyz/~api/v1/creator-rewards',
+      );
       expect(response.status).toBe(501);
-      expect(JSON.stringify(await json(response))).toContain('no node-backed reader');
+      expect(JSON.stringify(await json(response))).toContain(
+        'no node-backed reader',
+      );
     });
   });
 
@@ -284,10 +332,16 @@ describe('the node-backed fetch', () => {
         }
         seen.push(String(input));
         return Promise.resolve(
-          new Response(JSON.stringify({ messages: [], nextPageToken: TERMINAL_PAGE_TOKEN }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify({
+              messages: [],
+              nextPageToken: TERMINAL_PAGE_TOKEN,
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          ),
         );
       } as unknown as typeof fetch;
 
@@ -297,7 +351,9 @@ describe('the node-backed fetch', () => {
         fetchImpl: strictFetch,
       });
 
-      const response = await handle.fetch('https://farcaster.xyz/~api/v2/user-casts?fid=3');
+      const response = await handle.fetch(
+        'https://farcaster.xyz/~api/v2/user-casts?fid=3',
+      );
 
       expect(response.status).toBe(200);
       expect(seen.length).toBeGreaterThan(0);
@@ -307,9 +363,13 @@ describe('the node-backed fetch', () => {
   describe('with no account signed in', () => {
     it('says so, rather than answering with somebody else’s data', async () => {
       const { fetch: nodeBackedFetch } = buildHarness({ fid: undefined });
-      const response = await nodeBackedFetch('https://farcaster.xyz/~api/v2/me');
+      const response = await nodeBackedFetch(
+        'https://farcaster.xyz/~api/v2/me',
+      );
       expect(response.status).toBe(501);
-      expect(JSON.stringify(await json(response))).toContain('No account is signed in');
+      expect(JSON.stringify(await json(response))).toContain(
+        'No account is signed in',
+      );
     });
   });
 });
