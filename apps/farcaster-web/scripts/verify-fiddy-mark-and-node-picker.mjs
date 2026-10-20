@@ -202,6 +202,31 @@ const storedChoice = (page) =>
       }),
   );
 
+/**
+ * Wait until the shell is on screen and stays there. Saving a choice rebuilds
+ * the client, and the shell has a moment of nothing while that happens — a shot
+ * taken then is a picture of the background.
+ */
+const waitForStableShell = async (page, tries = 30) => {
+  let last = '';
+  for (let i = 0; i < tries; i += 1) {
+    const card = await readPicker(page);
+    const pill = await readPill(page);
+    const now = `${card.present}|${card.text.length}|${pill.length}`;
+    if (
+      card.present &&
+      card.text.length > 60 &&
+      pill.length > 0 &&
+      now === last
+    ) {
+      return true;
+    }
+    last = now;
+    await page.waitForTimeout(1000);
+  }
+  return false;
+};
+
 /** Sign in through the stubbed relay, and land inside the shell. */
 const signIn = async (page) => {
   await page.route('https://relay.farcaster.xyz/**', async (route) => {
@@ -407,6 +432,7 @@ const run = async () => {
   await page.waitForTimeout(5000);
   const publicInUse = await readPicker(page);
   const publicPill = await readPill(page);
+  await waitForStableShell(page);
   await page.screenshot({ path: `${OUT}/node-picker-public-chosen-1440.png` });
 
   check(
@@ -457,6 +483,7 @@ const run = async () => {
   await page.waitForTimeout(6000);
   const ownInUse = await readPicker(page);
   const ownPill = await readPill(page);
+  await waitForStableShell(page);
   await page.screenshot({ path: `${OUT}/node-picker-own-chosen-1440.png` });
 
   check(
