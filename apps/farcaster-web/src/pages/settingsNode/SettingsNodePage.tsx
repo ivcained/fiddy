@@ -58,7 +58,12 @@ import {
   saveAppKey,
   saveAppNonce,
 } from '~/snapchain/appKeyStorage';
-import { resolveNodeBaseUrl } from '~/snapchain/nodeEnv';
+import {
+  chooseNode,
+  resetNodeChoice,
+  resolveEffectiveNodeBaseUrl,
+  type NodeChoice,
+} from '~/snapchain/nodeChoice';
 import {
   type ClientLabels,
   loadClientLabels,
@@ -69,10 +74,12 @@ import {
   withClientLabel,
 } from '~/snapchain/nodePreferences';
 import { useNodeClient } from '~/snapchain/useNodeClient';
+import { useNodeChoice } from '~/snapchain/useNodeChoice';
 import { trackError } from '~/utils/errorUtils';
 
 import { AppKeyCard } from './Component/AppKeyCard';
 import { ClientFilterCard } from './Component/ClientFilterCard';
+import { NodeChoiceCard } from './Component/NodeChoiceCard';
 import { NodeComposer } from './Component/NodeComposer';
 import { NodeFeed } from './Component/NodeFeed';
 import { NodeStatusCard } from './Component/NodeStatusCard';
@@ -90,6 +97,11 @@ const nodeError = (operation: string, error: unknown) =>
 const SettingsNodePage = memo(() => {
   const { fid } = useCurrentUser();
   const node = useNodeClient();
+
+  // The server this reader chose (a public one, or their own). Restoring it is
+  // what points the rest of this page — and the pill, and the feed — at it, so
+  // it happens before anything is read.
+  const nodeChoice = useNodeChoice(fid ?? undefined);
 
   // Node health state
   const [nodeHealth, setNodeHealth] = useState<{
@@ -185,7 +197,7 @@ const SettingsNodePage = memo(() => {
     if (!node) {
       setNodeHealth({
         ok: false,
-        baseUrl: resolveNodeBaseUrl(),
+        baseUrl: resolveEffectiveNodeBaseUrl(),
         latencyMs: 0,
         error: 'No node client configured',
       });
@@ -569,6 +581,19 @@ const SettingsNodePage = memo(() => {
     [fid],
   );
 
+  // Choosing a server is a preference like the filter: stored per FID, and
+  // applied to the running session at once. The health check below re-runs by
+  // itself, because the client it uses is rebuilt from the new choice.
+  const handleChooseNode = useCallback(
+    (choice: NodeChoice) => (fid ? chooseNode(fid, choice) : Promise.resolve()),
+    [fid],
+  );
+
+  const handleResetNode = useCallback(
+    () => (fid ? resetNodeChoice(fid) : Promise.resolve()),
+    [fid],
+  );
+
   // Name (or un-name) another client. Labels are the reader's, never invented.
   const handleLabelClient = useCallback(
     (clientId: string, label: string) => {
@@ -630,10 +655,20 @@ const SettingsNodePage = memo(() => {
             {/* Plain words first: nothing on this screen is needed to use
                 Fiddy, and the precise words below are the ones you configure. */}
             <p className="text-sm text-muted">
-              This is the Advanced part. Point Fiddy at the server you run and
-              everything you read and write goes through it — the rest of Fiddy
-              works without it, and nothing here is needed to get started.
+              This is the Advanced part. Point Fiddy at the server you want to
+              read through — your own, or one that is already open to everyone —
+              and everything you read and write goes through it. The rest of
+              Fiddy works without it, and nothing here is needed to get started.
             </p>
+
+            {/* Where Fiddy reads from: the reader's choice, and the first
+                thing on this screen because everything below it reads through
+                whichever server it names. */}
+            <NodeChoiceCard
+              choice={nodeChoice}
+              onChoose={handleChooseNode}
+              onReset={handleResetNode}
+            />
 
             {/* Node Status Card */}
             <NodeStatusCard

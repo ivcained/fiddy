@@ -160,4 +160,80 @@ describe('NodeStatusPillView', () => {
       '/~/settings/node',
     );
   });
+
+  it('says a public server when a public one answered, not your own setup', () => {
+    render(
+      <NodeStatusPillView state="served" health={health(true)} kind="public" />,
+    );
+    expect(screen.getByRole('status').textContent).toBe(
+      'Answers come from a public server · v0.13.5',
+    );
+  });
+
+  it('keeps saying your own setup when that is the one that answered', () => {
+    render(
+      <NodeStatusPillView state="served" health={health(true)} kind="own" />,
+    );
+    expect(screen.getByRole('status').textContent).toBe(
+      'Answers come from your own setup · v0.13.5',
+    );
+  });
+
+  it('does not let a public server borrow the words for a machine you own', () => {
+    render(
+      <NodeStatusPillView
+        state="unreachable"
+        health={health(false)}
+        kind="public"
+      />,
+    );
+    expect(screen.getByRole('status').textContent).toBe(
+      'That public server is offline',
+    );
+    // And the phone-length version still says which kind it was.
+    render(
+      <NodeStatusPillView state="served" health={health(true)} kind="public" short />,
+    );
+    expect(screen.getAllByRole('status')[1].textContent).toBe('Public');
+  });
+
+  it('keeps the jargon ban once a server has been chosen', () => {
+    const seen = new Set<string>();
+    for (const kind of ['public', 'own'] as const) {
+      for (const state of [
+        'checking',
+        'served',
+        'unreachable',
+        'relay',
+      ] as const) {
+        const { unmount } = render(
+          <NodeStatusPillView
+            state={state}
+            health={health(state === 'served')}
+            kind={kind}
+          />,
+        );
+        seen.add(
+          `${screen.getByRole('status').textContent ?? ''} ${
+            screen.getByRole('link').getAttribute('title') ?? ''
+          }`,
+        );
+        unmount();
+      }
+    }
+    const all = [...seen].join(' ').toLowerCase();
+    for (const jargon of [
+      'node',
+      'snapchain',
+      'relay',
+      'shard',
+      'scope',
+      'ttl',
+      'signer',
+      'gasless',
+      '/v1/',
+    ]) {
+      expect(all).not.toContain(jargon);
+    }
+  });
 });
