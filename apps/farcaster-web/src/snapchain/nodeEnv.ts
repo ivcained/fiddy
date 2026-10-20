@@ -21,19 +21,54 @@ export const DEFAULT_NODE_URL = 'http://127.0.0.1:3381';
 /**
  * Resolve the base URL the browser client should use.
  *
- * When VITE_SNAPCHAIN_HTTP_URL is set and non-empty, use it directly.
- * Otherwise fall back to the proxy path (same-origin request).
+ * When VITE_SNAPCHAIN_HTTP_URL is set and non-empty, use it directly — unless
+ * that URL is a *different origin* than the page and the page is a browser.
+ * A browser can only read a node it is allowed to reach: a cross-origin node
+ * has to answer CORS, and a Snapchain node answers plain GETs (`*`) but not the
+ * preflight a JSON POST needs — which is exactly why `/snapchain-api` exists.
+ * This repo's dev and preview servers both proxy that path to the same node,
+ * so in a browser the relay is the working route to the node the operator
+ * configured. MEASURED: reading a node directly from a page on another origin
+ * fails the write-shaped requests (`submitMessage`, the feed's POST) at the
+ * preflight, while the same requests through the relay reach the node.
+ *
+ * Escape hatch: `VITE_SNAPCHAIN_DIRECT=true` forces the direct URL even when it
+ * is cross-origin — for a deployment that serves the app and the node from one
+ * host with correct CORS.
  *
  * @param env - The import.meta.env object (allows test injection)
+ * @param pageOrigin - The page's origin; defaults to the browser's own
  */
 export const resolveNodeBaseUrl = (
   env: Record<string, unknown> = import.meta.env,
+  pageOrigin: string | undefined = typeof window === 'undefined'
+    ? undefined
+    : window.location.origin,
 ): string => {
   const directUrl = env.VITE_SNAPCHAIN_HTTP_URL as string | undefined;
-  if (directUrl && directUrl.trim().length > 0) {
-    return directUrl.trim();
+  if (!directUrl || directUrl.trim().length === 0) {
+    return NODE_PROXY_PATH;
   }
-  return NODE_PROXY_PATH;
+
+  const trimmed = directUrl.trim();
+
+  const forceDirect = env.VITE_SNAPCHAIN_DIRECT as string | undefined;
+  if (forceDirect === 'true') {
+    return trimmed;
+  }
+
+  if (pageOrigin !== undefined) {
+    try {
+      if (new URL(trimmed).origin !== pageOrigin) {
+        return NODE_PROXY_PATH;
+      }
+    } catch {
+      // Not a URL at all: the relay is the safer answer than a broken one.
+      return NODE_PROXY_PATH;
+    }
+  }
+
+  return trimmed;
 };
 
 /**

@@ -15,6 +15,7 @@
 
 import type { SnapchainNodeClient } from './http';
 import type { NodeMessage } from './types';
+import { isTerminalPageToken } from './wire';
 
 export interface FetchFollowingOptions {
   node: SnapchainNodeClient;
@@ -34,7 +35,8 @@ export const fetchFollowing = async ({
   pageSize = 100,
   linkType = 'follow',
 }: FetchFollowingOptions): Promise<number[]> => {
-  const following: number[] = [];
+  const following = new Set<number>();
+  const seenTokens = new Set<string>();
   let pageToken: string | undefined;
   do {
     // The node pages ascending unless asked otherwise (measured against a live
@@ -45,13 +47,27 @@ export const fetchFollowing = async ({
     for (const message of page.messages) {
       const targetFid = message.link?.targetFid;
       if (typeof targetFid === 'number') {
-        following.push(targetFid);
+        following.add(targetFid);
       }
     }
     pageToken = page.nextPageToken;
-  } while (pageToken && following.length < limit);
+    // `isTerminalPageToken` is load-bearing, not tidiness: a live node answers
+    // the terminal token `[null,null]` with the FIRST page again, so a loop
+    // that only checks "is there a token" never ends.
+    //
+    // The token memory below is the second guard, for the other way a node can
+    // stop making progress: it hands back the SAME cursor twice (a page whose
+    // next request repeats it). Without this, a wedged node turns the follow
+    // graph into an unbounded loop in the browser tab.
+    if (pageToken !== undefined && seenTokens.has(pageToken)) {
+      break;
+    }
+    if (pageToken !== undefined) {
+      seenTokens.add(pageToken);
+    }
+  } while (pageToken && !isTerminalPageToken(pageToken) && following.size < limit);
 
-  return [...new Set(following)].slice(0, limit);
+  return [...following].slice(0, limit);
 };
 
 export interface FetchCastsOptions {

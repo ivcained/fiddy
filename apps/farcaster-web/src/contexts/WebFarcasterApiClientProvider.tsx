@@ -4,12 +4,14 @@ import {
   OnError,
   OnFetchStart,
 } from 'farcaster-client-data';
-import { FarcasterApiClientProvider } from 'farcaster-client-hooks';
-import React, { FC, memo, ReactNode, useCallback, useMemo } from 'react';
+import { FarcasterApiClientProvider, useCachedOnboardingState } from 'farcaster-client-hooks';
+import React, { FC, memo, ReactNode, useCallback, useMemo, useRef } from 'react';
 
-import { baseApiUrl, wsUrl } from '~/constants/api';
+import { baseApiUrl, localApiEnabled, wsUrl } from '~/constants/api';
 import { isDev } from '~/constants/env';
 import { useRecentFetch } from '~/contexts/RecentFetchProvider';
+import { resolveNodeBaseUrl } from '~/snapchain/nodeEnv';
+import { createNodeBackedFetch, isNodeBackedClientEnabled } from '~/snapchain/nodeApi';
 import { Analytics } from '~/utils/analyticsUtils';
 import { getPersistedDeviceId } from '~/utils/deviceIdUtils';
 
@@ -36,6 +38,39 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
       }),
       [],
     );
+
+    // Who the node-backed reads are about. The cached onboarding state is the
+    // same source the shell renders the signed-in account from, and it never
+    // fetches — which matters, because this has to answer synchronously inside
+    // the client's requests, including the ones that run while the network is
+    // what is broken.
+    const signedInFid = useCachedOnboardingState().result.state.user?.fid;
+    const signedInFidRef = useRef<number | undefined>(signedInFid);
+    signedInFidRef.current = signedInFid;
+
+    /**
+     * The node-backed read adapter.
+     *
+     * It replaces the hosted API as the client's data source: same `fetch`
+     * signature, same request paths, answers read from the configured
+     * Snapchain node instead of from `farcaster.xyz`. See
+     * `~/snapchain/nodeApi` for what is node-backed, what is local, and what
+     * the node genuinely cannot answer.
+     *
+     * Not installed when the fork's mock API is on (`farcasterApi.local`):
+     * that switch exists to serve the shell from a mock, and quietly rerouting
+     * it to the node would make the mock lie about what it is showing.
+     */
+    const nodeBackedFetch = useMemo(() => {
+      if (localApiEnabled || !isNodeBackedClientEnabled()) {
+        return undefined;
+      }
+      return createNodeBackedFetch({
+        nodeBaseUrl: resolveNodeBaseUrl(),
+        getSignedInFid: () => signedInFidRef.current,
+        fetchImpl: fetch,
+      }).fetch;
+    }, []);
 
     const onFetchStart: OnFetchStart = useCallback(() => {
       trackFetch();
@@ -70,7 +105,7 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         meta={meta}
         onError={onError}
         onFetchStart={onFetchStart}
-        fetch={fetch}
+        fetch={nodeBackedFetch ?? fetch}
         getDeviceId={Analytics.getDeviceId}
         getSessionId={Analytics.getSessionId}
       >
