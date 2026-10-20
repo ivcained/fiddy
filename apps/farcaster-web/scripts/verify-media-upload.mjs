@@ -3,18 +3,30 @@
 //
 //   node scripts/verify-media-upload.mjs
 //
-// Preconditions - two servers, each told about the other:
+// Preconditions - the media host and the client on the SAME page origin, which
+// is how production is shaped (fiddy.fun serves the client and the bytes). A
+// second localhost port would make the browser refuse the upload: an https page
+// may not POST to an http URL, and the composer's own error copy is exactly what
+// that looks like from the outside ("we couldn't reach the photo host"). So the
+// client's dev server proxies the media path through to the service:
 //
 //   1. the media service (the repo with app/api/fiddy/media):
 //        cd /Users/lc/legitmate-farcaster
-//        FIDDY_MEDIA_DIR=$HOME/.fiddy-media-dev LEGITMATE_SINGLE_USER_SUBJECT=dev-owner \
-//        FIDDY_ALLOWED_ORIGINS=https://localhost:5174 npx next dev -p 3217
+//        FIDDY_MEDIA_DIR=$HOME/.fiddy-media-dev \
+//        FIDDY_MEDIA_PUBLIC_URL=https://localhost:5174 \
+//        npx next dev --port 3217
 //
-//   2. the client, built with the media host it should upload to:
+//   2. the client, built with the media host it should upload to, and with
+//      `/api/fiddy/media` proxied to the service (see
+//      `scripts/probe.vite.config.mjs`: the app's config plus a `cacheDir` of
+//      its own and this proxy):
 //        cd apps/farcaster-web
 //        SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
-//        VITE_FIDDY_MEDIA_URL=http://localhost:3217 VITE_SNAPCHAIN_DEBUG=true \
-//        npx vite --port 5174
+//        VITE_FIDDY_MEDIA_URL=https://localhost:5174 VITE_SNAPCHAIN_DEBUG=true \
+//        npx vite --config scripts/probe.vite.config.mjs --port 5174
+//
+//      (without the proxy: MEDIA_SERVER and VITE_FIDDY_MEDIA_URL both point at
+//      the service's own origin, which only works when neither side is https)
 //
 // Only the SIWF relay is stubbed (with a REAL SIWE message signed by a throwaway
 // key, so the app's own verifier accepts the sign-in for real), exactly as
@@ -51,7 +63,9 @@ import { createSiweMessage } from 'viem/siwe';
 import { privateKeyToAccount } from 'viem/accounts';
 
 const SERVER = process.env.NODE_BACKED_SERVER ?? 'https://localhost:5174';
-const MEDIA = (process.env.MEDIA_SERVER ?? 'http://localhost:3217').replace(/\/+$/, '');
+// The media host is the client's own origin unless told otherwise: production
+// serves both from fiddy.fun (see the header).
+const MEDIA = (process.env.MEDIA_SERVER ?? SERVER).replace(/\/+$/, '');
 const OUT = process.env.MEDIA_SHOT_DIR ?? os.tmpdir();
 const DOMAIN = new URL(SERVER).host;
 const NONCE = 'f'.repeat(128);
@@ -152,6 +166,12 @@ const readSurface = (page) =>
       text,
       onboardingSheet: Boolean(document.querySelector('[data-fiddy="onboarding"]')),
       deviceOnlyLanding: Boolean(document.querySelector('[data-fiddy="device-only-session"]')),
+      // The shell itself: a signed-in client draws its frame and a Cast
+      // control. Without this a blank page would look like a landed sign-in.
+      shellMounted: Boolean(document.querySelector('.fiddy-shell-frame')),
+      castControl: Array.from(document.querySelectorAll('button')).some(
+        (button) => (button.innerText || '').trim() === 'Cast' && button.offsetParent,
+      ),
     };
   });
 
@@ -238,7 +258,7 @@ const run = async () => {
 
   let surface = await readSurface(page);
   for (let i = 0; i < 60; i += 1) {
-    if (surface.path === '/' && !surface.onboardingSheet && !surface.deviceOnlyLanding) {
+    if (surface.path === '/' && surface.shellMounted && !surface.onboardingSheet && !surface.deviceOnlyLanding) {
       break;
     }
     await page.waitForTimeout(1000);
@@ -246,12 +266,18 @@ const run = async () => {
   }
   check(
     'a completed sign-in lands in the client',
-    surface.path === '/' && !surface.onboardingSheet && !surface.deviceOnlyLanding,
-    `path=${surface.path} onboarding=${surface.onboardingSheet} deviceOnly=${surface.deviceOnlyLanding}`,
+    surface.path === '/' &&
+      surface.shellMounted &&
+      !surface.onboardingSheet &&
+      !surface.deviceOnlyLanding,
+    `path=${surface.path} shell=${surface.shellMounted} onboarding=${surface.onboardingSheet} deviceOnly=${surface.deviceOnlyLanding}`,
   );
 
   // ── 2. the composer ───────────────────────────────────────────────────────
-  const castButtons = await page.locator('button:has-text("Cast")').all();
+  // The shell keeps a second Cast control in the DOM for narrow screens; only
+  // one of them is on screen, and clicking the hidden one would never open
+  // anything, so ask for the visible one.
+  const castButtons = await page.locator('button:has-text("Cast"):visible').all();
   let opened = false;
   for (const button of castButtons) {
     const text = ((await button.innerText()) || '').trim();
@@ -265,39 +291,103 @@ const run = async () => {
     await page.keyboard.press('n');
   }
 
-  let composerReady = false;
+  let editorOpen = false;
+  let placeholderSeen = false;
   try {
     await page.waitForSelector(`${MODAL_ROOT} [contenteditable="true"]`, { timeout: 30000 });
-    composerReady = await page
+    editorOpen = true;
+    placeholderSeen = await page
       .locator(`${MODAL_ROOT}`)
       .getByText(PLACEHOLDER)
       .first()
       .isVisible()
       .catch(() => false);
   } catch {
-    composerReady = false;
+    editorOpen = false;
   }
-  await page.screenshot({ path: `${OUT}/media-composer-open.png` });
-  check(
-    'the composer opens over the feed',
-    composerReady && picks.scoped > 0,
-    `clicked=${opened} fileInputs=${JSON.stringify(picks)} composerText=${JSON.stringify(
-      composer_text_of(await readSurface(page)),
-    )}`,
-  );
-
-  // ── 3. pick a photo: the mint, then the upload ─────────────────────────────
-  const uploadResponse = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/fiddy/media') && response.request().method() === 'POST',
-    { timeout: 90000 },
-  );
+  // The composer's own file input is asked for before it is judged, so the
+  // measure and the assertion cannot disagree (and so the check can report
+  // what it found either way).
   const scopedInput = page.locator(`${MODAL_ROOT} input[type=file]`);
   const anywhereInput = page.locator('input[type=file]');
   const picks = { scoped: await scopedInput.count(), anywhere: await anywhereInput.count() };
+
+  await page.screenshot({ path: `${OUT}/media-composer-open.png` });
+  check(
+    'the composer opens over the feed',
+    editorOpen && picks.scoped > 0,
+    `clicked=${opened} editor=${editorOpen} placeholderSeen=${placeholderSeen} fileInputs=${JSON.stringify(
+      picks,
+    )} composerText=${JSON.stringify(composer_text_of(await readSurface(page)))}`,
+  );
+
+  // ── 3. pick a photo: the mint, then the upload ─────────────────────────────
+  // A missing upload must be a reported failure, not an unhandled rejection
+  // that takes the whole probe down before it prints anything.
+  const uploadResponse = page
+    .waitForResponse(
+      (response) =>
+        response.url().includes('/api/fiddy/media') && response.request().method() === 'POST',
+      { timeout: 45000 },
+    )
+    .catch(() => null);
   const fileInput = picks.scoped > 0 ? scopedInput.first() : anywhereInput.first();
-  await fileInput.setInputFiles(photo.file);
-  const uploaded = await uploadResponse;
+  let uploaded = null;
+  // Pick the photo the way a person does: press the composer's Media button and
+  // answer the file dialog it opens. Setting the input directly misses the
+  // picker's own click step (the mint it prefetches), and a pick can land on a
+  // node React is about to replace.
+  const mediaButton = page.locator(`${MODAL_ROOT} button[title="Media"]`).first();
+  try {
+    let picked = false;
+    if ((await mediaButton.count()) > 0) {
+      await mediaButton.waitFor({ state: 'visible', timeout: 30000 });
+      const chooser = page.waitForEvent('filechooser', { timeout: 20000 });
+      await mediaButton.click();
+      try {
+        await (await chooser).setFiles(photo.file);
+        picked = true;
+      } catch {
+        picked = false;
+      }
+    }
+    if (!picked) {
+      await fileInput.setInputFiles(photo.file);
+    }
+    uploaded = await uploadResponse;
+  } catch (error) {
+    check(
+      'the composer accepts a picked photo',
+      false,
+      `picking the photo threw: ${String(error).slice(0, 200)}`,
+    );
+  }
+  if (!uploaded) {
+    const adapterLog = await page.evaluate(() => window.__nodeBackedRequests ?? []);
+    const mint = adapterLog.find((entry) => /generate-image-upload-url$/.test(entry.path));
+    check(
+      'the upload-URL request the composer made was answered by the MEDIA route, not a 501',
+      mint?.kind === 'media' && mint?.status === 200,
+      `mint entry: ${JSON.stringify(mint)?.slice(0, 240) ?? 'never seen'}`,
+    );
+    check(
+      'the browser POSTed the picked bytes to OUR media host',
+      false,
+      mediaRequests.join(' | ') || 'no POST to the media host within 90s of picking the photo',
+    );
+    const left = await page.evaluate(() => window.__mediaFetchLog ?? []);
+    console.log('\n── failed run: what the adapter classified ──');
+    for (const entry of adapterLog.slice(-14)) {
+      console.log(`  ${entry.method} ${entry.path} kind=${entry.kind} status=${entry.status}`);
+    }
+    console.log('\n── failed run: requests that left the page ──');
+    for (const line of left.slice(-20)) console.log(`  ${line}`);
+    console.log('\n── failed run: console errors ──');
+    for (const line of consoleErrors.slice(0, 8)) console.log(`  ${line}`);
+    await page.screenshot({ path: `${OUT}/media-upload-failed.png` });
+    await browser.close();
+    throw new Error('no upload to the media host — the checks and dump above are the evidence');
+  }
   const uploadedBody = await uploaded.json().catch(() => ({}));
   const mediaRequest = uploaded.request();
 
@@ -444,6 +534,9 @@ const run = async () => {
     leftThePage.filter((line) => line.includes('/v2/casts')).join(' | ') || 'no cast request left the page',
   );
 
+  // Read the adapter's own tally while the page is still alive.
+  const adapterWrites = await page.evaluate(() => (window.__nodeBackedRequests ?? []).length);
+
   await ctx.request.dispose();
   await browser.close();
 
@@ -460,7 +553,6 @@ const run = async () => {
   for (const line of mediaRequests) {
     console.log(`  ${clip(line)}`);
   }
-  const adapterWrites = await page.evaluate(() => (window.__nodeBackedRequests ?? []).length);
   console.log(`\nadapter classifications this run: ${adapterWrites} (debug surface)`);
   console.log(
     `\nconsole errors: ${consoleErrors.length}${consoleErrors.length ? ` (first: ${consoleErrors[0]})` : ''}`,
