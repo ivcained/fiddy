@@ -30,11 +30,21 @@ type NodeCannotAnswerPanelProps = {
  * standing around it. The same panel is what the direct-cast route shows in
  * place of an inbox that would otherwise be empty (`data-fiddy` marker both
  * cases share: `node-cannot-answer`).
+ *
+ * TWO FAILURES, ONE PANEL, TWO TITLES. The adapter answers `501` when your node
+ * cannot read something at all, and `502` when it was asked and did not answer.
+ * Those are different facts and the heading says which one it is: nothing is
+ * "on your node" for a refusal, and the retry it offers (the `onRetry` the
+ * caller passes for a `502`) is the one that can change a timeout.
  */
 const NodeCannotAnswerPanel: FC<NodeCannotAnswerPanelProps> = memo(
   ({ label, reason, onRetry }) => (
     <div className="fiddy-degrade" data-fiddy="node-cannot-answer">
-      <p className="fiddy-degrade-title">{label} isn&rsquo;t on your node</p>
+      <p className="fiddy-degrade-title">
+        {onRetry
+          ? `${label} didn’t load from your node`
+          : `${label} isn’t on your node`}
+      </p>
       <p className="fiddy-degrade-body">{asSentence(reason)}</p>
       {onRetry ? (
         <div className="fiddy-degrade-actions">

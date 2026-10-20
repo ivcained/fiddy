@@ -28,15 +28,14 @@
 
 import {
   ApiCast,
-  ApiCastFeedItem,
   ApiCastReaction,
   ApiFeedItemsResult,
   ApiGetUnseen200Response,
-  ApiNotificationGroup,
   ApiNotificationCastMention,
   ApiNotificationCastReaction,
   ApiNotificationCastReply,
   ApiNotificationFollow,
+  ApiNotificationGroup,
   ApiThreadResult,
   ApiUser,
   ApiVerification,
@@ -45,9 +44,9 @@ import {
   fetchFollowing,
   isTerminalPageToken,
   mapWithConcurrency,
+  type NodeMessage,
   SnapchainNodeClient,
 } from 'farcaster-node-client';
-import type { NodeMessage } from 'farcaster-node-client';
 
 import {
   apiCastFeedItemFromNode,
@@ -79,7 +78,8 @@ const SEEN_STORAGE_PREFIX = 'fiddy:node-seen';
 /** `[null,null]` — measured as "there is nothing after this page". Shared with
  * the node client so the browser and the library stop for the same reason. */
 
-const fcTimestampToMs = (timestamp: number): number => timestamp * 1000 + 1609459200000;
+const fcTimestampToMs = (timestamp: number): number =>
+  timestamp * 1000 + 1609459200000;
 
 const seenStore = (): Storage | undefined => {
   try {
@@ -155,7 +155,10 @@ export class NodeBackedReads {
   // ---------------------------------------------------------------- user reads
 
   private async userDataMessages(fid: number): Promise<NodeMessage[]> {
-    const page = await this.node.userDataByFid({ fid, pageSize: USER_DATA_PAGE_SIZE });
+    const page = await this.node.userDataByFid({
+      fid,
+      pageSize: USER_DATA_PAGE_SIZE,
+    });
     // User data is a log; the newest message for each field is the current
     // value, which is why they are handed over oldest-first.
     return [...page.messages].sort((a, b) => a.timestamp - b.timestamp);
@@ -274,7 +277,9 @@ export class NodeBackedReads {
         linkType: 'follow',
         pageSize: COUNT_PAGE_SIZE,
       });
-      return page.messages.some((message) => message.link?.targetFid === targetFid);
+      return page.messages.some(
+        (message) => message.link?.targetFid === targetFid,
+      );
     } catch {
       return false;
     }
@@ -347,7 +352,10 @@ export class NodeBackedReads {
     }
   }
 
-  private async castById(fid: number, hash: string): Promise<NodeMessage | undefined> {
+  private async castById(
+    fid: number,
+    hash: string,
+  ): Promise<NodeMessage | undefined> {
     const cached = this.castCache.get(`${fid}:${hash}`);
     if (cached) {
       return cached.value;
@@ -405,7 +413,9 @@ export class NodeBackedReads {
   }
 
   /** Which casts the signed-in account has already liked / recast. */
-  private async viewerReactionHashes(reactionType: 'Like' | 'Recast'): Promise<Set<string>> {
+  private async viewerReactionHashes(
+    reactionType: 'Like' | 'Recast',
+  ): Promise<Set<string>> {
     const fid = this.getSignedInFid();
     if (fid === undefined) {
       return new Set();
@@ -472,20 +482,24 @@ export class NodeBackedReads {
     // Quoted casts are resolved for real (they address their parent), so a
     // quote renders as a quote rather than an empty box.
     const { quoteTargets } = castEmbedsFromNode({ body });
-    const quoted = await mapWithConcurrency(quoteTargets, RESOLVE_CONCURRENCY, async (target) => {
-      const quotedMessage = await this.castById(target.fid, target.hash);
-      if (!quotedMessage?.castAdd) {
-        return undefined;
-      }
-      const quotedAuthor = await this.readUser(quotedMessage.fid);
-      return {
-        hash: quotedMessage.hash,
-        threadHash: quotedMessage.hash,
-        author: quotedAuthor,
-        text: quotedMessage.castAdd.text,
-        timestamp: quotedMessage.timestampMs,
-      };
-    });
+    const quoted = await mapWithConcurrency(
+      quoteTargets,
+      RESOLVE_CONCURRENCY,
+      async (target) => {
+        const quotedMessage = await this.castById(target.fid, target.hash);
+        if (!quotedMessage?.castAdd) {
+          return undefined;
+        }
+        const quotedAuthor = await this.readUser(quotedMessage.fid);
+        return {
+          hash: quotedMessage.hash,
+          threadHash: quotedMessage.hash,
+          author: quotedAuthor,
+          text: quotedMessage.castAdd.text,
+          timestamp: quotedMessage.timestampMs,
+        };
+      },
+    );
 
     const viewerContext =
       likedHashes || recastHashes
@@ -506,27 +520,38 @@ export class NodeBackedReads {
       reactions,
       recasts,
       quotedCasts: quoted.filter((cast) => cast !== undefined),
-      ...(viewerContext && Object.keys(viewerContext).length > 0 ? { viewerContext } : {}),
+      ...(viewerContext && Object.keys(viewerContext).length > 0
+        ? { viewerContext }
+        : {}),
     });
   }
 
   /** Assemble a page of casts from raw node messages, order preserved. */
   private async buildCasts(
     messages: NodeMessage[],
-    { withCounts = true, withViewer = true }: { withCounts?: boolean; withViewer?: boolean } = {},
+    {
+      withCounts = true,
+      withViewer = true,
+    }: { withCounts?: boolean; withViewer?: boolean } = {},
   ): Promise<ApiCast[]> {
     this.rememberCasts(messages);
     const [likedHashes, recastHashes] = withViewer
-      ? await Promise.all([this.viewerReactionHashes('Like'), this.viewerReactionHashes('Recast')])
+      ? await Promise.all([
+          this.viewerReactionHashes('Like'),
+          this.viewerReactionHashes('Recast'),
+        ])
       : [undefined, undefined];
 
-    const casts = await mapWithConcurrency(messages, RESOLVE_CONCURRENCY, (message) =>
-      this.buildCast({
-        message,
-        likedHashes,
-        recastHashes,
-        withCounts,
-      }),
+    const casts = await mapWithConcurrency(
+      messages,
+      RESOLVE_CONCURRENCY,
+      (message) =>
+        this.buildCast({
+          message,
+          likedHashes,
+          recastHashes,
+          withCounts,
+        }),
     );
 
     return casts.filter((cast): cast is ApiCast => cast !== undefined);
@@ -575,19 +600,44 @@ export class NodeBackedReads {
 
     // The feed is assembled locally, so a page is: the newest few casts from
     // each followed account, merged on the protocol timestamp.
-    const perAuthor = await mapWithConcurrency(authorFids, RESOLVE_CONCURRENCY, async (authorFid) => {
-      try {
-        const page = await this.node.castsByFid({
-          fid: authorFid,
-          pageSize: Math.min(limit, 10),
-          reverse: true,
-        });
-        return page.messages.filter((message) => message.castAdd);
-      } catch {
-        // One unreachable account must not blank the feed.
-        return [] as NodeMessage[];
-      }
-    });
+    //
+    // One unreachable account must not blank the feed — but "no account
+    // answered" is not an empty feed, it is an unreadable one. MEASURED (the
+    // relay pointed at a refused port): every per-author read came back 500,
+    // every one was swallowed by the `catch` below, and the feed answered `200`
+    // with zero items — the same "there is nothing here" a genuinely quiet
+    // follow graph produces. Counted, so the two can be told apart.
+    let answered = 0;
+    let lastFailure: unknown;
+    const perAuthor = await mapWithConcurrency(
+      authorFids,
+      RESOLVE_CONCURRENCY,
+      async (authorFid) => {
+        try {
+          const page = await this.node.castsByFid({
+            fid: authorFid,
+            pageSize: Math.min(limit, 10),
+            reverse: true,
+          });
+          answered += 1;
+          return page.messages.filter((message) => message.castAdd);
+        } catch (error) {
+          // One unreachable account must not blank the feed.
+          lastFailure = error;
+          return [] as NodeMessage[];
+        }
+      },
+    );
+
+    if (answered === 0 && authorFids.length > 0) {
+      const message =
+        lastFailure instanceof Error
+          ? lastFailure.message
+          : String(lastFailure);
+      throw new Error(
+        `none of the ${authorFids.length} accounts this read asked answered (${message})`,
+      );
+    }
 
     const byHash = new Map<string, NodeMessage>();
     for (const message of perAuthor.flat()) {
@@ -602,7 +652,9 @@ export class NodeBackedReads {
       byHash.set(`${message.fid}:${message.hash}`, message);
     }
 
-    return [...byHash.values()].sort((a, b) => b.timestampMs - a.timestampMs).slice(0, limit);
+    return [...byHash.values()]
+      .sort((a, b) => b.timestampMs - a.timestampMs)
+      .slice(0, limit);
   }
 
   private async channelFeedMessages({
@@ -621,7 +673,9 @@ export class NodeBackedReads {
     });
     return page.messages
       .filter((message) => message.castAdd)
-      .filter((message) => olderThan === undefined || message.timestampMs < olderThan)
+      .filter(
+        (message) => olderThan === undefined || message.timestampMs < olderThan,
+      )
       .sort((a, b) => b.timestampMs - a.timestampMs)
       .slice(0, limit);
   }
@@ -648,7 +702,11 @@ export class NodeBackedReads {
 
     const isHome = feedKey === 'home';
     const isFollowing = feedKey === 'following';
-    if (feedType === 'for-you' || feedType === 'trending' || feedType === 'curated') {
+    if (
+      feedType === 'for-you' ||
+      feedType === 'trending' ||
+      feedType === 'curated'
+    ) {
       // Ranking is an indexer's job; saying so is better than serving the
       // follow graph under a "For you" label.
       throw new NodeCannotAnswerError(
@@ -741,26 +799,30 @@ export class NodeBackedReads {
     ]);
 
     const castMessages = [...ancestors, root, ...replies];
-    const built = await mapWithConcurrency(castMessages, RESOLVE_CONCURRENCY, (message) =>
-      this.buildCast({
-        message,
-        likedHashes,
-        recastHashes,
-        threadHash: ancestors[0]?.hash ?? root.hash,
-        ...(message.hash === root.hash
-          ? {
-              ancestors: { count: ancestors.length },
-              // Only the page we fetched is claimed: a floor, not a total.
-              replies: { count: replies.length },
-            }
-          : {}),
-      }),
+    const built = await mapWithConcurrency(
+      castMessages,
+      RESOLVE_CONCURRENCY,
+      (message) =>
+        this.buildCast({
+          message,
+          likedHashes,
+          recastHashes,
+          threadHash: ancestors[0]?.hash ?? root.hash,
+          ...(message.hash === root.hash
+            ? {
+                ancestors: { count: ancestors.length },
+                // Only the page we fetched is claimed: a floor, not a total.
+                replies: { count: replies.length },
+              }
+            : {}),
+        }),
     );
 
     const casts = built.filter((cast): cast is ApiCast => cast !== undefined);
     return {
       casts: casts.slice(0, limit + ancestors.length + 1),
-      ...(repliesPage.nextPageToken && !isTerminalPageToken(repliesPage.nextPageToken)
+      ...(repliesPage.nextPageToken &&
+      !isTerminalPageToken(repliesPage.nextPageToken)
         ? { hasHiddenReplies: false }
         : {}),
     };
@@ -783,7 +845,9 @@ export class NodeBackedReads {
     });
     const messages = page.messages
       .filter((message) => message.castAdd)
-      .filter((message) => olderThan === undefined || message.timestampMs < olderThan)
+      .filter(
+        (message) => olderThan === undefined || message.timestampMs < olderThan,
+      )
       .slice(0, limit);
     return await this.buildCasts(messages);
   }
@@ -820,7 +884,9 @@ export class NodeBackedReads {
     }
     try {
       const raw = store.getItem(this.seenKey(fid));
-      const parsed: Record<string, number> = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+      const parsed: Record<string, number> = raw
+        ? (JSON.parse(raw) as Record<string, number>)
+        : {};
       parsed[feedKey] = Date.now();
       store.setItem(this.seenKey(fid), JSON.stringify(parsed));
     } catch {
@@ -830,7 +896,11 @@ export class NodeBackedReads {
 
   private async myRecentCastHashes(fid: number, limit = 25): Promise<string[]> {
     try {
-      const page = await this.node.castsByFid({ fid, pageSize: Math.min(limit, 50), reverse: true });
+      const page = await this.node.castsByFid({
+        fid,
+        pageSize: Math.min(limit, 50),
+        reverse: true,
+      });
       const messages = page.messages.filter((message) => message.castAdd);
       this.rememberCasts(messages);
       return messages.map((message) => message.hash);
@@ -857,57 +927,77 @@ export class NodeBackedReads {
     const accountFid = fid ?? this.requireFid();
     const myHashes = await this.myRecentCastHashes(accountFid);
 
-    const [mentions, repliesByCast, reactionsByCast, follows] = await Promise.all([
-      this.node
-        .castsByMention({ fid: accountFid, pageSize: Math.min(limit, 50), reverse: true })
-        .catch(() => ({ messages: [] as NodeMessage[] })),
-      mapWithConcurrency(myHashes.slice(0, 10), RESOLVE_CONCURRENCY, (hash) =>
+    const [mentions, repliesByCast, reactionsByCast, follows] =
+      await Promise.all([
         this.node
-          .castsByParent({ fid: accountFid, hash, pageSize: 10, reverse: true })
-          .then((page) => page.messages.filter((message) => message.castAdd))
-          .catch(() => [] as NodeMessage[]),
-      ),
-      mapWithConcurrency(myHashes.slice(0, 10), RESOLVE_CONCURRENCY, async (hash) => {
-        const page = await this.node
-          .reactionsByCast({
-            targetFid: accountFid,
-            targetHash: hash,
-            reactionType: 'Like',
-            pageSize: 10,
+          .castsByMention({
+            fid: accountFid,
+            pageSize: Math.min(limit, 50),
             reverse: true,
           })
-          .catch(() => ({ messages: [] as NodeMessage[] }));
-        return { hash, messages: page.messages };
-      }),
-      this.node
-        .linksByTargetFid({
-          targetFid: accountFid,
-          linkType: 'follow',
-          pageSize: Math.min(limit, 50),
-          reverse: true,
-        })
-        .catch(() => ({ messages: [] as NodeMessage[] })),
-    ]);
+          .catch(() => ({ messages: [] as NodeMessage[] })),
+        mapWithConcurrency(myHashes.slice(0, 10), RESOLVE_CONCURRENCY, (hash) =>
+          this.node
+            .castsByParent({
+              fid: accountFid,
+              hash,
+              pageSize: 10,
+              reverse: true,
+            })
+            .then((page) => page.messages.filter((message) => message.castAdd))
+            .catch(() => [] as NodeMessage[]),
+        ),
+        mapWithConcurrency(
+          myHashes.slice(0, 10),
+          RESOLVE_CONCURRENCY,
+          async (hash) => {
+            const page = await this.node
+              .reactionsByCast({
+                targetFid: accountFid,
+                targetHash: hash,
+                reactionType: 'Like',
+                pageSize: 10,
+                reverse: true,
+              })
+              .catch(() => ({ messages: [] as NodeMessage[] }));
+            return { hash, messages: page.messages };
+          },
+        ),
+        this.node
+          .linksByTargetFid({
+            targetFid: accountFid,
+            linkType: 'follow',
+            pageSize: Math.min(limit, 50),
+            reverse: true,
+          })
+          .catch(() => ({ messages: [] as NodeMessage[] })),
+      ]);
 
     const groups: ApiNotificationGroup[] = [];
 
-    const mentionMessages = mentions.messages.filter((message) => message.castAdd);
+    const mentionMessages = mentions.messages.filter(
+      (message) => message.castAdd,
+    );
     if (mentionMessages.length > 0) {
       this.rememberCasts(mentionMessages);
-      const items = await mapWithConcurrency(mentionMessages.slice(0, 3), RESOLVE_CONCURRENCY, async (message) => {
-        const cast = await this.buildCast({ message, withCounts: false });
-        const actor = await this.readUser(message.fid);
-        if (!cast) {
-          return undefined;
-        }
-        return {
-          type: 'cast-mention' as const,
-          id: `mention:${message.hash}`,
-          timestamp: message.timestampMs,
-          actor,
-          content: { cast },
-        } satisfies ApiNotificationCastMention;
-      });
+      const items = await mapWithConcurrency(
+        mentionMessages.slice(0, 3),
+        RESOLVE_CONCURRENCY,
+        async (message) => {
+          const cast = await this.buildCast({ message, withCounts: false });
+          const actor = await this.readUser(message.fid);
+          if (!cast) {
+            return undefined;
+          }
+          return {
+            type: 'cast-mention' as const,
+            id: `mention:${message.hash}`,
+            timestamp: message.timestampMs,
+            actor,
+            content: { cast },
+          } satisfies ApiNotificationCastMention;
+        },
+      );
 
       groups.push({
         id: `mentions:${accountFid}`,
@@ -915,27 +1005,36 @@ export class NodeBackedReads {
         latestTimestamp: mentionMessages[0]!.timestampMs,
         totalItemCount: mentionMessages.length,
         previewItems: items.filter((item) => item !== undefined),
-        isUnread: mentionMessages.some((message) => message.timestampMs > this.readSeen(accountFid, 'notifications')),
+        isUnread: mentionMessages.some(
+          (message) =>
+            message.timestampMs > this.readSeen(accountFid, 'notifications'),
+        ),
       });
     }
 
-    const replyMessages = repliesByCast.flat().filter((message) => message.castAdd);
+    const replyMessages = repliesByCast
+      .flat()
+      .filter((message) => message.castAdd);
     if (replyMessages.length > 0) {
       this.rememberCasts(replyMessages);
-      const items = await mapWithConcurrency(replyMessages.slice(0, 3), RESOLVE_CONCURRENCY, async (message) => {
-        const cast = await this.buildCast({ message, withCounts: false });
-        const actor = await this.readUser(message.fid);
-        if (!cast) {
-          return undefined;
-        }
-        return {
-          type: 'cast-reply' as const,
-          id: `reply:${message.hash}`,
-          timestamp: message.timestampMs,
-          actor,
-          content: { cast },
-        } satisfies ApiNotificationCastReply;
-      });
+      const items = await mapWithConcurrency(
+        replyMessages.slice(0, 3),
+        RESOLVE_CONCURRENCY,
+        async (message) => {
+          const cast = await this.buildCast({ message, withCounts: false });
+          const actor = await this.readUser(message.fid);
+          if (!cast) {
+            return undefined;
+          }
+          return {
+            type: 'cast-reply' as const,
+            id: `reply:${message.hash}`,
+            timestamp: message.timestampMs,
+            actor,
+            content: { cast },
+          } satisfies ApiNotificationCastReply;
+        },
+      );
 
       groups.push({
         id: `replies:${accountFid}`,
@@ -943,12 +1042,18 @@ export class NodeBackedReads {
         latestTimestamp: replyMessages[0]!.timestampMs,
         totalItemCount: replyMessages.length,
         previewItems: items.filter((item) => item !== undefined),
-        isUnread: replyMessages.some((message) => message.timestampMs > this.readSeen(accountFid, 'notifications')),
+        isUnread: replyMessages.some(
+          (message) =>
+            message.timestampMs > this.readSeen(accountFid, 'notifications'),
+        ),
       });
     }
 
     const reactionMessages = reactionsByCast
-      .map((entry) => ({ hash: entry.hash, messages: entry.messages.filter((m) => m.reaction) }))
+      .map((entry) => ({
+        hash: entry.hash,
+        messages: entry.messages.filter((m) => m.reaction),
+      }))
       .filter((entry) => entry.messages.length > 0);
     if (reactionMessages.length > 0) {
       const items: ApiNotificationCastReaction[] = [];
@@ -961,7 +1066,10 @@ export class NodeBackedReads {
         if (!targetMessage?.castAdd) {
           continue;
         }
-        const cast = await this.buildCast({ message: targetMessage, withCounts: false });
+        const cast = await this.buildCast({
+          message: targetMessage,
+          withCounts: false,
+        });
         const reactionMessage = entry.messages[0]!;
         const actor = await this.readUser(reactionMessage.fid);
         if (!cast) {
@@ -988,24 +1096,34 @@ export class NodeBackedReads {
           id: `reactions:${accountFid}`,
           type: 'cast-reaction',
           latestTimestamp: Math.max(...items.map((item) => item.timestamp)),
-          totalItemCount: reactionMessages.reduce((sum, entry) => sum + entry.messages.length, 0),
+          totalItemCount: reactionMessages.reduce(
+            (sum, entry) => sum + entry.messages.length,
+            0,
+          ),
           previewItems: items,
-          isUnread: items.some((item) => item.timestamp > this.readSeen(accountFid, 'notifications')),
+          isUnread: items.some(
+            (item) =>
+              item.timestamp > this.readSeen(accountFid, 'notifications'),
+          ),
         });
       }
     }
 
     const followMessages = follows.messages.filter((message) => message.link);
     if (followMessages.length > 0) {
-      const items = await mapWithConcurrency(followMessages.slice(0, 3), RESOLVE_CONCURRENCY, async (message) => {
-        const actor = await this.readUser(message.fid);
-        return {
-          type: 'follow' as const,
-          id: `follow:${message.fid}`,
-          timestamp: message.timestampMs,
-          actor,
-        } satisfies ApiNotificationFollow;
-      });
+      const items = await mapWithConcurrency(
+        followMessages.slice(0, 3),
+        RESOLVE_CONCURRENCY,
+        async (message) => {
+          const actor = await this.readUser(message.fid);
+          return {
+            type: 'follow' as const,
+            id: `follow:${message.fid}`,
+            timestamp: message.timestampMs,
+            actor,
+          } satisfies ApiNotificationFollow;
+        },
+      );
 
       groups.push({
         id: `follows:${accountFid}`,
@@ -1013,7 +1131,10 @@ export class NodeBackedReads {
         latestTimestamp: followMessages[0]!.timestampMs,
         totalItemCount: followMessages.length,
         previewItems: items,
-        isUnread: followMessages.some((message) => message.timestampMs > this.readSeen(accountFid, 'notifications')),
+        isUnread: followMessages.some(
+          (message) =>
+            message.timestampMs > this.readSeen(accountFid, 'notifications'),
+        ),
       });
     }
 
@@ -1030,18 +1151,27 @@ export class NodeBackedReads {
     const seenAt = this.readSeen(fid, 'notifications');
 
     const [mentions, follows] = await Promise.all([
-      this.node.castsByMention({ fid, pageSize: 50, reverse: true }).catch(() => ({
-        messages: [] as NodeMessage[],
-      })),
       this.node
-        .linksByTargetFid({ targetFid: fid, linkType: 'follow', pageSize: 50, reverse: true })
+        .castsByMention({ fid, pageSize: 50, reverse: true })
+        .catch(() => ({
+          messages: [] as NodeMessage[],
+        })),
+      this.node
+        .linksByTargetFid({
+          targetFid: fid,
+          linkType: 'follow',
+          pageSize: 50,
+          reverse: true,
+        })
         .catch(() => ({ messages: [] as NodeMessage[] })),
     ]);
 
     const unreadMentions = mentions.messages.filter(
       (message) => message.timestampMs > seenAt,
     ).length;
-    const unreadFollows = follows.messages.filter((message) => message.timestampMs > seenAt).length;
+    const unreadFollows = follows.messages.filter(
+      (message) => message.timestampMs > seenAt,
+    ).length;
 
     return {
       notificationsCount: unreadMentions + unreadFollows,

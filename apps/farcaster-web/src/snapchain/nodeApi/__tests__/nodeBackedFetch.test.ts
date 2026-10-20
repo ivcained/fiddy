@@ -360,6 +360,127 @@ describe('the node-backed fetch', () => {
     });
   });
 
+  describe('a node that never answers', () => {
+    // A node that is black-holed does not refuse: the connection simply never
+    // completes. That is the one failure a `fetch` reports only when something
+    // aborts it, which is exactly what the adapter's deadlines are for.
+    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const abort = () =>
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        if (init?.signal?.aborted) {
+          abort();
+          return;
+        }
+        init?.signal?.addEventListener('abort', abort, { once: true });
+      })) as unknown as typeof fetch;
+
+    it('answers 502 with how long it waited, instead of leaving the read open', async () => {
+      const handle = createNodeBackedFetch({
+        nodeBaseUrl: '/snapchain-api',
+        getSignedInFid: () => 3,
+        fetchImpl: hangingFetch,
+        readTimeoutMs: 1_000,
+      });
+
+      const startedAt = Date.now();
+      const response = await handle.fetch(
+        'https://farcaster.xyz/~api/v2/user?fid=3',
+      );
+      const elapsed = Date.now() - startedAt;
+
+      expect(response.status).toBe(502);
+      expect(JSON.stringify(await json(response))).toContain(
+        'Your node did not answer this read within 1 s.',
+      );
+      // It waited for its own deadline and no longer.
+      expect(elapsed).toBeGreaterThanOrEqual(900);
+      expect(elapsed).toBeLessThan(3_000);
+    });
+
+    it('stops when the caller’s own deadline fires, without waiting for the node', async () => {
+      // The fork's client times every endpoint out itself and passes the signal
+      // in; before this change the adapter never looked at it, so the client's
+      // promise never settled and the feed stayed in its loading state forever.
+      const handle = createNodeBackedFetch({
+        nodeBaseUrl: '/snapchain-api',
+        getSignedInFid: () => 3,
+        fetchImpl: hangingFetch,
+        readTimeoutMs: 30_000,
+      });
+
+      const controller = new AbortController();
+      const clientDeadline = setTimeout(() => controller.abort(), 150);
+
+      const startedAt = Date.now();
+      const response = await handle.fetch(
+        'https://farcaster.xyz/~api/v2/user?fid=3',
+        { signal: controller.signal },
+      );
+      const elapsed = Date.now() - startedAt;
+      clearTimeout(clientDeadline);
+
+      expect(response.status).toBe(502);
+      expect(JSON.stringify(await json(response))).toContain(
+        'did not answer this read within',
+      );
+      expect(elapsed).toBeLessThan(2_000);
+    });
+
+    it('does not answer the feed with an empty page when no account read succeeded', async () => {
+      // MEASURED (the relay pointed at a refused port): every per-author read
+      // came back 500, the fan-out swallowed all of them, and the feed answered
+      // `200` with zero items — indistinguishable from a quiet follow graph.
+      // MEASURED, and the reason this test uses the shared fake at all: the
+      // recorded follow page carries a live `nextPageToken`, so a hand-rolled
+      // stub that keeps answering with it makes the follow-graph read paginate
+      // for ever — the test spun a core at ~95% and never finished.
+      // `createFixtureNodeFetch` answers one page and then the terminal token,
+      // which is what a real node does for an account whose log fits one page.
+      const fixtureNode = createFixtureNodeFetch();
+      const seen: string[] = [];
+      const fetchImpl = ((input: RequestInfo | URL) => {
+        const url = String(input);
+        seen.push(url.slice(0, 90));
+        if (url.includes('/v1/linksByFid')) {
+          // The fake speaks node-relative paths ('/v1/…'); this adapter is
+          // built on the browser's relay path, so strip it first (otherwise the
+          // fake answers `404 Not Found` and the fan-out is never reached —
+          // measured).
+          return fixtureNode(url.replace('/snapchain-api', ''));
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: 'nothing here' }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      }) as unknown as typeof fetch;
+
+      const handle = createNodeBackedFetch({
+        nodeBaseUrl: '/snapchain-api',
+        getSignedInFid: () => 3,
+        fetchImpl,
+      });
+
+      const response = await handle.fetch(
+        'https://farcaster.xyz/~api/v2/feed-items',
+        {
+          method: 'POST',
+          body: JSON.stringify({ feedKey: 'home', feedType: 'default' }),
+        },
+      );
+
+      expect(response.status).toBe(502);
+      const body = JSON.stringify(await json(response));
+      expect(body, `reads made: ${seen.join(' | ')}`).toContain(
+        'Your node did not answer this read',
+      );
+      expect(body, `reads made: ${seen.join(' | ')}`).toContain('none of the');
+      expect(body).not.toContain('"items":[]');
+    });
+  });
+
   describe('with no account signed in', () => {
     it('says so, rather than answering with somebody else’s data', async () => {
       const { fetch: nodeBackedFetch } = buildHarness({ fid: undefined });
