@@ -53,5 +53,12 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      # farcaster-web imports the workspace packages by name and reads their
+      # `dist` (gitignored), so both typecheck and test need them built first;
+      # lint does not.
+      - name: Build workspace packages
+        if: matrix.gate != 'lint'
+        run: pnpm build:packages
+
       - name: ${{ matrix.gate }}
         run: pnpm --filter farcaster-web ${{ matrix.gate }}
