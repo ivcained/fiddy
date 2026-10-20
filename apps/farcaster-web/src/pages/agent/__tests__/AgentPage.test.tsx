@@ -119,6 +119,39 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+/**
+ * The agent surface carries the two pivot entries as real links ("Add a brain",
+ * "Connect apps"). This renders each one as an anchor whose href is the real
+ * route path — read from the app's own route table, not hard-coded — instead of
+ * mounting `Link` itself, which needs a router and the app's JSX runtime (this
+ * suite has neither). It also means the new test below can be a single test
+ * covering both links from a shared helper rather than a second renderer.
+ */
+vi.mock('~/components/links/Link', async () => {
+  const { routes } =
+    await vi.importActual<typeof import('~/constants/routes')>(
+      '~/constants/routes',
+    );
+  return {
+    Link: ({
+      to,
+      title,
+      children,
+      className,
+    }: {
+      to: keyof typeof routes;
+      title?: string;
+      children?: React.ReactNode;
+      className?: string;
+    }) =>
+      React.createElement(
+        'a',
+        { href: routes[to].path, title, className },
+        children,
+      ),
+  };
+});
+
 describe('not paired', () => {
   it('offers the hatch action and says honestly that hatching depends on the service', async () => {
     render(<AgentPage />);
@@ -266,5 +299,22 @@ describe('paired with a running agent', () => {
 
     expect(await screen.findByText('iMessage · soon')).toBeTruthy();
     expect(screen.getByText('WhatsApp · soon')).toBeTruthy();
+  });
+
+  it('offers the two pivot surfaces as real links, with the choices that were made', async () => {
+    // The agent screen is where "Add a brain" and "Connect apps" live after
+    // onboarding, so both have to be reachable from it and both have to show
+    // the state the setup file holds rather than a generic label.
+    render(<AgentPage />);
+
+    const brains = await screen.findByRole('link', { name: /Add a brain/ });
+    const apps = screen.getByRole('link', { name: /Connect apps/ });
+
+    expect(brains.getAttribute('href')).toBe('/~/agent/brains');
+    expect(apps.getAttribute('href')).toBe('/~/agent/apps');
+    // Nothing has been chosen in this test, so the built-in brain and the
+    // default single permission are what the tiles must own up to.
+    expect(screen.getByText('Fiddy, built in')).toBeTruthy();
+    expect(screen.getByText(/1 on — the list you choose from/)).toBeTruthy();
   });
 });

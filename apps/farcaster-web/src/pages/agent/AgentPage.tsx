@@ -11,6 +11,7 @@
  * failed call says so instead of showing a spinner forever.
  */
 
+import { Brain, Plug } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 
 import {
@@ -19,6 +20,8 @@ import {
   type HatchAvailability,
   hatchAvailabilityCopy,
 } from '~/components/agent/AgentCard';
+import { brainSummary } from '~/components/fiddy/BrainSheet';
+import { Link } from '~/components/links/Link';
 import { Page } from '~/components/page/Page';
 import { useAgentSession } from '~/hooks/agent/useAgentSession';
 import {
@@ -47,6 +50,7 @@ import {
   listChannels,
   probeAgentService,
 } from '~/lib/agentService';
+import { allowedChannelCount, useFiddySetup } from '~/lib/fiddySetup';
 import { trackError } from '~/utils/errorUtils';
 
 import { AgentChannelsPanel } from './Component/AgentChannelsPanel';
@@ -88,6 +92,7 @@ const newMessageId = (): string =>
 
 const AgentPage: React.FC = () => {
   const { status, session, pair, forget } = useAgentSession();
+  const setup = useFiddySetup();
 
   const [view, setView] = useState<'surface' | 'pair'>('surface');
   const [pairBusy, setPairBusy] = useState(false);
@@ -630,6 +635,37 @@ const AgentPage: React.FC = () => {
 
   return (
     <Page meta={{ title: 'Fiddy Agent' }} className="px-4 py-6">
+      <div className="fiddy-agent-tiles">
+        <Link
+          to="fiddyBrains"
+          params={{}}
+          searchParams={{}}
+          title="Add a brain"
+          className="fiddy-tile"
+        >
+          <Brain aria-hidden="true" />
+          <span>
+            <b>Add a brain</b>
+            <small>{brainSummary(setup)}</small>
+          </span>
+        </Link>
+        <Link
+          to="fiddyApps"
+          params={{}}
+          searchParams={{}}
+          title="Connect apps"
+          className="fiddy-tile"
+        >
+          <Plug aria-hidden="true" />
+          <span>
+            <b>Connect apps</b>
+            <small>
+              {allowedChannelCount(setup)} on — the list you choose from
+            </small>
+          </span>
+        </Link>
+      </div>
+
       <p className="mb-4 text-xs text-muted">
         Agent service:{' '}
         {paired
