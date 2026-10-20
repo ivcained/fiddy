@@ -618,6 +618,16 @@ html.fiddy-dark-shell body {
   outline: none;
 }
 
+/* Each step focuses its heading so a screen reader announces the new idea
+   instead of starting over at the top. That focus is programmatic, and a
+   heading is not a control — so it does not get the accent ring, which would
+   otherwise draw a lime box around every headline on arrival. Keyboard users
+   tabbing through still see rings on everything they can act on. */
+.fiddy-sheet-title:focus,
+.fiddy-sheet-title:focus-visible {
+  outline: none;
+}
+
 .fiddy-sheet-sub {
   color: var(--fiddy-ink-dim);
   font-size: 16px;
