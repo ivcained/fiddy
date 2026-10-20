@@ -285,6 +285,80 @@ describe('nextFailoverState: no flapping', () => {
   });
 });
 
+describe('nextFailoverState: what the pill says while a backup serves the reader', () => {
+  it('never claims the first choice is answering when a backup is the one answering', () => {
+    // The reader was on their first choice, then changed their list in
+    // Advanced: the state still remembers `start` from before, while the first
+    // choice has just been measured as slow. The old reason must not survive —
+    // it reads "Everything you read comes from your first choice", which is a
+    // claim about a server that is not the one answering.
+    const stale: FailoverState = {
+      activeId: 'relay',
+      activeSince: 0,
+      lastSwitchAt: 0,
+      reason: 'start',
+      preferredGoodChecks: 0,
+    };
+    const decision = nextFailoverState({
+      order,
+      health: healthOf({ mine: 'slow', relay: 'live' }),
+      state: stale,
+      now: 120_000,
+      config: CONFIG,
+    });
+
+    expect(decision.state.activeId).toBe('relay');
+    expect(decision.state.reason).toBe('preferred-slow');
+    expect(decision.explanation).toContain('your first choice got slow');
+    expect(decision.explanation).not.toContain('comes from your first choice');
+  });
+
+  it('names the failure for each way the first choice can fail', () => {
+    const stale: FailoverState = {
+      activeId: 'relay',
+      activeSince: 0,
+      lastSwitchAt: 0,
+      reason: 'start',
+      preferredGoodChecks: 0,
+    };
+    const words = (status: ProviderStatus): string =>
+      nextFailoverState({
+        order,
+        health: healthOf({ mine: status, relay: 'live' }),
+        state: stale,
+        now: 120_000,
+        config: CONFIG,
+      }).explanation;
+
+    expect(words('down')).toContain('stopped answering');
+    expect(words('stale')).toContain('stopped keeping up');
+    expect(words('unconfigured')).toContain('still needs your key');
+  });
+
+  it('says it is waiting out the hysteresis when the first choice is good again', () => {
+    // The first choice is live but has not proven itself twice in a row yet, and
+    // the old reason is not a failure of the first choice: the honest sentence is
+    // that the client is staying put a little longer.
+    const stale: FailoverState = {
+      activeId: 'relay',
+      activeSince: 0,
+      lastSwitchAt: 0,
+      reason: 'start',
+      preferredGoodChecks: 0,
+    };
+    const decision = nextFailoverState({
+      order,
+      health: healthOf({ mine: 'live', relay: 'live' }),
+      state: stale,
+      now: 120_000,
+      config: CONFIG,
+    });
+
+    expect(decision.state.reason).toBe('cooldown');
+    expect(decision.explanation).toContain('flip back and forth');
+  });
+});
+
 describe('nextFailoverState: a backup that goes bad too', () => {
   it('moves to the next server down the list', () => {
     const three = [...order, provider('spare', 'A spare node')];

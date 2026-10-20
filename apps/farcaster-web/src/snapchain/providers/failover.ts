@@ -266,18 +266,31 @@ export const nextFailoverState = ({
       };
     }
 
+    const heldReason: SwitchReason = !preferredGood
+      ? // A backup is serving the reader and their first choice is measured and
+        // not good enough. The pill has to say which way it failed: holding the
+        // old reason here (often `start`, which reads "Everything you read comes
+        // from your first choice") would describe a server that is not the one
+        // answering.
+        reasonForFailure(statusOf(preferredId) ?? 'down', true)
+      : withinCooldown ||
+          previous.reason === 'start' ||
+          previous.reason === 'first-choice'
+        ? // The first choice is answering again but has not proved itself the
+          // required number of checks in a row, so the reader is still on a
+          // backup: that is the hysteresis rule, and this says so in plain words.
+          'cooldown'
+        : previous.reason;
+
     return {
       state: {
         ...previous,
-        reason: preferredGood && withinCooldown ? 'cooldown' : previous.reason,
+        reason: heldReason,
         preferredGoodChecks: goodChecks,
       },
       switched: false,
       direction: 'held',
-      explanation: explainReason(
-        preferredGood && withinCooldown ? 'cooldown' : previous.reason,
-        ids.length,
-      ),
+      explanation: explainReason(heldReason, ids.length),
     };
   }
 
