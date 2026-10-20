@@ -11,6 +11,8 @@ import { FiddyMobileTabBar } from '~/components/fiddy/FiddyMobileTabBar';
 import { FiddyTopBar } from '~/components/fiddy/FiddyTopBar';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { PreloadAuthedResources } from '~/components/PrefetchAuthedResources';
+import { DeviceOnlySessionPage } from '~/components/session/DeviceOnlySessionPage';
+import { useDeviceOnlySession } from '~/components/session/useDeviceOnlySession';
 import { EnsureCachedCurrentUser } from '~/components/users/EnsureCachedCurrentUser';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { AuthSessionRecoveryBridge } from '~/contexts/AuthSessionRecoveryBridge';
@@ -241,9 +243,20 @@ function FollowingFeedSessionBoundary() {
 const AuthedLayout: FC = () => {
   const location = useLocation();
   const { inStandaloneMode } = useStandaloneMode();
+  const deviceOnlySession = useDeviceOnlySession();
 
   // Fiddy ships dark; pin the ground while the shell is mounted.
   useFiddyBrandGround();
+
+  // A session that exists only on this device cannot run this shell: every
+  // surface below is a farcaster.xyz read or write, and this session has no
+  // token for any of them. Landing the user here — named, explained, with the
+  // account-free surfaces one tap away — is the honest outcome; mounting the
+  // shell would only produce a broken client. See
+  // ~/components/session/DeviceOnlySessionPage.
+  if (deviceOnlySession.isDeviceOnly) {
+    return <DeviceOnlySessionPage />;
+  }
 
   return (
     <EnsureCachedCurrentUser>
