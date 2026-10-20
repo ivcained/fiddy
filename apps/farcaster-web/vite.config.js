@@ -20,6 +20,79 @@ const metamaskEciesCommonJs = path.resolve(
   '../../eciesjs/dist/index.js',
 );
 
+// How long the relay waits on the node before it answers the browser with a
+// failure. MEASURED (2026-10-20): a healthy public read node answers the feed's
+// per-author read in p50 258ms / p95 773ms / max 986ms (60 authors x pageSize=10
+// at concurrency 12), so 8s is ~8x the worst healthy read. MEASURED with the
+// node address black-holed (34.101.47.167:3381): without these the relay left
+// the browser waiting **75.008s** and then answered `500` with an empty body
+// (the TCP SYN timeout), which is what made the feed look blank for over a
+// minute. With the timeout the browser gets a failure it can read and report.
+const NODE_RELAY_TIMEOUT_MS = 8_000;
+
+const nodeRelayProxy = (environment) => {
+  const target =
+    environment.SNAPCHAIN_HTTP_URL ||
+    environment.VITE_SNAPCHAIN_HTTP_URL ||
+    'http://127.0.0.1:3381';
+  const message = (reason) =>
+    `Your node did not answer this read: the relay waited up to ${
+      NODE_RELAY_TIMEOUT_MS / 1000
+    }s for ${target} and gave up (${reason}).`;
+  return {
+    target,
+    changeOrigin: true,
+    rewrite: (path) => path.replace(/^\/snapchain-api/, ''),
+    // MEASURED, in this order:
+    //   - no timeout at all: the browser waits 75.008s for a black-holed node
+    //     and then gets `500` with an empty body;
+    //   - `proxyTimeout` + `timeout` (http-proxy's own pair): bounded at +8.4s,
+    //     but the socket is destroyed with **no response at all** (`curl`
+    //     status 000) and no event a config can hook — a client still cannot say
+    //     what happened;
+    //   - this: a per-upstream-request timeout that destroys with an Error, so
+    //     the proxy's own error hook can answer the hosted API's error envelope.
+    //     Bounded and readable.
+    configure: (proxy) => {
+      const answer = (reason) => {
+        const body = JSON.stringify({ errors: [{ message: message(reason) }] });
+        return { status: 504, contentType: 'application/json; charset=utf-8', body };
+      };
+      // MEASURED: `proxyReq.setTimeout(ms, …)` (and http-proxy's own
+      // `proxyTimeout`, which is the same call) never fires while the TCP
+      // connect to the node is still hanging — the socket's idle timer starts
+      // only once a connection exists — so a black-holed node still hung for the
+      // full 40s the probe was willing to wait. A plain timer around the
+      // upstream request is what actually bounds the connect.
+      proxy.on('proxyReq', (proxyReq) => {
+        const deadline = setTimeout(() => {
+          proxyReq.destroy(new Error(`no reply within ${NODE_RELAY_TIMEOUT_MS}ms`));
+        }, NODE_RELAY_TIMEOUT_MS);
+        for (const event of ['response', 'error', 'close']) {
+          proxyReq.once(event, () => clearTimeout(deadline));
+        }
+      });
+      proxy.on('error', (error, _request, response) => {
+        if (!response || typeof response.writeHead !== 'function') {
+          response?.destroy?.();
+          return;
+        }
+        const { status, contentType, body } = answer(
+          String(error?.message ?? error),
+        );
+        try {
+          if (!response.headersSent) {
+            response.writeHead(status, { 'content-type': contentType });
+          }
+          response.end(body);
+        } catch {
+          // The socket was already gone; nothing left to answer with.
+        }
+      });
+    },
+  };
+};
+
 export default defineConfig(({ mode }) => {
   const environment = loadEnv(mode, __dirname, '');
   const solanaRpcUrl =
@@ -73,26 +146,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: () => '/',
         },
-        '/snapchain-api': {
-          target:
-            environment.SNAPCHAIN_HTTP_URL ||
-            environment.VITE_SNAPCHAIN_HTTP_URL ||
-            'http://127.0.0.1:3381',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/snapchain-api/, ''),
-        },
+        '/snapchain-api': nodeRelayProxy(environment),
       },
     },
     preview: {
       proxy: {
-        '/snapchain-api': {
-          target:
-            environment.SNAPCHAIN_HTTP_URL ||
-            environment.VITE_SNAPCHAIN_HTTP_URL ||
-            'http://127.0.0.1:3381',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/snapchain-api/, ''),
-        },
+        '/snapchain-api': nodeRelayProxy(environment),
       },
     },
     build: {
