@@ -6,10 +6,11 @@ import {
   PersistQueryClientOptions,
 } from '@tanstack/react-query-persist-client';
 import { BlockedDomainsProvider, PubSubProvider } from 'farcaster-client-hooks';
-import React, { FC, ReactNode, Suspense } from 'react';
+import React, { FC, ReactNode, Suspense, useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { WagmiProvider } from 'wagmi';
 
+import { ShellSkeleton } from '~/components/fiddy/ShellSkeleton';
 import { Router } from '~/components/routing/Router';
 import { AnalyticsProvider } from '~/contexts/AnalyticsProvider';
 import { AuthProvider, useAuth } from '~/contexts/AuthProvider';
@@ -72,7 +73,63 @@ persistQueryClient({
   persister: localStoragePersister,
 } as unknown as PersistQueryClientOptions);
 
+/** The id the document gives the shell it paints before the app runs. */
+const SHELL_SKELETON_ID = 'shell-skeleton';
+
+/**
+ * Hands the shell over from the document to the app.
+ *
+ * `index.html` carries the shell as static markup, so a reader looks at it from
+ * the first paint — but it sits outside `#root`, because React clears its own
+ * container before it paints anything, and a skeleton inside would be cleared
+ * with it.
+ *
+ * It goes when the app has something to show, which is not the same moment as
+ * the app's first commit: measured on a cold load, the first commit painted
+ * nothing at all (an empty root for ~800 ms while the session and the route
+ * resolved). So this waits for the app's first element to appear in `#root` —
+ * a real surface or one of the shell's own fallbacks, which are the same shape
+ * — and takes the document's copy away one painted frame later.
+ */
+const useShellSkeletonHandoff = () => {
+  useEffect(() => {
+    const skeleton = document.getElementById(SHELL_SKELETON_ID);
+    const root = document.getElementById('root');
+    if (!skeleton || !root) {
+      return undefined;
+    }
+
+    let frame = 0;
+    const handOver = () => {
+      frame = requestAnimationFrame(() => {
+        skeleton.remove();
+      });
+    };
+
+    if (root.childElementCount > 0) {
+      handOver();
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const observer = new MutationObserver(() => {
+      if (root.childElementCount === 0) {
+        return;
+      }
+      observer.disconnect();
+      handOver();
+    });
+    observer.observe(root, { childList: true });
+
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+};
+
 const App: FC = () => {
+  useShellSkeletonHandoff();
+
   return (
     <HelmetProvider>
       {/* This needs to be outside QueryClientProvider so that Wagmi uses a basic queryClient rather than our normal one with suspense */}
@@ -89,7 +146,14 @@ const App: FC = () => {
                     <GlobalKeyPressProvider>
                       <LinkDetailsPopoverManagerProvider>
                         <RecentFetchProvider>
-                          <Suspense fallback={null}>
+                          {/* The shell is meant to be on screen whatever the
+                              feed is doing, and this boundary sits above every
+                              provider in it: anything that suspends up here
+                              falls back to the shell and its loading column,
+                              never to an empty page. The same shell is what the
+                              document itself paints, so the reader sees one
+                              shape from the first paint onwards. */}
+                          <Suspense fallback={<ShellSkeleton />}>
                             <QueryClientProvider client={queryClient}>
                               {/* FullScreenErrorBoundary must be a child of QueryClientProvider */}
                               <FullScreenErrorBoundary>

@@ -9,6 +9,7 @@ import { ToastContainer } from 'react-toastify';
 import { EmbeddedWalletBridgeProvider } from '~/components/EmbeddedWallet';
 import { FiddyMobileTabBar } from '~/components/fiddy/FiddyMobileTabBar';
 import { FiddyTopBar } from '~/components/fiddy/FiddyTopBar';
+import { ShellSkeleton } from '~/components/fiddy/ShellSkeleton';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { PreloadAuthedResources } from '~/components/PrefetchAuthedResources';
 import { DeviceOnlySessionLanding } from '~/components/session/DeviceOnlySessionLanding';
@@ -65,9 +66,14 @@ const LazySpaceProvider = lazyWithPreload(() =>
   import('~/contexts/SpaceContext').then((m) => ({ default: m.SpaceProvider })),
 );
 
+// This boundary sits above the shell's own chrome, so falling back to nothing
+// here is falling back to a blank page: a reader mid-session would lose the top
+// bar and the rail while a WebRTC chunk loads, and on a slow connection they
+// would stay lost. The fallback is the shell itself, which is the same shape the
+// document paints before the app runs — see ~/components/fiddy/ShellSkeleton.
 const SpacesContainer: FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<ShellSkeleton />}>
       <LazySpaceProvider>{children}</LazySpaceProvider>
     </Suspense>
   );
