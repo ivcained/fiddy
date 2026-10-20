@@ -26,6 +26,11 @@
 //       Fiddy shell is up
 //   5b. with the real API (farcaster.xyz): still no ejection to the welcome —
 //       the surfaces themselves error out, which is recorded, not hidden
+//   6. the two surfaces that landing offers ("Add a brain", "Connect apps") are
+//      reached by CLICKING them, and the screens that come up are those screens
+//      — not the landing again. The landing claims they need no account; a
+//      button that only changes the URL is the same dishonesty it exists to
+//      remove, and reading the label cannot tell the two apart
 import os from 'node:os';
 
 import { chromium } from 'playwright';
@@ -127,9 +132,89 @@ const run = async ({ label, mockApi }) => {
     };
   });
   await page.screenshot({ path: `${OUT}/after-reload-${label}.png` });
+
+  // Read what is on screen now, in the same terms the landing is judged by.
+  const readSurface = () =>
+    page.evaluate(() => ({
+      url: window.location.pathname,
+      landing: Boolean(
+        document.querySelector('[data-fiddy="device-only-session"]'),
+      ),
+      text: document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 160),
+    }));
+
+  const clickByText = async (re) => {
+    for (const el of await page.$$('a, button')) {
+      const txt = ((await el.innerText()) || '').replace(/\s+/g, ' ').trim();
+      if (re.test(txt)) {
+        await el.click();
+        return txt;
+      }
+    }
+    return null;
+  };
+
+  // Only meaningful where the landing is what came up: with the mock API the
+  // session is real enough for the shell, and the buttons live on the agent
+  // screen instead.
+  let accountFreeSurfaces = null;
+  if (!mockApi) {
+    const errorsBefore = consoleErrors.length;
+    const landedText = after.text;
+
+    const brainsLabel = await clickByText(/^Add a brain/i);
+    await page.waitForTimeout(2000);
+    const brains = await readSurface();
+    await page.screenshot({ path: `${OUT}/device-only-brains-${label}.png` });
+
+    await page.goto('https://localhost:5173/~/agent/apps', {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    });
+    await page.waitForFunction(
+      () => document.body.innerText.trim().length > 60,
+      { timeout: 30000 },
+    );
+    await page.waitForTimeout(1500);
+    const apps = await readSurface();
+    await page.screenshot({ path: `${OUT}/device-only-apps-${label}.png` });
+
+    accountFreeSurfaces = {
+      landedOn: landedText,
+      brains: {
+        clicked: brainsLabel !== null,
+        url: brains.url,
+        // The screen itself, not just its label: the copy under the heading is
+        // the sheet's own and the landing does not carry it.
+        rendered:
+          !brains.landing &&
+          /Add a brain/.test(brains.text) &&
+          /think with anything you already have/i.test(brains.text),
+        landingAgain: brains.landing,
+        text: brains.text,
+      },
+      apps: {
+        url: apps.url,
+        rendered:
+          !apps.landing &&
+          /Connect apps/.test(apps.text) &&
+          /apps your agent is allowed to help with/i.test(apps.text),
+        landingAgain: apps.landing,
+        text: apps.text,
+      },
+      newConsoleErrors: consoleErrors.slice(errorsBefore),
+      // Console noise from the app's other background calls is not the signal
+      // here; an uncaught error is, because that is how a surface is lost.
+      newUncaughtErrors: consoleErrors
+        .slice(errorsBefore)
+        .filter((e) => e.startsWith('pageerror:')),
+    };
+  }
+
   await browser.close();
 
   return {
+    accountFreeSurfaces,
     qrRendered: svgCount > 0,
     qrPointsAtSiwf: /farcaster\.xyz\/~\/siwf\?channelToken=/.test(qrText),
     legacyLinkGone: !/farcaster\.xyz\/login-web\?channel-id=/.test(qrText),
@@ -155,3 +240,34 @@ console.log(JSON.stringify(withMock, null, 1));
 const realApi = await run({ label: 'realapi', mockApi: false });
 console.log('--- with the real farcaster.xyz API ---');
 console.log(JSON.stringify(realApi, null, 1));
+
+// The card's own conditions, as pass/fail rather than prose, so this script can
+// be the gate it is meant to be instead of something a reader has to grade.
+const checks = {
+  'qr renders': realApi.qrRendered && withMock.qrRendered,
+  'qr points at the SIWF relay': realApi.qrPointsAtSiwf && withMock.qrPointsAtSiwf,
+  'the dead legacy link is gone': realApi.legacyLinkGone && withMock.legacyLinkGone,
+  'sign-in names the account and the fid': realApi.signedInStateRendered &&
+    realApi.handleNamed && realApi.fidShown && withMock.handleNamed && withMock.fidShown,
+  'no sync-channel traffic': realApi.noSyncChannelTraffic && withMock.noSyncChannelTraffic,
+  'no /v2/me probe with a device-only token': realApi.noMeProbeWithLocalToken && withMock.noMeProbeWithLocalToken,
+  'the reload never lands on the bare error page or the welcome':
+    (!realApi.afterReload.apiErrorPage && !realApi.afterReload.welcomeBack) &&
+    (!withMock.afterReload.apiErrorPage && !withMock.afterReload.welcomeBack),
+  'the mock API still gets the full shell': withMock.afterReload.shellClasses >= 10,
+  'the landing\'s own two buttons reach their screens':
+    realApi.accountFreeSurfaces.brains.clicked &&
+    realApi.accountFreeSurfaces.brains.rendered &&
+    realApi.accountFreeSurfaces.apps.rendered,
+  'reaching them adds no page errors':
+    realApi.accountFreeSurfaces.newUncaughtErrors.length === 0,
+};
+
+console.log('--- checks ---');
+let failed = 0;
+for (const [name, passed] of Object.entries(checks)) {
+  if (!passed) failed += 1;
+  console.log(`${passed ? 'PASS' : 'FAIL'}  ${name}`);
+}
+console.log(`PROBE_EXIT=${failed === 0 ? 0 : 1} (${failed} failed)`);
+process.exitCode = failed === 0 ? 0 : 1;
