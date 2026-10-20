@@ -1,0 +1,54 @@
+/*
+ * The honest degrade panel.
+ *
+ * Shown by `ShellSectionErrorBoundary` when one region of the shell cannot
+ * load: the frame, the chrome and the nav stay standing around it, and only
+ * this panel says what is missing. Values are copied from fiddy-shell.css (the
+ * shell's own tokens), not invented, so the two files cannot drift into
+ * different visual languages.
+ */
+
+.fiddy-degrade {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 13px 15px;
+  max-width: 420px;
+  border: 1px dashed color-mix(in oklab, var(--fiddy-ink-dim), transparent 58%);
+  border-radius: 14px;
+  background: var(--fiddy-glass);
+  font-family: var(--fiddy-font);
+  text-align: left;
+}
+
+.fiddy-degrade-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--fiddy-ink);
+}
+
+.fiddy-degrade-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fiddy-ink-dim);
+}
+
+.fiddy-degrade-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.fiddy-degrade-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 12.5px;
+}

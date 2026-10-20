@@ -140,6 +140,9 @@
 @import '@neynar/ui/styles';
 /* Fiddy brand tokens + shell chrome (design: OpenDesign fiddy-client-4695). */
 @import './styles/fiddy-shell.css';
+/* What a device-only session says for itself: the chrome banner and the
+   in-place degrade panel for a shell region that cannot load. */
+@import './styles/fiddy-device-only.css';
 @config '../tailwind.config.js';
 
 * {
