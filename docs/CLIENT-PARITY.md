@@ -174,12 +174,28 @@ against that node through the relay. One run, 11/11 checks:
 | **a reload keeps it** | after `goto('/')`: the same bounded `castsByFid` read, 44–47 cast texts back on screen |
 | the rail is honest about DMs | `Direct Casts · soon` in place of the link |
 
-Node routes the client used in that run, all `200`: `castsByFid` (62),
-`linksByFid` (96), `linksByTargetFid` (73), `reactionsByCast` (60),
+Node routes the client used in that 11/11 run (2026-10-20), all `200`:
+`castsByFid` (62), `linksByFid` (96), `linksByTargetFid` (73),
+`reactionsByCast` (60),
 `userDataByFid` (28), `castsByParent` (10), `castById` (6), `castsByMention` (3),
 `reactionsByFid` (2), `verificationsByFid` (1), `userNameProofByName` (1),
 `info` (6) — the same shape as the first pass measured, re-measured after the
 fan-out bound and the honesty fixes.
+
+**Re-measured 2026-10-21 (card `t_8ffc2c23`): that probe is now 4/11, and the
+timeout work is not why.** Every failing check is one that requires the *feed's
+own reads to go through the `/snapchain-api` relay*, and the client no longer
+reads that way. Same probe, same live public node behind the relay (5174): the
+only `/snapchain-api` traffic is `GET 200 /v1/info` (the node health check, 3×),
+no `castsByFid` / `userDataByFid` / `castsByParent` read reaches the relay at all,
+and the client's own fetch log shows the feed reading an *absolute* node origin
+instead; the status pill says `Backup Feed`. The commits that did that
+(`703e2da`, `af8d9f8`, `131ae87`, `de0269e` — the provider chain in
+`~/snapchain/providers`) landed after this section's parent verified 11/11, and
+none of them is touched by `t_8ffc2c23`'s diff. All 7 failures are phrased as
+"no … read", never as "too few casts" — which is what a too-tight timeout would
+look like. The probe is worth re-pointing at the provider chain; that is the
+providers' card, not this one.
 
 ### The 501s are the honest part
 
@@ -238,21 +254,92 @@ The unit tests for the boundary's three branches (generic failure, node cannot
 answer, node did not answer) are in
 `src/components/session/__tests__/deviceOnlySession.test.tsx`.
 
-### Still open: a node that never answers (measured, not fixed here)
+### A node that never answers: every layer now has a deadline (measured, fixed)
 
-With the node `.env.local` names black-holed (`http://34.101.47.167:3381`,
-unreachable from this Mac), the same signed-in client on
-`https://localhost:5173` was driven for 75 seconds. The rail's Explore region
-showed the honest refusal (that read is a `501`, answered locally by the
-adapter — this fix applies to it too), but the **feed column showed no casts, no
-error and no message** — just the feed's header and tabs. The adapter's `502`
-branch ("Your node did not answer this read: …", with a retry) never fired: the
-dev server's relay is still waiting on a TCP connection to a black-holed address,
-and nothing on the client side times a node read out. So it is not a crash and
-not a fake, but it is not an answer either. A read timeout on the client
-(`nodeBackedFetch`) or a connect timeout on the relay would turn it into the
-`502` sentence; that is a card of its own. The `502` branch is unit-tested; this
-is the one configuration where it cannot be reached.
+Was, at `d0eede6`: with the node `.env.local` names black-holed
+(`http://34.101.47.167:3381`, unreachable from this Mac), the signed-in client on
+`https://localhost:5173` ran for 75 seconds and the **feed column showed no
+casts, no error and no message** — just the feed's header and tabs. The rail's
+Explore region did show its honest refusal (that read is a `501`, answered
+locally), so the shell was alive; the feed's own read simply never came back.
+
+The root cause was sharper than "nothing times out":
+
+* the fork's client **does** time every endpoint out itself
+  (`DEFAULT_TIMEOUT_FEED_ITEMS` = 5 s) and passes the `AbortSignal` in, but
+  `nodeBackedFetch` never read `init.signal`, so the abort did nothing: the read
+  was not cancelled, no request failed, and the client's promise never settled —
+  the column stayed in its loading state for as long as the page was open. The
+  client's deadline was dead code on this path;
+* the dev server's `/snapchain-api` relay had no deadline at all, and http-proxy
+  waits on a TCP connect that a black-holed address never completes. MEASURED:
+  a bare in-page read came back **75.008 s** later with `500` and an **empty
+  body** — which is also why the `502` sentence never appeared.
+
+Both layers now have a deadline, and the numbers come from measurement, not
+taste:
+
+| Measurement | Value |
+| --- | --- |
+| healthy node, per-read latency (feed fan-out shape: 60 authors × `pageSize=10`, concurrency 12, warm) | p50 **258 ms**, p90 759 ms, p95 **773 ms**, p99 986 ms, max **986 ms** |
+| the same fan-out, wall clock | **1.99 s** (cold first read 819 ms) |
+| black-holed node, relay **before** | **75.008 s**, `500`, empty body |
+| black-holed node, relay **after** (`curl` at `/snapchain-api`) | **8.07 s**, `504`, `{"errors":[{"message":"Your node did not answer this read: the relay waited up to 8s for http://34.101.47.167:3381 and gave up (no reply within 8000ms)."}]}` |
+| a *refused* port through the same relay | `504` in **35 ms**, same envelope, `(connect ECONNREFUSED …)` |
+
+What changed:
+
+* `nodeBackedFetch`: `NODE_READ_TIMEOUT_MS = 10_000` is the per-read deadline
+  (~10× the worst healthy read), armed around every node fetch and handed to the
+  node client as its own `timeoutMs`; `NodeReadTimeoutError` /
+  `isNodeReadTimeout` / `nodeDidNotAnswerWithin(ms)` name the failure in words;
+  and `raceClientDeadline` **honours the caller's own `init.signal`**, so the
+  client's 5 s feed deadline answers `502 "Your node did not answer this read
+  within 5 s."` instead of never settling.
+* the relay (`vite.config.js`, `nodeRelayProxy`, on both `server.proxy` and
+  `preview.proxy`): an 8 s per-upstream-request deadline whose error hook answers
+  the hosted API's error envelope with `504` and that sentence. Three relays were
+  tried and measured, in this order: no timeout (75 s hang) → `proxyTimeout` +
+  `timeout` (bounded at +8.4 s but the socket is destroyed with **no response at
+  all**, `curl` status 000) → `proxyReq.setTimeout` (never fires while the TCP
+  connect hangs) → a plain timer around the upstream request (chosen). 8 s sits
+  below the adapter's 10 s on purpose, so the relay's failure is what the read
+  reports.
+* the feed column: `FullScreenErrorBoundary` → `ShellSectionErrorBoundary
+  label="Home"`, so the adapter's sentence lands **in the column** with a retry
+  instead of the generic full-screen "Error retrieving data" /
+  "Could not reach Farcaster" copy. `NodeCannotAnswerPanel`'s heading now says
+  which failure it is: `502` → "… didn't load from your node" (with Try again),
+  `501` → "… isn't on your node".
+* `reads.ts`: the feed's fan-out counts the reads that **answered**. MEASURED
+  (relay pointed at a refused port): every per-author read came back `500`, every
+  one was swallowed by the per-account `catch`, and the feed answered `200` with
+  zero items — indistinguishable from a genuinely quiet follow graph. When *no*
+  account read succeeded, the read now throws instead of answering an empty page.
+
+Fail-capable probe: `scripts/verify-dead-node-feed.mjs` (sign-in via the same
+real-SIWE stub as its siblings, then the feed column's own words). **4/4** with
+the relay pointed at the black-holed node and every other server blocked, the
+column carrying the adapter's sentence and a retry; at the pre-fix state the
+column stays blank for the whole budget (measured twice: the 75 s run above, and
+a 30 s run of this probe whose only answer on the page was the rail's `501`).
+
+Two things this round had to learn the hard way, both recorded in the probe:
+
+* a check that accepts *any* `[data-fiddy="node-cannot-answer"]` panel on the page
+  passes on the **rail**, not the feed (it did) — the assertion is scoped to
+  `main`;
+* reads taken while the client is swapping routes throw
+  `Execution context was destroyed, most likely because of a navigation` and kill
+  the probe mid-run — a probe defect that hid the checks it was about to make.
+
+And one thing that changed under this card, worth knowing before anyone re-runs
+it: the provider chain (`~/snapchain/providers`) now answers the same setup by
+**moving to a server that answers** — measured without isolation, the column
+filled with live casts and the status pill said which server it moved to. A dead
+node with a live backup is not a blank feed; the sentence above is what the user
+gets when nothing else can answer, which is why the probe blocks the other
+servers.
 
 ### Two measured defects this card had to fix first
 

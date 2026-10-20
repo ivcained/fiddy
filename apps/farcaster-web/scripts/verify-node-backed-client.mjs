@@ -68,31 +68,52 @@ const check = (name, ok, detail = '') => {
   checks.push({ name, ok: Boolean(ok), detail });
 };
 
-const readSurface = (page) =>
-  page.evaluate(() => {
-    const text = document.body.innerText.replace(/\s+/g, ' ').trim();
-    return {
-      path: window.location.pathname,
-      text,
-      onboardingSheet: Boolean(document.querySelector('[data-fiddy="onboarding"]')),
-      deviceOnlyLanding: Boolean(
-        document.querySelector('[data-fiddy="device-only-session"]'),
-      ),
-      dmsUnavailable: Boolean(document.querySelector('[data-fiddy="dms-unavailable"]')),
-      dmsNoteText: /direct casts\s+soon/i.test(text),
-      errorText:
-        /Could not reach Farcaster|Error retrieving data|Something went wrong/i.test(text),
-      castLinks: Array.from(document.querySelectorAll('a[href*="/conversations/"]'))
-        .map((a) => a.getAttribute('href'))
-        .slice(0, 12),
-    };
-  });
+/**
+ * Read the surface, tolerating a page that is mid-navigation.
+ *
+ * MEASURED (2026-10-21, under load): a read taken while the client is still
+ * swapping routes throws `Execution context was destroyed, most likely because
+ * of a navigation` and takes the whole probe down with it — the checks it was
+ * about to make never run. A destroyed execution context is retried; anything
+ * else still throws.
+ */
+const readSurface = async (page) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      return await page.evaluate(surfaceProbe);
+    } catch (error) {
+      if (!/Execution context was destroyed|Target closed|navigat/i.test(String(error))) {
+        throw error;
+      }
+      await page.waitForTimeout(250);
+    }
+  }
+  return { path: '', text: '', castLinks: [] };
+};
+
+const surfaceProbe = () => {
+  const text = document.body.innerText.replace(/\s+/g, ' ').trim();
+  return {
+    path: window.location.pathname,
+    text,
+    onboardingSheet: Boolean(document.querySelector('[data-fiddy="onboarding"]')),
+    deviceOnlyLanding: Boolean(
+      document.querySelector('[data-fiddy="device-only-session"]'),
+    ),
+    dmsUnavailable: Boolean(document.querySelector('[data-fiddy="dms-unavailable"]')),
+    dmsNoteText: /direct casts\s+soon/i.test(text),
+    errorText:
+      /Could not reach Farcaster|Error retrieving data|Something went wrong/i.test(text),
+    castLinks: Array.from(document.querySelectorAll('a[href*="/conversations/"]'))
+      .map((a) => a.getAttribute('href'))
+      .slice(0, 12),
+  };
+};
 
 const run = async () => {
   /** "GET 200 /snapchain-api/v1/castsByFid?fid=3…" — what left the page. */
   const readLog = (page) =>
     page.evaluate(() => window.__nodeBackedFetchLog ?? []);
-  const endpoints = [];
   const nodeCastTexts = [];
   /** The same casts' hashes, so a thread can be opened by hash. */
   const nodeCastHashes = [];
