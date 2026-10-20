@@ -152,6 +152,11 @@ export class NodeBackedReads {
     return fid;
   }
 
+  /** The account every signed-in read is relative to, or undefined. */
+  signedInFid(): number | undefined {
+    return this.getSignedInFid();
+  }
+
   // ---------------------------------------------------------------- user reads
 
   private async userDataMessages(fid: number): Promise<NodeMessage[]> {

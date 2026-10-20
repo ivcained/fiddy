@@ -11,6 +11,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { LocalDraftStore } from '~/snapchain/nodeApi/localDrafts';
 import {
   mediaUploadAnswer,
   type RequestLogEntry,
@@ -356,5 +357,127 @@ describe('createProviderBackedFetch: the media pipeline', () => {
       (globalThis as unknown as Record<string, unknown>).__nodeBackedRequests,
     ).toBe(requestLog);
     vi.unstubAllEnvs();
+  });
+});
+
+/**
+ * A cast's submit, at the seam. Both writes of that flow are answered without a
+ * provider: the draft is this device's own state, and the refusal to post is
+ * one sentence, not whichever write guard the live server happens to have.
+ */
+describe('createProviderBackedFetch: pressing Cast', () => {
+  const STORM = 'https://farcaster.xyz/~api/v2/draft-caststorms';
+  const CASTS = 'https://farcaster.xyz/~api/v2/casts';
+
+  const draftStore = () => {
+    const map = new Map<string, string>();
+    const storage = {
+      get length() {
+        return map.size;
+      },
+      clear: () => map.clear(),
+      getItem: (key: string) => map.get(key) ?? null,
+      key: (index: number) => Array.from(map.keys())[index] ?? null,
+      removeItem: (key: string) => {
+        map.delete(key);
+      },
+      setItem: (key: string, value: string) => {
+        map.set(key, value);
+      },
+    } as Storage;
+    return new LocalDraftStore({ storage });
+  };
+
+  it('answers the draft write itself when the live server takes no writes', async () => {
+    const calls: string[] = [];
+    const drafts = draftStore();
+    const requestLog: RequestLogEntry[] = [];
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => farcasterPublicProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async (url: string) => {
+        calls.push(url);
+        return jsonResponse({});
+      }) as unknown as typeof fetch,
+      requestLog,
+      drafts,
+    });
+
+    const response = await handle.fetch(STORM, {
+      method: 'POST',
+      body: JSON.stringify({ caststorm: { casts: [{ text: 'kept here' }] } }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(drafts.caststorms(3)[0]?.casts[0]?.text).toBe('kept here');
+    // That provider's own write guard — "POST … is a write" — is exactly what
+    // used to run in front of every Cast attempt for a local draft.
+    expect(calls).toEqual([]);
+    expect(requestLog.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/~api/v2/draft-caststorms',
+      kind: 'local',
+      status: 200,
+    });
+  });
+
+  it('hands a node that answers the feed the same draft store', async () => {
+    const { calls, factory } = stubNodeAdapter();
+    const drafts = draftStore();
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => ownNodeProvider('https://mine.example'),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: fetch,
+      createNodeAdapter: factory,
+      drafts,
+    });
+
+    // Written while a node was live, read back once the provider changed.
+    await handle.fetch(STORM, {
+      method: 'POST',
+      body: JSON.stringify({
+        caststorm: { casts: [{ text: 'mine either way' }] },
+      }),
+    });
+
+    expect(drafts.caststorms(3)[0]?.casts[0]?.text).toBe('mine either way');
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses the cast submit in the same words for every provider', async () => {
+    const refusals: string[] = [];
+    for (const provider of [
+      farcasterPublicProvider(),
+      neynarProvider(),
+      ownNodeProvider('https://mine.example'),
+    ]) {
+      const handle = createProviderBackedFetch({
+        getActiveProvider: () => provider,
+        getSignedInFid: () => 3,
+        nodeBaseUrl: '/snapchain-api',
+        fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
+        neynarApiKey: provider.kind === 'neynar' ? 'a-key' : null,
+        createNodeAdapter: stubNodeAdapter().factory,
+      });
+
+      const response = await handle.fetch(CASTS, {
+        method: 'POST',
+        body: JSON.stringify({ text: 'anything' }),
+      });
+
+      expect(response.status).toBe(501);
+      refusals.push(
+        ((await response.json()) as { errors: { message: string }[] }).errors[0]
+          ?.message ?? '',
+      );
+    }
+
+    // One sentence, three servers: the public server's generic write guard names
+    // a way to post (a node writer) that this client does not have, so it is not
+    // the one a person should read.
+    expect(new Set(refusals).size).toBe(1);
+    expect(refusals[0]).toContain('app key');
   });
 });

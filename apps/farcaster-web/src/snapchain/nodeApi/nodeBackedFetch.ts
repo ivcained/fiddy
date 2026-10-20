@@ -36,6 +36,7 @@
 import { type FetchLike, SnapchainNodeClient } from 'farcaster-node-client';
 
 import { classifyHostedRequest, type HostedRouteMatch } from './hostedRoutes';
+import { answerLocalDraftRequest, LocalDraftStore } from './localDrafts';
 import { mediaUploadUrl } from './mediaUpload';
 import { NodeBackedReads, NodeCannotAnswerError } from './reads';
 
@@ -58,6 +59,12 @@ export interface NodeBackedFetchOptions {
    * can point at a local instance without an env.
    */
   mediaUploadUrl?: string;
+  /**
+   * Where cast drafts are kept (this browser, one list per signed-in FID).
+   * Defaults to a store over `localStorage`; injectable so a test can use a
+   * storage of its own (the test runner has no `window`).
+   */
+  drafts?: LocalDraftStore;
   /**
    * Where this adapter appends what it classified. Defaults to an array of its
    * own. The provider layer passes one shared sink here so that whichever layer
@@ -121,6 +128,20 @@ const errorResponse = (status: number, message: string): Response =>
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
+
+/**
+ * The answer every `hosted` route gets: the hosted API's error envelope with the
+ * classification's own sentence, which the UI shows as written.
+ *
+ * Exported because one of those routes is answered by the provider seam as well
+ * as by this adapter — `POST /v2/casts`, whose refusal must read the same
+ * whichever server is answering today's feed. A provider's generic write guard
+ * ("Farcaster's own public server does not take writes from this client. Posting
+ * goes through your node (or ours) instead") names a way to post that this
+ * client does not have yet; the classification's sentence names the real one.
+ */
+export const hostedRefusal = (route: HostedRouteMatch): Response =>
+  errorResponse(501, route.why);
 
 const jsonResponse = (payload: unknown, status = 200): Response =>
   new Response(JSON.stringify(payload), {
@@ -291,6 +312,7 @@ export const createNodeBackedFetch = ({
   countCap,
   readTimeoutMs = NODE_READ_TIMEOUT_MS,
   mediaUploadUrl: mediaUploadUrlOption,
+  drafts: draftsOption,
   log: logOption,
 }: NodeBackedFetchOptions): NodeBackedFetchHandle => {
   const nodeFetch = fetchImpl ?? fetch;
@@ -359,16 +381,19 @@ export const createNodeBackedFetch = ({
 
   const mediaUploadTarget = mediaUploadUrlOption ?? mediaUploadUrl();
   const mediaAnswer = (): Response => mediaUploadAnswer(mediaUploadTarget);
+  // One store per adapter; the provider seam keeps its own over the same
+  // browser storage, so both layers read the same drafts.
+  const drafts = draftsOption ?? new LocalDraftStore();
 
   const answer = async (
-    { url, method: _method, body }: ParsedRequest,
+    { url, method, body }: ParsedRequest,
     route: HostedRouteMatch,
   ): Promise<Response> => {
     const searchParams = url.searchParams;
 
     switch (route.kind) {
       case 'hosted':
-        return errorResponse(501, route.why);
+        return hostedRefusal(route);
 
       case 'media':
         return mediaAnswer();
@@ -376,9 +401,11 @@ export const createNodeBackedFetch = ({
       case 'local':
         return localAnswer({
           path: route.path,
+          method,
           searchParams,
           body,
           reads: reader,
+          drafts,
         });
 
       case 'node':
@@ -645,15 +672,30 @@ const channelFromKey = (key: string, reader: NodeBackedReads) => ({
 
 const localAnswer = async ({
   path,
-  searchParams: _searchParams,
+  method,
+  searchParams,
   body,
   reads,
+  drafts,
 }: {
   path: string;
+  method: string;
   searchParams: URLSearchParams;
   body: unknown;
   reads: NodeBackedReads;
+  drafts: LocalDraftStore;
 }): Promise<Response> => {
+  // Drafts first: this device's own state, answered from the real store in
+  // `localDrafts.ts`. A store that cannot be written says so (501) rather than
+  // reporting a save that did not happen.
+  const draftAnswer = answerLocalDraftRequest(
+    { method, path, searchParams, body, fid: reads.signedInFid() },
+    drafts,
+  );
+  if (draftAnswer) {
+    return draftAnswer;
+  }
+
   switch (path) {
     case '/v2/user-app-context':
       return jsonResponse({ result: { context: LOCAL_USER_APP_CONTEXT } });

@@ -33,7 +33,10 @@
  * /v1/generate-image-upload-url`, classified `media`) is answered here, before
  * any provider sees it, because the bytes belong to our own host rather than to
  * whichever machine is answering today's feed. A provider that takes no writes
- * would otherwise turn "post a photo" into a 501.
+ * would otherwise turn "post a photo" into a 501. Cast drafts are the second:
+ * they are this device's own state (`localDrafts.ts`), so the draft write the
+ * composer makes before every Cast is answered here too, for the same reason
+ * (`local`, see `answerLocalDraftRequest`).
  */
 
 import {
@@ -41,7 +44,12 @@ import {
   hostedApiPath,
 } from '~/snapchain/nodeApi/hostedRoutes';
 import {
+  answerLocalDraftRequest,
+  LocalDraftStore,
+} from '~/snapchain/nodeApi/localDrafts';
+import {
   createNodeBackedFetch,
+  hostedRefusal,
   isRequestDebugEnabled,
   mediaUploadAnswer,
   REQUEST_BODY_PREVIEW_LIMIT,
@@ -80,6 +88,11 @@ export interface ProviderBackedFetchOptions {
    * `VITE_SNAPCHAIN_DEBUG=true`) reads this same array.
    */
   requestLog?: RequestLogEntry[];
+  /**
+   * Where cast drafts are kept. Defaults to a store over this browser's own
+   * storage; injectable so a test can use a storage of its own.
+   */
+  drafts?: LocalDraftStore;
 }
 
 export interface ProviderBackedFetchHandle {
@@ -137,6 +150,26 @@ const errorResponse = (status: number, message: string): Response =>
  * their own requests and pass no headers through at all.
  */
 
+/**
+ * The sink a write's refusal goes to when the seam answers it itself; the same
+ * shape the adapter keeps.
+ */
+const recordSelfAnswered = (
+  requestLog: RequestLogEntry[],
+  parsed: ParsedRequest,
+  route: { path: string; kind: RequestLogEntry['kind'] },
+  response: Response,
+  bodyPreview: { bodyPreview?: string },
+): void => {
+  requestLog.push({
+    method: parsed.method,
+    path: parsed.url.pathname,
+    kind: route.kind,
+    status: response.status,
+    ...bodyPreview,
+  });
+};
+
 export const createProviderBackedFetch = ({
   getActiveProvider,
   getSignedInFid,
@@ -147,7 +180,9 @@ export const createProviderBackedFetch = ({
   onRead,
   createNodeAdapter = createNodeBackedFetch,
   requestLog: requestLogOption,
+  drafts: draftsOption,
 }: ProviderBackedFetchOptions): ProviderBackedFetchHandle => {
+  const drafts = draftsOption ?? new LocalDraftStore();
   const nodeFetch = fetchImpl ?? fetch;
   const boundFetch = (nodeFetch as (...args: unknown[]) => unknown).bind(
     globalThis,
@@ -169,6 +204,9 @@ export const createProviderBackedFetch = ({
       getSignedInFid,
       fetchImpl: boundFetch,
       ...(countCap ? { countCap } : {}),
+      // The same draft store the seam answers with, so a draft written while a
+      // node was live is the draft read back when it is not.
+      drafts,
       // One sink for the whole client: a request the node adapter answers and a
       // request this seam answers land in the same list, in order.
       log: requestLog,
@@ -311,14 +349,66 @@ export const createProviderBackedFetch = ({
     // today's feed: the bytes always go to our own host.
     if (route.kind === 'media') {
       const response = mediaUploadAnswer();
-      requestLog.push({
-        method: parsed.method,
-        path: parsed.url.pathname,
-        kind: 'media',
-        status: response.status,
-        ...bodyPreviewOf(parsed),
-      });
+      recordSelfAnswered(
+        requestLog,
+        parsed,
+        route,
+        response,
+        bodyPreviewOf(parsed),
+      );
       return response;
+    }
+
+    // A cast draft is this device's own state, so it is answered here too —
+    // before any provider sees it. A provider that takes no writes would
+    // otherwise refuse `POST /v2/draft-caststorms` as a write with a sentence
+    // about itself, in front of every Cast attempt, for a request that never
+    // had to leave the browser at all (measured on `farcaster-public`; the same
+    // shape of failure the media mint had one endpoint over).
+    if (route.kind === 'local') {
+      const local = answerLocalDraftRequest(
+        {
+          method: parsed.method,
+          path,
+          body: parsed.body,
+          searchParams: parsed.url.searchParams,
+          fid: getSignedInFid(),
+        },
+        drafts,
+      );
+      if (local) {
+        recordSelfAnswered(
+          requestLog,
+          parsed,
+          route,
+          local,
+          bodyPreviewOf(parsed),
+        );
+        return local;
+      }
+    }
+
+    // The cast submit itself is refused in one set of words, whichever server
+    // is live: no provider in this client's catalog posts a cast (a node has no
+    // writer wired up, and the public server and Neynar take no writes), and a
+    // provider's generic write guard would name a way to post that this device
+    // does not have yet. The classification's sentence says what is really
+    // missing (a signing app key), and the composer shows it to the person who
+    // pressed Cast.
+    if (
+      route.kind === 'hosted' &&
+      route.method === 'POST' &&
+      path === '/v2/casts'
+    ) {
+      const refusal = hostedRefusal(route);
+      recordSelfAnswered(
+        requestLog,
+        parsed,
+        route,
+        refusal,
+        bodyPreviewOf(parsed),
+      );
+      return refusal;
     }
 
     if (provider === null) {

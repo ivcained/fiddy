@@ -24,7 +24,12 @@
  *                   messages, channel directories and the other indexer
  *                   features are Warpcast's own. The request fails with a
  *                   message that says so, rather than an empty success that
- *                   would read as "there is nothing there".
+ *                   would read as "there is nothing there". The one write in
+ *                   this list is `POST /v2/casts`: sending a cast is the
+ *                   client's own job, but it needs a signed message, and this
+ *                   device holds no app key to sign with yet — so it is named
+ *                   here, refused in plain words, and shown to the person who
+ *                   pressed Cast.
  *
  * The classification is by path, because that is all a `fetch` sees: the
  * hosted client builds `${baseUrl}${relativeUrl}` itself, so the path is the
@@ -140,6 +145,43 @@ const LOCAL_ROUTES: { method: string; path: string; why: string }[] = [
     path: '/v2/feed-seen',
     why: 'what you have seen is this device’s own bookmark, kept locally',
   },
+  // ── drafts: DECIDED (t_44070b80), and the reason is written down here on
+  // purpose. A draft is what this device typed and has not sent, not a
+  // Farcaster object: Warpcast keeps its own copy on its own servers so drafts
+  // follow you between Warpcast apps, and a third-party client holding no
+  // Warpcast session cannot have that. So the store is real and it is here
+  // (`localDrafts.ts`, one list per signed-in FID in this browser's storage).
+  // Answering "saved" while storing nothing — or refusing the write with a
+  // 501 — would both be worse than owning the state: the second one is what
+  // made every Cast attempt stop before it could even try to post.
+  // `DELETE /v2/draft-casts` is in this list for the same reason: the composer
+  // discards the pre-publish draft after a successful cast, and a 501 there
+  // would leave a stale draft on the device for ever.
+  {
+    method: 'GET',
+    path: '/v2/draft-caststorms',
+    why: 'a draft is this device’s own state, kept in localDrafts.ts, not a server’s',
+  },
+  {
+    method: 'POST',
+    path: '/v2/draft-caststorms',
+    why: 'a draft is this device’s own state, kept in localDrafts.ts, not a server’s',
+  },
+  {
+    method: 'GET',
+    path: '/v2/draft-casts',
+    why: 'a draft is this device’s own state, kept in localDrafts.ts, not a server’s',
+  },
+  {
+    method: 'POST',
+    path: '/v2/draft-casts',
+    why: 'a draft is this device’s own state, kept in localDrafts.ts, not a server’s',
+  },
+  {
+    method: 'DELETE',
+    path: '/v2/draft-casts',
+    why: 'a draft is this device’s own state, kept in localDrafts.ts, not a server’s',
+  },
 ];
 
 const MEDIA_ROUTES: { method: string; path: string; why: string }[] = [
@@ -151,6 +193,11 @@ const MEDIA_ROUTES: { method: string; path: string; why: string }[] = [
 ];
 
 const HOSTED_ROUTES: { method: string; path: string; why: string }[] = [
+  {
+    method: 'POST',
+    path: '/v2/casts',
+    why: 'sending a cast means signing it with an app key and handing it to a node — this device has no app key yet, so nothing was signed and nothing was sent',
+  },
   {
     method: 'GET',
     path: '/v2/feeds',
@@ -275,22 +322,42 @@ export const classifyHostedRequest = ({
 
   const node = find(NODE_ROUTES, normalizedMethod, endpoint);
   if (node) {
-    return { kind: 'node', path: endpoint, method: normalizedMethod, why: node.why };
+    return {
+      kind: 'node',
+      path: endpoint,
+      method: normalizedMethod,
+      why: node.why,
+    };
   }
 
   const local = find(LOCAL_ROUTES, normalizedMethod, endpoint);
   if (local) {
-    return { kind: 'local', path: endpoint, method: normalizedMethod, why: local.why };
+    return {
+      kind: 'local',
+      path: endpoint,
+      method: normalizedMethod,
+      why: local.why,
+    };
   }
 
   const media = find(MEDIA_ROUTES, normalizedMethod, endpoint);
   if (media) {
-    return { kind: 'media', path: endpoint, method: normalizedMethod, why: media.why };
+    return {
+      kind: 'media',
+      path: endpoint,
+      method: normalizedMethod,
+      why: media.why,
+    };
   }
 
   const hosted = find(HOSTED_ROUTES, normalizedMethod, endpoint);
   if (hosted) {
-    return { kind: 'hosted', path: endpoint, method: normalizedMethod, why: hosted.why };
+    return {
+      kind: 'hosted',
+      path: endpoint,
+      method: normalizedMethod,
+      why: hosted.why,
+    };
   }
 
   // Paths we know are search reads (/v1/search-*, /v2/search-*) and anything
@@ -312,7 +379,15 @@ export const classifyHostedRequest = ({
   };
 };
 
-export const nodeBackedRoutes = NODE_ROUTES.map((entry) => `${entry.method} ${entry.path}`);
-export const localRoutes = LOCAL_ROUTES.map((entry) => `${entry.method} ${entry.path}`);
-export const mediaRoutes = MEDIA_ROUTES.map((entry) => `${entry.method} ${entry.path}`);
-export const hostedOnlyRoutes = HOSTED_ROUTES.map((entry) => `${entry.method} ${entry.path}`);
+export const nodeBackedRoutes = NODE_ROUTES.map(
+  (entry) => `${entry.method} ${entry.path}`,
+);
+export const localRoutes = LOCAL_ROUTES.map(
+  (entry) => `${entry.method} ${entry.path}`,
+);
+export const mediaRoutes = MEDIA_ROUTES.map(
+  (entry) => `${entry.method} ${entry.path}`,
+);
+export const hostedOnlyRoutes = HOSTED_ROUTES.map(
+  (entry) => `${entry.method} ${entry.path}`,
+);
