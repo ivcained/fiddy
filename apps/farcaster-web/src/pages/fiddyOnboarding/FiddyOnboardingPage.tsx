@@ -20,6 +20,7 @@
 
 import { KeyRound, MessageCircle, Plug, ShieldCheck } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 
 import { AppsSheet, CHANNEL_ROWS } from '~/components/fiddy/AppsSheet';
 import { BrainSheet, brainSummary } from '~/components/fiddy/BrainSheet';
@@ -28,6 +29,8 @@ import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { Link } from '~/components/links/Link';
 import { LoginModal } from '~/components/modals/LoginModal';
 import { Page } from '~/components/page/Page';
+import { defaultRoute } from '~/constants/routes';
+import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
 import { useNavigate } from '~/hooks/navigation/useNavigate';
 import {
   allowedChannelCount,
@@ -71,6 +74,7 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
 
   const setup = useFiddySetup();
   const navigate = useNavigate();
+  const isSignedIn = useIsSignedIn();
 
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [draftName, setDraftName] = useState(setup.agentName);
@@ -94,6 +98,20 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
   const stepMeta = position ? { index: position, total: 4 } : null;
   const go = (to: OnboardingRouteName) =>
     navigate({ to, params: {}, searchParams: {} });
+
+  // A signed-in session does not belong on a setup screen.
+  //
+  // The setup flow is reachable signed out on purpose — that is the pivot — but
+  // "signed in, looking at the setup" is only ever an accident: the reload that
+  // follows a completed sign-in lands back on the screen the sign-in was
+  // started from, and one of these screens is where "Go social" lives. Measured
+  // before this: a completed SIWF sign-in left the browser on `/welcome/ready`
+  // showing "Fiddy is ready." — before and after a reload. So anyone who
+  // arrives here holding a session is sent on to the client instead, which is
+  // what makes the reload keep the session rather than bounce out of it.
+  if (isSignedIn) {
+    return <Navigate to={defaultRoute.path} replace />;
+  }
 
   const commitName = () => {
     const name = draftName.trim().slice(0, 24) || DEFAULT_AGENT_NAME;

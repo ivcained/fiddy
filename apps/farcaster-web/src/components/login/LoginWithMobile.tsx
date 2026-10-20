@@ -15,6 +15,7 @@ import { LoginQRCodeWithInstructions } from '~/components/login/LoginQRCodeWithI
 import { getOnboardingStateKey } from '~/constants/storage';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useAuth } from '~/contexts/AuthProvider';
+import { postSignInLocation } from '~/lib/postSignInLanding';
 import {
   buildLocalAuthToken,
   buildLocalOnboardingState,
@@ -30,7 +31,7 @@ import { setItem } from '~/utils/storageUtils';
 /** After this long on the QR screen we add a "still waiting" nudge. */
 const SLOW_HINT_AFTER_MS = 45_000;
 
-/** How long the "you're in" confirmation stays up before the app reloads. */
+/** How long the "you're in" confirmation stays up before the app moves on. */
 const SUCCESS_HOLD_MS = 1_100;
 
 const timeoutErrorMessage = 'That sign-in request timed out';
@@ -198,7 +199,19 @@ const LoginWithMobileContent: FC<LoginWithMobileContentProps> = memo(
 
         trackEvent(AnalyticsEvent.LoggedInToWebUsingCompanion, {});
 
-        setTimeout(() => window.location.reload(), SUCCESS_HOLD_MS);
+        // Reboot the app so it boots from the new session — but not blindly in
+        // place. Started from a setup screen (where "Go social" lives), an
+        // in-place reload re-renders that screen and the person who just signed
+        // in never reaches the client; started from anywhere else, in place is
+        // exactly right. `postSignInLocation` is that decision, in one place.
+        setTimeout(() => {
+          window.location.replace(
+            postSignInLocation({
+              pathname: window.location.pathname,
+              href: window.location.href,
+            }),
+          );
+        }, SUCCESS_HOLD_MS);
       } catch (error) {
         // Only a real unmount may swallow the failure. Anything else must reach
         // the user as a visible error with a retry — a modal that can quietly
