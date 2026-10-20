@@ -49,11 +49,13 @@
 //      sha256 is the name in the URL
 //   4. the composer rendered the photo, with no upload-failure copy
 //   5. the payload the composer handed to the adapter (the write that carries
-//      the uploaded URL — `POST /v2/casts`, or the `POST /v2/draft-caststorms`
-//      the fork stores first when there is no hosted session) references that
-//      URL as an embed
+//      the uploaded URL — the composer's own `POST /v2/draft-caststorms`, which
+//      is this device's state and is answered 200 from the local store) carries
+//      that URL as an embed
 //   6. nothing was posted to Farcaster from this probe (posting stays behind
-//      the existing app-key flow)
+//      the existing app-key flow). The submit itself is not this probe's
+//      subject: `scripts/verify-cast-submit.mjs` measures the whole compose →
+//      Cast path, including the refusal it ends at.
 //
 // Screenshots land in $MEDIA_SHOT_DIR (default: the system temp dir).
 
@@ -569,10 +571,14 @@ const run = async () => {
         return {
           cast: writes.find((entry) => /\/v2\/casts$/.test(entry.path)) ?? null,
           // The fork's composer stores the whole caststorm as a DRAFT before
-          // anything is cast (`POST /v2/draft-caststorms`, a hosted endpoint),
-          // so a client with no hosted session is answered 501 there and never
-          // reaches `/v2/casts`. The payload is the same either way — this is
-          // the last write that carried it.
+          // anything is cast (`POST /v2/draft-caststorms`), and a draft is this
+          // device's own state, so that write is answered 200 from the local
+          // store — it is the first write to carry the uploaded URL, which is
+          // what this check wants. MEASURED (2026-10-21): a client with no
+          // hosted session *does* go on to reach `POST /v2/casts`; that submit
+          // and its refusal are measured by scripts/verify-cast-submit.mjs.
+          // The payload is the same either way — this is the last write that
+          // carried it.
           payload: writes.at(-1) ?? null,
         };
       }, mediaUrl);

@@ -368,6 +368,21 @@ Media upload (see "Media upload" above), the channel directory, search, mini-app
 catalogue, audio rooms, wallet surfaces, notification grouping and DMs — all
 hosted-API products with no node equivalent today.
 
+### Cast drafts and the cast submit (card `t_44070b80`, measured 2026-10-21)
+
+Measured end to end in headless Chrome with the node-backed client on a live
+public read node and no hosted session (`scripts/verify-cast-submit.mjs`), by
+typing text and pressing **Cast**:
+
+| Step | Endpoint | Verdict |
+| --- | --- | --- |
+| pre-publish draft write | `POST /v2/draft-caststorms` | **local** — this device's own state, 200, kept in `localStorage` per FID (`localDrafts.ts`). It was a 501, retried twice, in front of every Cast attempt. |
+| drafts list / discard | `GET /v2/draft-caststorms`, `POST\|GET\|DELETE /v2/draft-casts` | **local** — the same store; the Drafts tab and resume button read it back. |
+| the submit itself | `POST /v2/casts` | **hosted, refused by name.** The submit *does* reach it (the earlier audit's \"never reaches `/v2/casts`\" was a probe under-measurement, corrected in that probe's comments). It answers 501 with the classification's sentence — sending a cast means signing it with an app key, and this device has none — and the composer renders it: \"The cast didn't post. Sending a cast means signing it with an app key … nothing was signed and nothing was sent.\" No success UI. |
+
+Still open, deliberately: signing the Farcaster message (the app-key flow). That
+is the only thing between this compose → Cast path and a real post.
+
 ## Fix order for Phase 2 (posting loop first)
 
 1. Text posting: composer → `packages/farcaster-node-client.submitMessage`
