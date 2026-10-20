@@ -22,6 +22,7 @@ export * from './catalog';
 export * from './failover';
 export * from './health';
 export * from './neynarMap';
+export * from './pill';
 export * from './preferences';
 export * from './providerFetch';
 export * from './providerTypes';

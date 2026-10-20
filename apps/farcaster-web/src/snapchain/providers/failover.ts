@@ -198,8 +198,13 @@ export const nextFailoverState = ({
   if (previous.activeId === null || !ids.includes(previous.activeId)) {
     const firstLive = ids.find((id) => isAcceptable(statusOf(id)));
     const activeId = firstLive ?? ids[0]!;
-    const reason: SwitchReason =
-      statusOf(activeId) === 'unconfigured'
+    const skippedFirstChoice = activeId !== ids[0];
+    // Starting on a backup is still a story worth telling: the reader's first
+    // choice was measured and skipped, and the pill says which way it failed
+    // rather than presenting the backup as if it were the first choice.
+    const reason: SwitchReason = skippedFirstChoice
+      ? reasonForFailure(statusOf(ids[0]!) ?? 'down', true)
+      : statusOf(activeId) === 'unconfigured'
         ? 'preferred-unconfigured'
         : firstLive
           ? 'start'

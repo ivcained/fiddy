@@ -52,6 +52,8 @@ import type { NodeProvider } from './providerTypes';
 export interface ProviderRuntimeSnapshot {
   order: NodeProvider[];
   health: Record<string, ProviderHealth>;
+  /** Consecutive failed reads per provider, since the last good one. */
+  readErrors: Record<string, number>;
   failover: FailoverState;
   /** The server answering right now, or null before the first check lands. */
   activeId: string | null;
@@ -77,6 +79,7 @@ export interface ProviderRuntimeOptions {
 let snapshot: ProviderRuntimeSnapshot = {
   order: [],
   health: {},
+  readErrors: {},
   failover: initialFailoverState(0),
   activeId: null,
   explanation: '',
@@ -84,6 +87,14 @@ let snapshot: ProviderRuntimeSnapshot = {
   lastCheckedAt: null,
   paused: false,
 };
+
+/**
+ * How many reads in a row may fail before a server that passed its last health
+ * check counts as bad. Three is a pattern, not a blip: one route failing is the
+ * client's own bug or a single flaky call, three in a row on a server that
+ * claimed to be healthy is that server being unhealthy.
+ */
+export const READ_ERRORS_BEFORE_DOWN = 3;
 
 const listeners = new Set<() => void>();
 const freshnessByProvider = new Map<string, FreshnessRecord>();
@@ -143,6 +154,126 @@ const probe = async (provider: NodeProvider): Promise<ProbeSample> => {
 };
 
 /**
+ * The health the failover decides on: what the last check measured, corrected by
+ * what the reads have been doing since.
+ *
+ * A server whose reads have failed `READ_ERRORS_BEFORE_DOWN` times in a row is
+ * down, whatever its last `/v1/info` said. That is the "repeated errors" half of
+ * the switch rule: a node can answer a status check perfectly while every actual
+ * read through it fails, and the reader should not be left on it because of that.
+ */
+const effectiveHealth = ({
+  health,
+  readErrors,
+}: {
+  health: Record<string, ProviderHealth>;
+  readErrors: Record<string, number>;
+}): Record<string, ProviderHealth> => {
+  const merged: Record<string, ProviderHealth> = { ...health };
+  for (const [providerId, errors] of Object.entries(readErrors)) {
+    if (errors < READ_ERRORS_BEFORE_DOWN) {
+      continue;
+    }
+    const previous = merged[providerId];
+    merged[providerId] = {
+      providerId,
+      status: 'down',
+      latencyMs: previous?.latencyMs ?? null,
+      watermark: previous?.watermark ?? null,
+      freshness: previous?.freshness ?? 'unknown',
+      detail: `It stopped answering your reads — ${errors} in a row failed.`,
+      checkedAt: Date.now(),
+    };
+  }
+  return merged;
+};
+
+/** Run the decision on measurements already in hand, and publish it. */
+const applyDecision = ({
+  order,
+  health,
+  readErrors,
+}: {
+  order: NodeProvider[];
+  health: Record<string, ProviderHealth>;
+  readErrors: Record<string, number>;
+}): void => {
+  // The effective health is what everything downstream reads: the pill, the
+  // picker and the next decision. Storing the raw probe result instead would
+  // let a server that fails every read keep claiming it is answering normally.
+  const effective = effectiveHealth({ health, readErrors });
+  const decision = nextFailoverState({
+    order,
+    health: effective,
+    state: snapshot.failover,
+    now: Date.now(),
+    config: options.failoverConfig ?? DEFAULT_FAILOVER_CONFIG,
+  });
+
+  setSnapshot({
+    health: effective,
+    failover: decision.state,
+    activeId: decision.state.activeId,
+    explanation: decision.explanation,
+    checking: false,
+    lastCheckedAt: Date.now(),
+  });
+};
+
+/**
+ * Tell the runtime how one read went.
+ *
+ * Called by the fetch seam for every request it answered. A success clears the
+ * streak; a failure adds to it, and once the streak is long enough the decision
+ * runs again immediately — a minute is too long to keep reading from a server
+ * that is failing every request.
+ */
+export const noteProviderReadResult = ({
+  providerId,
+  ok,
+}: {
+  providerId: string;
+  ok: boolean;
+}): void => {
+  if (snapshot.order.every((provider) => provider.id !== providerId)) {
+    return;
+  }
+
+  const readErrors: Record<string, number> = { ...snapshot.readErrors };
+  if (ok) {
+    delete readErrors[providerId];
+  } else {
+    readErrors[providerId] = (readErrors[providerId] ?? 0) + 1;
+  }
+  setSnapshot({ readErrors });
+
+  if (
+    readErrors[providerId] !== undefined &&
+    readErrors[providerId]! >= READ_ERRORS_BEFORE_DOWN
+  ) {
+    applyDecision({
+      order: snapshot.order,
+      health: snapshot.health,
+      readErrors,
+    });
+  }
+};
+
+/** Consecutive failed reads for a provider, for the pill and for the picker. */
+export const readErrorsFor = (providerId: string): number =>
+  snapshot.readErrors[providerId] ?? 0;
+
+/**
+ * Run the decision on measurements already in hand, and publish it.
+ */
+export const decideFromCurrentHealth = (): void =>
+  applyDecision({
+    order: snapshot.order,
+    health: snapshot.health,
+    readErrors: snapshot.readErrors,
+  });
+
+/**
  * One round of checks: measure every server, then move the live one if the
  * measurements say to. The order is decided before the probes so a provider the
  * reader just added is measured in the same round it appears in.
@@ -186,23 +317,15 @@ export const checkProvidersNow = async (): Promise<void> => {
       health[entry.providerId] = entry;
     }
 
-    const decision = nextFailoverState({
-      order,
-      health,
-      state: snapshot.failover,
-      now: Date.now(),
-      config: options.failoverConfig ?? DEFAULT_FAILOVER_CONFIG,
-    });
+    // A server that just passed its health check starts with a clean slate on
+    // read errors: the check is the newer evidence.
+    const readErrors: Record<string, number> = { ...snapshot.readErrors };
+    for (const entry of results) {
+      delete readErrors[entry.providerId];
+    }
 
-    setSnapshot({
-      order,
-      health,
-      failover: decision.state,
-      activeId: decision.state.activeId,
-      explanation: decision.explanation,
-      checking: false,
-      lastCheckedAt: Date.now(),
-    });
+    setSnapshot({ order, health, readErrors });
+    applyDecision({ order, health, readErrors });
   })();
 
   checkInFlight = run.finally(() => {
@@ -295,10 +418,14 @@ export const chooseProviderOrder = async (
   ids: string[],
 ): Promise<void> => {
   storedIds = ids;
-  if (fid === forFid) {
-    await saveProviderOrder(forFid, ids);
+  await saveProviderOrder(forFid, ids);
+  // Only the running watch can act on this now; before it is started, the first
+  // round of `startProviderWatch` reads the order that was just stored. Probing
+  // here when nothing else is watching would also run without the caller's
+  // fetch stubs — which in a test means hitting the real network.
+  if (running) {
+    await checkProvidersNow();
   }
-  await checkProvidersNow();
 };
 
 /** Move one provider to the front of the reader's list. */
@@ -322,6 +449,7 @@ export const resetProviderRuntimeForTests = (): void => {
   snapshot = {
     order: [],
     health: {},
+    readErrors: {},
     failover: initialFailoverState(0),
     activeId: null,
     explanation: '',

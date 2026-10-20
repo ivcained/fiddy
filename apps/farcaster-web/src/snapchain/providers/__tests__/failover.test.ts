@@ -95,10 +95,15 @@ describe('nextFailoverState: first decisions', () => {
       now: 1_000,
       config: CONFIG,
     });
-    // The very first pick is not a "switch": there was nothing live before.
+    // The very first pick is not a "switch": there was nothing live before. It
+    // is still reported as the first choice failing, because that is what the
+    // reader is looking at — a backup answering while their node is down.
     expect(decision.state.activeId).toBe('relay');
     expect(decision.direction).toBe('held');
-    expect(decision.state.reason).toBe('start');
+    expect(decision.state.reason).toBe('preferred-down');
+    expect(decision.explanation).toContain(
+      'your first choice stopped answering',
+    );
   });
 
   it('keeps the first choice when nothing answers, and says so', () => {

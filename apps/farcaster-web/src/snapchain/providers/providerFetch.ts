@@ -50,6 +50,12 @@ export interface ProviderBackedFetchOptions {
   neynarApiKey?: string | null;
   /** Cap on paged counts, passed through to the node-backed readers. */
   countCap?: number;
+  /**
+   * Called after every request a provider answered, with whether that answer was
+   * usable. This is how "repeated errors" reaches the failover engine: a server
+   * can pass a status check and still fail every read, and only the reads know.
+   */
+  onRead?: (providerId: string, ok: boolean) => void;
   /** Test seam: stand in for the node-backed adapter. */
   createNodeAdapter?: typeof createNodeBackedFetch;
 }
@@ -116,6 +122,7 @@ export const createProviderBackedFetch = ({
   fetchImpl,
   neynarApiKey,
   countCap,
+  onRead,
   createNodeAdapter = createNodeBackedFetch,
 }: ProviderBackedFetchOptions): ProviderBackedFetchHandle => {
   const nodeFetch = fetchImpl ?? fetch;
@@ -258,7 +265,12 @@ export const createProviderBackedFetch = ({
     // `init.headers` is deliberately not forwarded to a provider that is not a
     // node: what the client attaches is this device's session with Fiddy's own
     // API, and handing that to a third-party server is how a token leaks.
-    return await answer(parsed, provider);
+    const response = await answer(parsed, provider);
+    // A 5xx is the provider failing; a 4xx is this client asking for something
+    // that provider does not serve, which is our bug to fix, not a reason to
+    // move the reader's feed to another machine.
+    onRead?.(provider.id, response.status < 500);
+    return response;
   }) as typeof fetch;
 
   return { fetch: providerBackedFetch, log };
