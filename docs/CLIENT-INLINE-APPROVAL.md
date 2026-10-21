@@ -184,10 +184,15 @@ the write's name until the last write it is carrying has been answered.
 1. **The tap.** One person, in their own Farcaster app. Everything up to it is
    asserted; the tap itself cannot be.
 2. **The offer card's copy.** `PostForYouStep` (the one-time "Let Fiddy post as
-   you?" offer, a different card's artifact) still opens
-   `SeedPhraseWarningModal`. It should route to this same sheet — its own probe
-   (`scripts/verify-post-for-you.mjs`) pins the phrase step today, so that change
-   belongs in its own card with its own probe run, not folded in here.
+   you?" offer, a different card's artifact) still opened
+   `SeedPhraseWarningModal`. **Closed by card `t_0b9dc099` (2026-10-22):** the
+   offer's "Set it up" now mounts this same sheet (`autoStart` + `onApproved`),
+   the offer ends and is remembered the moment the approval arrives, and the
+   phrase step moved behind a collapsed "Advanced: test account recovery phrase
+   (developers only)" disclosure on the card — still the same blocking
+   `SeedPhraseWarningModal` behind it. That card's own probe
+   (`scripts/verify-post-for-you.mjs`, rewritten for it) pins both halves,
+   and `docs/CLIENT-PARITY.md` has the details.
 3. **A wallet-signed approval.** The card mentioned "QR scan / deep link … or
    connected wallet EIP-712". The phone approval is the implemented, live one
    (measured above); an EIP-712 signature from a custody wallet is *not*

@@ -23,10 +23,25 @@
  *
  * The offer is shell copy, not Advanced copy: it never names a protocol word
  * ("gasless", "signer", "scopes", "TTL", "KEY_ADD"). It says what Fiddy can do
- * with it, that it lives in this browser, and that setting it up asks for the
- * account's seed phrase — which is why the blocking test-account warning
- * (`SeedPhraseWarningModal`, unchanged) still stands between the offer and the
- * setup.
+ * with the pass and what setting it up costs — which is nothing to type: the
+ * phone approval (the same `ConnectSheet` `/connect-farcaster` shows) is what
+ * "Set it up" raises, and the recovery-phrase path stays where the Advanced
+ * screen keeps it, behind a collapsed disclosure on the card.
+ *
+ * MEASURED (2026-10-22, the card before this one): the offer's own button still
+ * opened `SeedPhraseWarningModal` — a blocking "⚠️ Security warning … use a TEST
+ * account … enter your recovery phrase" screen — so a reader who had just signed
+ * in could meet a phrase prompt two taps into the product. The offer is now the
+ * phone approval, and the phrase step is a developer's door with its name on it.
+ *
+ * THE TWO ANSWERS THIS DEVICE REMEMBERS
+ *
+ * The offer is made once per account, and it is answered in one of two ways:
+ * "Not now", or approving Fiddy in the person's own Farcaster app. Both are
+ * recorded on the device (`readOfferAnswer` / `rememberOfferAnswer`), because
+ * neither is visible from the pass check alone: after an approval the pass is
+ * held by Fiddy's service, not on this device, and after a refusal there is
+ * nothing to find anywhere.
  */
 
 import {
@@ -53,17 +68,46 @@ import { getItem, setItem } from '~/utils/storageUtils';
  */
 type PassState = 'unknown' | 'present' | 'absent';
 
+/**
+ * How this device has already answered the one-time offer. A separate question
+ * from the pass check above: an approval leaves no key here (Fiddy's service
+ * holds it) and a refusal leaves nothing anywhere.
+ */
+type OfferAnswer = 'unanswered' | 'not-now' | 'approved';
+
+const ANSWER_KEY = (fid: number) => `fiddy_post_for_you_${fid}_answer`;
+
+/**
+ * The key the released build wrote when somebody pressed "Not now". Still read,
+ * so a device that has already answered is never asked again; nothing writes it
+ * any more.
+ */
 const DISMISSED_KEY = (fid: number) => `fiddy_post_for_you_${fid}_said_not_now`;
 
 const readPassState = async (fid: number): Promise<PassState> =>
   (await loadAppKey(fid)) === null ? 'absent' : 'present';
 
-const readSaidNotNow = async (fid: number): Promise<boolean> =>
-  (await getItem<boolean>({ key: DISMISSED_KEY(fid), fallback: false })) ===
-  true;
+const readOfferAnswer = async (fid: number): Promise<OfferAnswer> => {
+  const written = await getItem<OfferAnswer | null>({
+    key: ANSWER_KEY(fid),
+    fallback: null,
+  });
+  if (written === 'not-now' || written === 'approved') {
+    return written;
+  }
+  return (await getItem<boolean>({
+    key: DISMISSED_KEY(fid),
+    fallback: false,
+  })) === true
+    ? 'not-now'
+    : 'unanswered';
+};
 
-const rememberSaidNotNow = async (fid: number): Promise<void> => {
-  await setItem({ key: DISMISSED_KEY(fid), value: true });
+const rememberOfferAnswer = async (
+  fid: number,
+  answer: OfferAnswer,
+): Promise<void> => {
+  await setItem({ key: ANSWER_KEY(fid), value: answer });
 };
 
 type PostForYouDecision =
@@ -75,6 +119,7 @@ type PostForYouDecision =
         | 'no-server-named'
         | 'no-account-yet'
         | 'a-pass-already-exists'
+        | 'already-approved'
         | 'said-not-now'
         | 'still-checking';
     };
@@ -88,7 +133,8 @@ interface DecidePostForYouInput {
   nodeConfigured: boolean;
   fid: number | undefined;
   passState: PassState;
-  saidNotNow: boolean | undefined;
+  /** How the device already answered, or `undefined` while that read is pending. */
+  offerAnswer: OfferAnswer | undefined;
 }
 
 /**
@@ -106,13 +152,18 @@ const decidePostForYou = (input: DecidePostForYouInput): PostForYouDecision => {
   if (input.fid === undefined) {
     return { kind: 'not-offered', because: 'no-account-yet' };
   }
-  if (input.passState === 'unknown' || input.saidNotNow === undefined) {
+  if (input.passState === 'unknown' || input.offerAnswer === undefined) {
     return { kind: 'not-offered', because: 'still-checking' };
   }
   if (input.passState === 'present') {
     return { kind: 'not-offered', because: 'a-pass-already-exists' };
   }
-  if (input.saidNotNow) {
+  // Approved in their own Farcaster app: Fiddy holds the pass for this account,
+  // so there is nothing left to offer — and nothing about it to ask again.
+  if (input.offerAnswer === 'approved') {
+    return { kind: 'not-offered', because: 'already-approved' };
+  }
+  if (input.offerAnswer === 'not-now') {
     return { kind: 'not-offered', because: 'said-not-now' };
   }
   return { kind: 'offered', fid: input.fid };
@@ -205,10 +256,15 @@ const setUpPostingForYou = async ({
 export {
   decidePostForYou,
   describeSetupFailure,
+  readOfferAnswer,
   readPassState,
-  readSaidNotNow,
-  rememberSaidNotNow,
+  rememberOfferAnswer,
   SETUP_STEP_COPY,
   setUpPostingForYou,
 };
-export type { DecidePostForYouInput, PassState, PostForYouDecision };
+export type {
+  DecidePostForYouInput,
+  OfferAnswer,
+  PassState,
+  PostForYouDecision,
+};

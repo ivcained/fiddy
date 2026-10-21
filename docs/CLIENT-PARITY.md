@@ -502,39 +502,65 @@ the reader meets it as a failure rather than as a step.
 
 *What it is now.* `~/components/session/PostForYouStep`, mounted once in the
 shell (`AuthedLayout`), is the offer: "Let Fiddy post as you?" — what Fiddy may
-do with it (post, reply, like and follow, signed on this device, nothing that can
-post as you held by a server), what setting it up costs (the account's seed
-phrase, once, test account only), "Set it up" and "Not now". It renders nothing
-unless all of these hold: the session is a device one, the node adapter is on, a
-server is named, the account is known, and this device holds no pass for it yet.
-"Not now" is remembered per account (`fiddy_post_for_you_<fid>_said_not_now`), so
-the offer is made once.
+do with it (post, reply, like and follow), what approving costs (one tap in
+their own Farcaster app, on their phone — no fee, nothing to type), and the
+honest limit ("your account, its key and its recovery phrase stay where they
+are"), with "Set it up" and "Not now". It renders nothing unless all of these
+hold: the session is a device one, the node adapter is on, a server is named,
+the account is known, and this device holds no pass for it yet. The device
+remembers how it was answered (`fiddy_post_for_you_<fid>_answer`, `not-now` or
+`approved`; the released build's `…_said_not_now` is still read so a device
+that already answered is not asked again), so the offer is made once. The
+answer record is what an approval needs: the pass is held by Fiddy's service,
+not on this device, so nothing here would tell the card about it after a
+reload.
 
-*The warning stays between the offer and the setup.* "Set it up" opens the SAME
+*"Set it up" raises the phone approval.* MEASURED (2026-10-22, before this
+card's change): the offer's own button opened `SeedPhraseWarningModal` — the
+blocking "⚠️ Security warning … use a TEST account … enter your recovery
+phrase" screen — so a reader could meet a phrase prompt two taps after signing
+in, even though the posting flow itself had stopped doing that. "Set it up" now
+mounts `ConnectSheet` (the same sheet `/connect-farcaster` shows and
+`SignerApprovalGate` reuses) with `autoStart` and `onApproved`: one service
+request, the link, a code to scan, and a screen that notices the approval by
+itself. On approval the offer ends and is remembered; closing the sheet
+without approving leaves the offer standing (nothing is remembered, and "Not
+now" is still the way to say no).
+
+*The phrase step is still reachable, and still named for who it is for.* Behind
+a collapsed disclosure on the card — "Advanced: test account recovery phrase
+(developers only)", invisible until it is opened — the door opens the SAME
 screen Advanced ships (`SeedPhraseWarningModal`), unchanged and loaded lazily:
-checkbox acknowledgement, test account only, confirm disabled without it, phrase
-cleared on close. Nothing about how the pass is issued changed — the one signing
-path (`issueAppKey` from the node client), the pass stored browser-local per FID,
-the phrase never stored. A second signing path is what the card forbids, so this
-is only a new door onto the existing one.
+checkbox acknowledgement, test account only, confirm disabled without it,
+phrase cleared on close. Nothing about how the pass is issued changed — the
+one signing path (`issueAppKey` from the node client), the pass stored
+browser-local per FID, the phrase never stored. A second signing path is what
+the card forbids, so this is only a new door onto the existing one — and it is
+a developer's door with its name on it, not a normal reader's first screen.
 
-| Check (probe `scripts/verify-post-for-you.mjs`, **7/7**, exit 0) | Evidence |
+| Check (probe `scripts/verify-post-for-you.mjs`, **8/8**, exit 0) | Evidence |
 | --- | --- |
 | a completed sign-in lands in the client | `clicked="Go social — sign in with Farcaster"`, path `/`, `main` present, not the device-only landing |
 | the offer is made right after it, in the shell | `[data-fiddy="post-for-you"]` on screen at `/`, without navigating anywhere |
-| plain words, two buttons | "Set it up" and "Not now"; no `gasless\|signer\|scope\|ttl\|KEY_ADD\|app key\|nonce\|EIP-712` anywhere on the card |
-| the blocking warning stands in front | "Security warning" + "Use a TEST account"; confirm disabled with nothing typed **and** with a phrase typed; enabled only after the acknowledgement |
+| plain words, two buttons, the honest limit | "Set it up" and "Not now", "stay where they are", "one tap in your own Farcaster app"; no `gasless\|signer\|scope\|ttl\|KEY_ADD\|app key\|nonce\|EIP-712` anywhere on the card |
+| "Set it up" raises the phone approval by itself, and the phrase step is only behind its own disclosure | one `POST /api/fiddy/connect` (stubbed — a real one mints a paid signer request), the waiting sheet with its QR and the approval link, no `#mnemonic` and no warning anywhere on that path; the card back after the sheet is closed; disclosure collapsed with the developer label, the phrase door invisible until opened, then the blocking warning — confirm disabled with nothing typed **and** with a phrase typed, enabled only after the acknowledgement |
 | nothing is signed or sent by the probe | no `/v1/submitMessage` left the page |
-| the same session still reads a node | 74 cast reads `200` at `https://haatz.quilibrium.com` (not this app) |
+| the same session still reads a node | 72 cast reads `200` at `https://haatz.quilibrium.com` (not this app) |
 | "Not now" ends it, and the device remembers | gone after the click; still gone after a reload of `/` |
+| approving in the reader's own Farcaster app ends it too, and is remembered | the stub flipped to `connected` (the approval itself happens in their app); the card ends with "Done — Fiddy can post for you now.", the sheet is gone, and the offer is still gone after a reload of `/` — on a second, fresh device |
 
-Unit level — `~/components/session/__tests__/postForYou.test.tsx`, 11 tests (part
-of the session directory's 32, all green): the decision's every negative case (a
-session a server can serve, the adapter off, no server named, no account yet, a
-pass already present, already said not now, the storage reads still pending), and
-the setup itself against a fake node — exactly one custody-signed KEY_ADD
-submitted, the stored pass's public half equal to the key in the submitted bytes,
-the account's next nonce recorded, and no phrase written to storage.
+Unit level — `~/components/session/__tests__/postForYou.test.tsx`, 14 tests (part
+of the session directory's suites, all green): the decision's every negative
+case (a session a server can serve, the adapter off, no server named, no
+account yet, a pass already present, already said not now, already approved,
+the storage reads still pending); "Set it up" raising the approval with a link
+and no phrase field; closing the sheet leaving the offer standing; the approval
+ending the offer with nothing typed and no key made on this device, and no
+offer after the done line; the phrase step behind a collapsed disclosure that
+still blocks until acknowledged; and the setup itself against a fake node —
+exactly one custody-signed KEY_ADD submitted, the stored pass's public half
+equal to the key in the submitted bytes, the account's next nonce recorded, and
+no phrase written to storage.
 
 *What this does not do.* It does not make a cast post on its own: signing the
 cast and reading the state back is the write layer, which this card did not

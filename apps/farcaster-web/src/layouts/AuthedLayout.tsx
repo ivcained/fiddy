@@ -348,11 +348,11 @@ const AuthedLayout: FC = () => {
                                               />
                                               <FiddyMobileTabBar />
                                               {/* The one-time "let Fiddy post
-                                                  as you" offer: the pass that
-                                                  makes posting work is issued
-                                                  on this device, and a reader
-                                                  should not have to find
-                                                  Advanced to learn that. It
+                                                  as you" offer: a reader should
+                                                  not have to find Advanced to
+                                                  learn that Fiddy can post for
+                                                  them, and approving it is one
+                                                  tap on their own phone. It
                                                   renders nothing unless the
                                                   offer applies. */}
                                               <PostForYouStep />
