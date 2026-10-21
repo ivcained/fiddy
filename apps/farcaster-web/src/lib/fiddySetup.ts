@@ -17,8 +17,11 @@
 
 import { useEffect, useState } from 'react';
 
+import type { WalletChoiceId } from '~/lib/surp/walletChoice';
+
 export type BrainId =
   | 'fiddy'
+  | 'surp'
   | 'openai'
   | 'anthropic'
   | 'google'
@@ -26,8 +29,15 @@ export type BrainId =
   | 'nous'
   | 'custom';
 
+/**
+ * Every id a stored setup may hold. 'surp' is a service like the others — its
+ * address lives with the provider presets on the agent service, not here — so
+ * it belongs in this list rather than in LEGACY_BRAINS: a build that offered it
+ * under its own name is a build that offered the same choice.
+ */
 export const BRAIN_IDS: BrainId[] = [
   'fiddy',
+  'surp',
   'openai',
   'anthropic',
   'google',
@@ -57,6 +67,8 @@ export interface FiddySetup {
   toolServerUrl: string | null;
   /** Per-app permission, as the owner last set it. */
   channels: Record<ChannelId, boolean>;
+  /** Which wallet the owner chose to pay from. A preference, not a credential. */
+  walletChoice: WalletChoiceId;
   /** Set when the last onboarding step was reached; null until then. */
   completedAt: number | null;
 }
@@ -93,6 +105,7 @@ export const defaultFiddySetup = (): FiddySetup => ({
     imessage: false,
     email: false,
   },
+  walletChoice: 'farcaster',
   completedAt: null,
 });
 
@@ -124,6 +137,14 @@ const asModel = (value: unknown): string | null =>
   typeof value === 'string' && MODEL_NAME.test(value.trim())
     ? value.trim()
     : null;
+
+/**
+ * The wallet choice is a preference between two named options; anything else
+ * stored by an older build resolves to the default rather than to a third state
+ * no surface knows how to render.
+ */
+const asWalletChoice = (value: unknown): WalletChoiceId =>
+  value === 'fresh' ? 'fresh' : 'farcaster';
 
 /**
  * Read, never throw. Stored state from an older build, a half-written value or
@@ -165,6 +186,7 @@ export const loadFiddySetup = (): FiddySetup => {
       brainModel: asModel(parsed.brainModel),
       toolServerUrl: asString(parsed.toolServerUrl),
       channels: sanitiseChannels(parsed.channels, base.channels),
+      walletChoice: asWalletChoice(parsed.walletChoice),
       completedAt:
         typeof parsed.completedAt === 'number' ? parsed.completedAt : null,
     };
@@ -200,6 +222,10 @@ export const saveFiddySetup = (patch: Partial<FiddySetup>): FiddySetup => {
         ? current.toolServerUrl
         : asString(patch.toolServerUrl),
     channels: sanitiseChannels(patch.channels, current.channels),
+    walletChoice:
+      patch.walletChoice === undefined
+        ? current.walletChoice
+        : asWalletChoice(patch.walletChoice),
     completedAt:
       typeof patch.completedAt === 'number'
         ? patch.completedAt

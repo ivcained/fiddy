@@ -13,6 +13,9 @@ import { BRAIN_CARDS, BrainSheet } from '~/components/fiddy/BrainSheet';
 import { installFakeStorage } from '~/lib/__tests__/fakeStorage';
 import { AgentServiceError } from '~/lib/agentService';
 import { loadFiddySetup, resetFiddySetup } from '~/lib/fiddySetup';
+import keyCreated from '~/lib/surp/__tests__/fixtures/key-created.json';
+
+const SURP_KEY = keyCreated.key as string;
 
 const service = vi.hoisted(() => ({
   probeBrain: vi.fn(),
@@ -244,6 +247,129 @@ describe('BrainSheet', () => {
       brainServiceUrl: 'https://api.example.com/v1',
       brainModel: 'my-model',
     });
+  });
+
+  it('offers Surp as a pay-as-you-go preset, with the price on the card and no address to fill in', () => {
+    render(<BrainSheet />);
+    const surp = document.querySelector(
+      '[data-fiddy-brain="surp"]',
+    ) as HTMLElement;
+    expect(surp.textContent?.toLowerCase()).toContain('pay as you go');
+    expect(surp.textContent?.toLowerCase()).toContain(
+      'only for the requests you actually make',
+    );
+
+    click('[data-fiddy-brain="surp"]');
+    expect(document.querySelector('[data-fiddy="brain-connect"]')).toBeTruthy();
+    // A preset owns its address, so the owner is never asked for one — and the
+    // panel that answers "what would this cost me" is there.
+    expect(
+      document.querySelector('[data-fiddy-field="brain-address"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-fiddy-field="brain-key"]'),
+    ).toBeTruthy();
+    expect(
+      document.querySelector('[data-fiddy-field="brain-model"]'),
+    ).toBeTruthy();
+    expect(document.querySelector('[data-fiddy="surp"]')).toBeTruthy();
+    // And it says where a key made here actually lives, instead of borrowing
+    // the "we keep no copy" line that is only true for somebody else's key.
+    expect(
+      screen.getByText(/you will not have to paste it again/),
+    ).toBeTruthy();
+  });
+
+  it('makes the Surp key in the panel and uses it without a copy-and-paste', async () => {
+    // The price read cannot leave this page today (Surp sends no CORS header —
+    // see lib/surp/transport.ts), so the panel says so. Making a key is its own
+    // job on its own endpoint and is exercised against the recorded response.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/api/keys/create')) {
+          return { ok: true, status: 200, json: async () => keyCreated };
+        }
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+    service.probeBrain.mockResolvedValue({
+      ok: true,
+      status: 'ok',
+      code: 'BRAIN_OK',
+      models: ['surp/value'],
+    });
+
+    render(<BrainSheet />);
+    click('[data-fiddy-brain="surp"]');
+    expect(
+      await screen.findByText(/blocked this page from reading Surp directly/i),
+    ).toBeTruthy();
+
+    click('[data-fiddy-surp="make-key"]');
+    await waitFor(() =>
+      expect(
+        (
+          document.querySelector(
+            '[data-fiddy-field="brain-key"]',
+          ) as HTMLInputElement
+        ).value,
+      ).toBe(SURP_KEY),
+    );
+
+    fill('[data-fiddy-field="brain-model"]', 'surp/value');
+    click('[data-fiddy-action="test-brain"]');
+    await waitFor(() =>
+      expect(screen.getByText(/That key works/)).toBeTruthy(),
+    );
+    // A preset descriptor, exactly as the agent service's provider table has it.
+    expect(service.probeBrain.mock.calls[0]?.[1]).toEqual({
+      kind: 'preset',
+      presetId: 'surp',
+      model: 'surp/value',
+      key: SURP_KEY,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps a Surp choice on this device, and keeps the key out of the setup file', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/api/keys/create')) {
+          return { ok: true, status: 200, json: async () => keyCreated };
+        }
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+
+    render(<BrainSheet />);
+    click('[data-fiddy-brain="surp"]');
+    click('[data-fiddy-surp="make-key"]');
+    await waitFor(() =>
+      expect(
+        (
+          document.querySelector(
+            '[data-fiddy-field="brain-key"]',
+          ) as HTMLInputElement
+        ).value,
+      ).toBe(SURP_KEY),
+    );
+    fill('[data-fiddy-field="brain-model"]', 'surp/value');
+    click('[data-fiddy-action="use-brain"]');
+
+    await waitFor(() =>
+      expect(screen.getByText(/Saved on this device/)).toBeTruthy(),
+    );
+    const setup = loadFiddySetup();
+    // A stored 'surp' is still 'surp' after a reload: it is in BRAIN_IDS, not
+    // behind asBrain()'s fallback to the built-in brain.
+    expect(setup.brain).toBe('surp');
+    expect(setup.brainModel).toBe('surp/value');
+    expect(setup.brainServiceUrl).toBeNull();
+    const raw = window.localStorage.getItem('fiddy.setup') ?? '';
+    expect(raw).not.toContain(SURP_KEY);
+    vi.unstubAllGlobals();
   });
 
   it('keeps the builders row closed until it is asked for', () => {

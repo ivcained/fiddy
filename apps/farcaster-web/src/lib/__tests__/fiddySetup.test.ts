@@ -116,4 +116,32 @@ describe('fiddySetup', () => {
     );
     expect(loadFiddySetup().brainModel).toBeNull();
   });
+
+  it('keeps Surp as Surp across a reload, rather than falling back to the built-in brain', () => {
+    // asBrain() coerces anything it does not know to 'fiddy', so an id missing
+    // from BRAIN_IDS is an option that silently disappears on the next load.
+    saveFiddySetup({ brain: 'surp', brainModel: 'surp/value' });
+    const setup = loadFiddySetup();
+    expect(setup.brain).toBe('surp');
+    expect(setup.brainModel).toBe('surp/value');
+    expect(setup.brainServiceUrl).toBeNull();
+  });
+
+  it('keeps the wallet choice across a reload, and refuses one it does not know', () => {
+    // The wallet home reads this back to say which wallet pays; a field the
+    // whitelist drops would leave the choice reverting on every reload.
+    saveFiddySetup({ walletChoice: 'fresh' });
+    expect(loadFiddySetup().walletChoice).toBe('fresh');
+    saveFiddySetup({ agentName: 'Sprout' });
+    expect(loadFiddySetup()).toMatchObject({
+      walletChoice: 'fresh',
+      agentName: 'Sprout',
+    });
+    saveFiddySetup({ walletChoice: 'farcaster' });
+    expect(loadFiddySetup().walletChoice).toBe('farcaster');
+
+    // Two named options, and nothing else: an unknown value is not a third one.
+    saveFiddySetup({ walletChoice: 'someone-elses' as never });
+    expect(loadFiddySetup().walletChoice).toBe('farcaster');
+  });
 });

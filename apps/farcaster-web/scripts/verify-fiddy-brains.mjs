@@ -52,6 +52,7 @@ const textOf = async (page, selector) =>
 
 const cards = [
   ['fiddy', 'Fiddy'],
+  ['surp', 'Surp'],
   ['openai', 'ChatGPT'],
   ['anthropic', 'Claude'],
   ['google', 'Gemini'],
@@ -70,9 +71,23 @@ const run = async () => {
   const page = await context.newPage();
   const consoleErrors = [];
   page.on('console', (message) => {
-    if (message.type() === 'error') {
-      consoleErrors.push(message.text());
+    if (message.type() !== 'error') {
+      return;
     }
+    // One host is allowed to be noisy here, and only because the noise is the
+    // measurement: the Surp panel reads surp.ivc.lol straight from this page,
+    // Surp sends no CORS header, and the browser refuses the read (see
+    // lib/surp/transport.ts). Chrome logs that refusal — a failed resource,
+    // with the host on the message's location rather than in its text — the
+    // panel says it in one sentence on screen, and the check below holds it to
+    // saying it. Everything else on the sheet still keeps the console clean.
+    if (
+      /surp\.ivc\.lol/.test(message.text()) ||
+      /surp\.ivc\.lol/.test(message.location()?.url ?? '')
+    ) {
+      return;
+    }
+    consoleErrors.push(message.text());
   });
 
   // The service's answer, and how it is asked.
@@ -128,7 +143,47 @@ const run = async () => {
     builtIn.replace(/\s+/g, ' ').slice(0, 90),
   );
 
-  // 2. An account card asks for a key and a model, and never for an address.
+  // 2. Surp is a preset with its own panel: a key and a model, no address, the
+  //    price line, and the one button that makes a key here.
+  await page.locator('[data-fiddy-brain="surp"]').click();
+  await appears(page, '[data-fiddy="surp"]');
+  const surpFields = await page.locator('[data-fiddy="brain-connect"] [data-fiddy-field]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-fiddy-field')));
+  check(
+    'Surp asks for the key and the model, never for the address',
+    surpFields.includes('brain-key') && surpFields.includes('brain-model') && !surpFields.includes('brain-address'),
+    surpFields.join(','),
+  );
+  await page.screenshot({ path: `${OUT}/fiddy-brains-surp.png`, fullPage: true });
+  // The price read is a real cross-origin attempt, so it is not decided on the
+  // first frame: wait for the panel to leave its "reading…" state, whichever of
+  // the honest states it lands in.
+  await page
+    .locator(
+      '[data-fiddy-surp="pricing"][data-state="live"], [data-fiddy-surp="pricing"][data-state="blocked"], [data-fiddy-surp="pricing"][data-state="failed"]',
+    )
+    .first()
+    .waitFor({ timeout: 20000 })
+    .catch(() => {});
+  const surpPricing = (await page.locator('[data-fiddy-surp="pricing"]').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const live = await page.locator('[data-fiddy-surp="savings"]').count();
+  check(
+    'Surp says what it costs and where that came from, or why it cannot',
+    (live === 1 && /month/i.test(surpPricing)) || /blocked this page from reading Surp|did not answer in a way this page could read/i.test(surpPricing),
+    surpPricing.slice(0, 110),
+  );
+  check(
+    'Surp shows no comparison it did not read',
+    live === 0 ? !/savings|\$0\./i.test(surpPricing) : true,
+    `${live} comparison(s): ${surpPricing.slice(0, 90)}`,
+  );
+  check(
+    'Surp offers the key that is made here, and says where it is kept',
+    (await page.locator('[data-fiddy-surp="make-key"]').count()) === 1 &&
+      /kept in this browser/i.test(await textOf(page, '[data-fiddy="surp"]')),
+    (await textOf(page, '[data-fiddy="surp"]')).slice(0, 90),
+  );
+
+  // 3. An account card asks for a key and a model, and never for an address.
   await page.locator('[data-fiddy-brain="openrouter"]').click();
   const accountKeys = await page.locator('[data-fiddy="brain-connect"] [data-fiddy-field]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-fiddy-field')));
   check(
