@@ -88,6 +88,11 @@ which is not an assertion about the feature: every wait in the probe rides
 viewport instead of both while you iterate. A cold start that timed out is worth
 one retry before it is worth a bug report.
 
+Each run derives its own three identities from one base, so the probe does not
+need a fresh database: run it twice against the same service and both runs are
+full first runs (sign-in → create → invite → join). `TOGETHER_FID_BASE` pins
+that base when a transcript has to be replayed exactly.
+
 Recorded 2026-10-21/22: **80/80 checks**, at 390×844 and 1440×900 — the headline
 and the honest note, no horizontal overflow, the dark brand ground, a real QR
 from the service, the create-space form, three columns laid out per width, every
@@ -122,6 +127,16 @@ probe now measures one real cross-identity change per marker instead of a
 premise nobody promised. Watch for that shape: a green feature plus a red
 assertion is not always a feature bug.
 
+Then a third fix, again to the probe rather than the feature: the owner-side
+assertions *waited* on the page's own text (`document.body.innerText`) but then
+*read* the card's thread element. A comment is also a board event, so the
+activity feed quotes it about one poll before the card's 2s thread poll has it —
+the wait passed, the assertion read a thread that was still empty, and the same
+probe that was 40/40 at 390 came back 38/40 at 1440 on a feature that worked.
+Every thread assertion now waits on the thread element itself
+(`[data-testid^="thread-"]`). Watch for that shape too: one width red and the
+other green is a probe race until proven otherwise.
+
 `tests/test_spaces.py` in the service holds the same rules at the API level (32
 tests), including the cross-space `404`, the anonymous `401`, the forged author
 being ignored, typing expiring on a moved clock, and a removed member's typing
@@ -134,6 +149,14 @@ The service needs its offline verifier for local work
 endpoint asserts and is not a production identity path. Without it, sign-in goes
 through Farcaster's relay. Do not expose the alpha service publicly: single
 process, SQLite, no per-space rate limits.
+
+It counts requests per address, and that budget is sized for this page: 600 a
+minute, which is two members of one space behind one address with a card open
+(~50 requests a minute each) and room left over. It was 120, which one space can
+reach by itself — that is why a probe run used to answer 429s that the browser
+reported as failed resources, and why a run could die at a sign-in. If you
+script against this service, budget for `Retry-After: 60` rather than retrying
+immediately.
 
 ## Not here yet (say "soon", not "done")
 

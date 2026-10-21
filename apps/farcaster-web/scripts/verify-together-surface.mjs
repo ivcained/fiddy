@@ -30,7 +30,9 @@
 //   1. at 390x844 and 1440x900: the headline, the promise and the honest note,
 //      with no horizontal overflow at either width
 //   2. the Farcaster door leads to a real QR (a canvas) the service minted
-//   3. approving it in "the phone" lands on the create-space form
+//   3. approving it in "the phone" lands on the create-space form (fresh
+//      identities every run, so this is a real first run, never an adopted
+//      board)
 //   4. creating a space shows the board: the space name, `#channel`, the three
 //      columns (stacked at 390, three across at 1440), every button a tap target
 //   5. a card added by the owner is visible on the board
@@ -50,6 +52,10 @@
 //        then stops saying it when the member stops (measured, not claimed);
 //        the member sends, and the owner's open card shows the reply with
 //        @marcus
+//      Every one of those is read off the card's OWN thread element, not the
+//      page's text: the board's activity feed quotes a comment a poll before
+//      the card's 2s thread poll has it, so a body-wide check would pass while
+//      the thread element was still empty.
 //  10. what a thread refuses: a member of a DIFFERENT space (their own space,
 //      their own session) asking for this card's thread is answered 404, and an
 //      unauthenticated request is answered 401
@@ -61,6 +67,11 @@
 // (default 120s); TOGETHER_CHROMIUM points at a Chromium build already on the
 // machine so Playwright does not download one; TOGETHER_WIDTHS picks the
 // viewports to run ("390" for one of them, default both).
+//
+// Identities are derived per RUN from one base (FID_BASE below), so this probe
+// is re-runnable against a service whose database has outlived earlier runs: it
+// does not need a fresh DB, and a second run is not read as a broken sign-in.
+// TOGETHER_FID_BASE pins the base when a transcript has to be replayed exactly.
 
 import os from 'node:os';
 import path from 'node:path';
@@ -95,6 +106,22 @@ const record = (label, ok, detail = '') => {
 
 const expect = (label, ok, detail = '') => record(label, Boolean(ok), detail);
 
+/**
+ * The 4xx/5xx resources a context saw, deduped. Printed beside a console error
+ * because the browser's own "Failed to load resource" message carries no URL:
+ * without this, a red "no browser errors" check tells you nothing about what
+ * failed, which is how a third-party CDN can look like a broken surface.
+ */
+const resources = (list) => {
+  if (list.length === 0) return '';
+  const counts = new Map();
+  for (const one of list) counts.set(one, (counts.get(one) ?? 0) + 1);
+  return (
+    'resources: ' +
+    [...counts].map(([one, count]) => `${count}x ${one}`).join(' | ')
+  );
+};
+
 const service = async (method, url, body, token) => {
   const response = await fetch(SERVICE + url, {
     method,
@@ -106,6 +133,45 @@ const service = async (method, url, body, token) => {
   });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : undefined };
+};
+
+/**
+ * Whether an invite link the service minted points back at this app. The
+ * service mints it from its own `HERMES_MULTIPLAYER_INVITE_BASE_URL`, which on
+ * a dev machine may be spelled `127.0.0.1` where this probe was handed
+ * `localhost` — same host, same port, so that is a spelling difference, not a
+ * wrong link. The path and the port still have to be this app's.
+ */
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const pointsAtThisApp = (link) => {
+  try {
+    const expected = new URL(SERVER);
+    const got = new URL(link);
+    return (
+      (got.hostname === expected.hostname ||
+        (LOOPBACK.has(got.hostname) && LOOPBACK.has(expected.hostname))) &&
+      got.port === expected.port &&
+      got.pathname.startsWith('/~/together/join/')
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * A step that has to reach the board, and a failure that says what the page was
+ * showing instead of naming a selector nobody can act on — the difference
+ * between a three-minute opaque timeout and a named problem.
+ */
+const mustSee = async (page, selector, what) => {
+  try {
+    await page.waitForSelector(selector, { timeout: LOAD_TIMEOUT });
+  } catch {
+    const shown = await page
+      .evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 300))
+      .catch(() => '(the page could not be read)');
+    throw new Error(`${what} never happened — the page was showing: ${shown}`);
+  }
 };
 
 /** Plays the phone: the offline verifier approves whatever the page asked for. */
@@ -229,13 +295,65 @@ const threadText = (page) =>
     () => document.querySelector('[data-testid^="thread-"]')?.innerText ?? '',
   );
 
+/**
+ * Waits until the card's OWN thread element carries the text, and only then
+ * lets the caller read `threadText`.
+ *
+ * Waiting on `document.body` here is a race the board's activity feed wins: a
+ * comment is also a space event, so the feed quotes the body about one poll
+ * before the card's own 2s thread poll has it. The body check then passes while
+ * the thread element is still empty, and the assertion that follows reads a
+ * false negative on a feature that has already worked.
+ */
+const waitForThread = (page, text) =>
+  page.waitForFunction(
+    (needle) =>
+      (document.querySelector('[data-testid^="thread-"]')?.innerText ?? '')
+        .includes(needle),
+    text,
+    { timeout: LOAD_TIMEOUT },
+  );
+
+/**
+ * Waits until the card's open thread no longer carries the text — the other
+ * half of a presence measurement, asserted in the same place it appeared.
+ */
+const waitForThreadToClear = (page, text) =>
+  page.waitForFunction(
+    (needle) =>
+      !(document.querySelector('[data-testid^="thread-"]')?.innerText ?? '')
+        .includes(needle),
+    text,
+    { timeout: LOAD_TIMEOUT },
+  );
+
+/**
+ * Fids are derived per RUN, not fixed: the service keeps its database between
+ * runs, and an identity that already owns a space is landed on that board
+ * instead of the create form — which then reads as a sign-in failure at the
+ * create step. Three identities per width, spaced by ten per width index.
+ * TOGETHER_FID_BASE pins them when a transcript has to be replayable.
+ */
+const FID_BASE =
+  Number(process.env.TOGETHER_FID_BASE) || 200000000 + (Date.now() % 100000000);
+
 const run = async (browser, width, index) => {
-  const ownerFid = 910000 + index * 10;
-  const memberFid = 910001 + index * 10;
+  const ownerFid = FID_BASE + index * 10;
+  const memberFid = ownerFid + 1;
+  const strangerFid = ownerFid + 2;
   const errors = [];
   const context = await browser.newContext({
     viewport: { width: width.width, height: width.height },
     colorScheme: 'dark',
+  });
+  // Every response this context saw with a 4xx/5xx, so a console error that is
+  // only "Failed to load resource" says which resource — the browser's own
+  // message carries no URL, and a red check nobody can act on is not evidence.
+  const badResponses = [];
+  context.on('response', (response) => {
+    if (response.status() >= 400) {
+      badResponses.push(`${response.status()} ${response.url()}`);
+    }
   });
   const page = await context.newPage();
   page.on('console', (message) => {
@@ -295,7 +413,7 @@ const run = async (browser, width, index) => {
   await page.fill('input[placeholder="Fiddy launch"]', 'Fiddy launch');
   await page.fill('input[placeholder="fiddy"]', 'fiddy');
   await page.getByRole('button', { name: 'Create the space' }).click();
-  await page.waitForSelector('text=#fiddy', { timeout: LOAD_TIMEOUT });
+  await mustSee(page, 'text=#fiddy', 'creating the space');
   const board = await layout(page);
   expect(
     `${width.label}: the space name heads the board`,
@@ -327,7 +445,7 @@ const run = async (browser, width, index) => {
   const link = (await page.locator('code').first().textContent())?.trim() ?? '';
   expect(
     `${width.label}: the invite link points at this app`,
-    link.startsWith(SERVER) && link.includes('/~/together/join/'),
+    pointsAtThisApp(link),
     link,
   );
   await page.screenshot({ path: path.join(OUT, `together-board-${width.label}.png`) });
@@ -337,6 +455,12 @@ const run = async (browser, width, index) => {
   const guestContext = await browser.newContext({
     viewport: { width: width.width, height: width.height },
     colorScheme: 'dark',
+  });
+  const guestBadResponses = [];
+  guestContext.on('response', (response) => {
+    if (response.status() >= 400) {
+      guestBadResponses.push(`${response.status()} ${response.url()}`);
+    }
   });
   const guest = await guestContext.newPage();
   guest.on('console', (message) => {
@@ -365,7 +489,7 @@ const run = async (browser, width, index) => {
   await guest.screenshot({ path: path.join(OUT, `together-join-${width.label}.png`) });
 
   await guest.getByRole('link', { name: 'Open the board' }).click();
-  await guest.waitForSelector('text=Ship the Together surface', { timeout: LOAD_TIMEOUT });
+  await mustSee(guest, 'text=Ship the Together surface', 'the member opening the board');
   expect(
     `${width.label}: the member sees BOTH members on the board`,
     (await guest.getByText(/@elena/).count()) > 0 &&
@@ -426,11 +550,7 @@ const run = async (browser, width, index) => {
   // The owner says something on that card.
   await composer(page).fill('the invite link is live — try it from your phone');
   await comment(page);
-  await page.waitForFunction(
-    () => document.body.innerText.includes('the invite link is live'),
-    null,
-    { timeout: LOAD_TIMEOUT },
-  );
+  await waitForThread(page, 'the invite link is live');
   const ownerSaid = await threadText(page);
   expect(
     `${width.label}: the owner's comment is on the card`,
@@ -488,21 +608,13 @@ const run = async (browser, width, index) => {
   // Typing presence, measured in the other browser: the member types into the
   // composer and the OWNER's open card says so; the member stops and it clears.
   await composer(guest).fill('board is on my screen');
-  await page.waitForFunction(
-    () => document.body.innerText.includes('marcus is typing'),
-    null,
-    { timeout: LOAD_TIMEOUT },
-  );
+  await waitForThread(page, 'marcus is typing');
   expect(
     `${width.label}: the owner sees "marcus is typing…" while the member types`,
     true,
   );
   await composer(guest).fill('');
-  await page.waitForFunction(
-    () => !document.body.innerText.includes('is typing'),
-    null,
-    { timeout: LOAD_TIMEOUT },
-  );
+  await waitForThreadToClear(page, 'is typing');
   expect(
     `${width.label}: and the indicator clears when the member stops`,
     true,
@@ -513,11 +625,7 @@ const run = async (browser, width, index) => {
   // looking at.
   await composer(guest).fill('board is on my screen');
   await comment(guest);
-  await page.waitForFunction(
-    () => document.body.innerText.includes('board is on my screen'),
-    null,
-    { timeout: LOAD_TIMEOUT },
-  );
+  await waitForThread(page, 'board is on my screen');
   const ownerRead = await threadText(page);
   expect(
     `${width.label}: the owner's open card shows the member's reply`,
@@ -536,7 +644,6 @@ const run = async (browser, width, index) => {
 
   // 10. What a thread refuses ------------------------------------------------
   // A third identity, in their OWN space, holding their OWN valid session.
-  const strangerFid = 919000 + index * 10;
   const challenge = await service('POST', '/spaces/auth', {
     siwe_uri: `${SERVER}/~/together`,
     domain: 'localhost',
@@ -606,11 +713,17 @@ const run = async (browser, width, index) => {
     String(insideRead.status),
   );
 
-  expect(`${width.label}: no browser errors`, errors.length === 0, errors.join(' | '));
+  expect(
+    `${width.label}: no browser errors`,
+    errors.length === 0,
+    [errors.join(' | '), resources(badResponses)].filter(Boolean).join(' — '),
+  );
   expect(
     `${width.label}: no browser errors in the member's context`,
     guestErrors.length === 0,
-    guestErrors.join(' | '),
+    [guestErrors.join(' | '), resources(guestBadResponses)]
+      .filter(Boolean)
+      .join(' — '),
   );
 
   await guestContext.close();
