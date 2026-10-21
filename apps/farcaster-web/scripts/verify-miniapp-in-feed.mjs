@@ -8,38 +8,58 @@
 //   SNAPCHAIN_HTTP_URL=https://<node> npx vite --port 5180
 //
 // THE FIXTURE, and why this one. The card asked for a cast found *through the
-// node* whose embed URL answers `fc:miniapp`. It was found by reading, not by
-// guessing: the Neynar frame catalog gave 50 miniapp hosts, each host's author
-// FID was read on the node (`/v1/castsByFid`), and the embed URL of every cast
-// those authors had posted was fetched and grepped for `fc:miniapp`. That left
-// 4 miniapp-bearing casts, all from fid 1439819. Only one useful cast was in a
-// signed-in account's own follow graph, so this is the fixture:
+// node* whose embed URL answers `fc:miniapp`, and one recent enough to be inside
+// the window a feed renders. A read node keeps no search index, so finding one
+// was reading, not guessing:
 //
-//   fid 17 (`sds`), cast 0xac298f3555e453c7b7e0a9338bb9ba065339418b, a TOP-LEVEL
-//   cast (a reply never reaches a home feed), text "Colleagues, Co-workers,
-//   Comrades: Pleasure to be here", embedding https://thefirm.biz/employees/17
-//   whose page carries:
+//   1. Neynar's frame catalog listed 50 miniapp hosts;
+//   2. each host's author FID was read on the node (`/v1/castsByFid`) and every
+//      embed URL those authors had posted was fetched and grepped for
+//      `fc:miniapp`. That left 19 frame/miniapp casts — and every one was
+//      326–536 days old, because the catalog's authors are not the people
+//      posting miniapps this week;
+//   3. so the search was inverted: recent casts embedding a known miniapp URL
+//      were looked up, and each confirmed back ON THE NODE (`/v1/castById`).
+//
+// This is the fixture, and the only one the assertions use:
+//
+//   fid 1062481, cast 0x8b3019a85bdbd946bab5f1105f62f7b926746ace, a TOP-LEVEL
+//   cast (a reply never reaches a home feed), text "ask me anything for $0.05",
+//   embedding https://beep.works/send/cmi8mtgn500afiolnh4qelc53 whose page
+//   carries:
 //     <meta name="fc:miniapp" content='{"version":"1",
-//       "imageUrl":"https://thefirm.biz/api/employees/17/og-image",
-//       "button":{"title":"Inspect e-ID","action":{"type":"launch_frame",
-//       "name":"@sds | The Firm","url":"https://thefirm.biz/employees/17", …}}}'>
+//       "imageUrl":"…/opengraph-image","button":{"title":"Beep @topp-airdrop",
+//       "action":{"type":"launch_miniapp", …}}}'>
 //
-// fid 3 (`dwr`) follows fid 17 — measured on the node, `/v1/linksByFid` — so the
-// cast is in the home feed of the account this probe signs in as, not merely
-// reachable by URL. That distinction is the whole point: a card that only
-// renders on a cast-detail page is not an in-feed miniapp card.
+// fid 259576 (`ogmaro`, 151 follows) follows fid 1062481 — measured on the node,
+// `/v1/linksByTargetFid?target_fid=1062481` returned them — so the cast is in
+// the feed column of the account this probe signs in as, not merely reachable by
+// URL. That distinction is the whole point: a card that only renders on a
+// cast-detail page is not an in-feed miniapp card.
 //
-// WHAT IT RECORDS (evidence, not a verdict): every console line, every request
-// with its method and status, and — for the fixture cast's own card — the image
-// sources, button labels, links and any iframe that the card actually put on
-// screen, at 390px and 1440px. Nothing here writes.
+// AGED_FIXTURE below is the FIRST fixture tried (fid 17, `thefirm.biz/employees/17`,
+// button "Inspect e-ID", a genuine `fc:miniapp` cast in fid 3's follow graph) and
+// is reported alongside, never asserted: it is 326 days old, so it is inside the
+// follow graph but past the end of the newest-first feed the client renders.
+// Every path below uses FIXTURE for its assertions; a runner who signs in for
+// AGED_FIXTURE's account is measuring the wrong cast.
+//
+// WHAT IT RECORDS (evidence, not a verdict): the provenance block first (which
+// server and which head served the run, the node, the fixture), then every
+// console line, every request with its method and status, and — for the fixture
+// cast's own card — the image sources, button labels, links and any iframe that
+// the card actually put on screen, at 390px and 1440px. Nothing here writes.
+// The report is written even when a viewport dies: a crashed run with no report
+// on disk is not evidence, it is a gap.
 //
 // The sign-in is the same real-SIWE stub the sibling probes use (`relay.farcaster.xyz`
 // is the only thing stubbed), so the client reaches its signed-in shell for real.
 
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -75,6 +95,14 @@ const SIGNED_IN_USERNAME = process.env.MINIAPP_SIGNED_IN_USERNAME ?? 'ogmaro';
 // budgets are env-settable so a slower or calmer machine can say so.
 const FEED_BUDGET_MS = Number(process.env.MINIAPP_FEED_BUDGET_MS ?? 240_000);
 const SURFACE_BUDGET_MS = Number(process.env.MINIAPP_SURFACE_BUDGET_MS ?? 150_000);
+// The sign-in is the longest single wait: the setup flow compiles on first visit,
+// the press opens a modal, and the modal waits on the relay. MEASURED
+// (2026-10-22 00:33, load average 74): the old hard-coded 120 s expired with the
+// browser still on `/welcome/ready`, which read as "this client cannot sign in"
+// when it was this machine. Env-settable, and the report says which budget ran.
+const SIGNIN_BUDGET_MS = Number(process.env.MINIAPP_SIGNIN_BUDGET_MS ?? 240_000);
+const SHOT_MS = Number(process.env.MINIAPP_SHOT_MS ?? 30_000);
+const SHOT_RETRY_MS = Number(process.env.MINIAPP_SHOT_RETRY_MS ?? 180_000);
 
 /**
  * The fixture, as measured on the node — and the reason it is this cast.
@@ -123,7 +151,9 @@ const AGED_FIXTURE = {
   fid: 17,
   hash: '0xac298f3555e453c7b7e0a9338bb9ba065339418b',
   text: 'Colleagues, Co-workers, Comrades',
+  url: 'https://thefirm.biz/employees/17',
   button: 'Inspect e-ID',
+  image: 'https://thefirm.biz/api/employees/17/og-image',
 };
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -225,7 +255,8 @@ const readUntil = async (page, done, budgetMs) => {
  * longer budget and its failure is reported, not thrown.
  */
 const shot = async (page, name) => {
-  for (const budget of [20_000, 90_000]) {
+  const budgets = [SHOT_MS, SHOT_RETRY_MS];
+  for (const [index, budget] of budgets.entries()) {
     try {
       await page.screenshot({
         path: path.join(OUT, `${name}.png`),
@@ -235,7 +266,7 @@ const shot = async (page, name) => {
       });
       return `${name}.png`;
     } catch (error) {
-      if (budget === 90_000) {
+      if (index === budgets.length - 1) {
         return `(screenshot ${name} skipped: ${String(error).split('\n')[0]})`;
       }
     }
@@ -324,8 +355,29 @@ const inspectFixtureCard = (page, fixture = FIXTURE) =>
       // image from this host too, so an image alone proves nothing — the
       // descriptor's BUTTON does, because `og:title` and the frame's button
       // title are different strings.
-      hasMiniappImage: everything.some((s) => s.includes(fixture.host)),
-      hasMiniappButton: everything.some((s) => s.includes(fixture.button)),
+      //
+      // MEASURED BUG (2026-10-21, caught in review): this used to be
+      // `everything.some((s) => s.includes(fixture.host))` with the host
+      // defaulted to `''` for a fixture that declares no URL — and EVERY string
+      // includes `''`, so an undeclared fixture reported `miniappImage=true`
+      // whenever the container held any image at all. A fixture with no URL has
+      // no measurable image; it now says so instead of answering yes.
+      miniappImageMeasured: fixture.host !== '',
+      hasMiniappImage:
+        fixture.host !== '' && everything.some((s) => s.includes(fixture.host)),
+      hasMiniappButton:
+        fixture.button !== '' &&
+        everything.some((s) => s.includes(fixture.button)),
+      // WHICH SOURCE drew the card. A card built from the page's own
+      // `fc:miniapp` tag carries the page's declared `imageUrl`; a card built
+      // from an index's app entry carries the app's catalog art instead, and the
+      // two are different URLs. MEASURED (2026-10-22 01:40): in the feed the art
+      // was `beep.works/images/beeper-og-0326.png` (the catalog's) while on the
+      // cast page it was `…/send/cmi8…/opengraph-image` (the page's own) — the
+      // check used to call both "the miniapp's own image", which hid that.
+      hasPageDeclaredImage:
+        Boolean(fixture.image) && everything.some((s) => s.includes(fixture.image)),
+      fixtureHost: fixture.host,
       hasLaunchAffordance: levels
         .flatMap((l) => l.buttonTexts)
         .some((t) => /launch|open (mini ?app|app)|play/i.test(t)),
@@ -334,11 +386,65 @@ const inspectFixtureCard = (page, fixture = FIXTURE) =>
     };
   }, { ...fixture, host: fixture.url ? new URL(fixture.url).host : '' });
 
+/**
+ * One line per surface: what the card did, and whether the fixture even has an
+ * image to look for.
+ *
+ * MEASURED (caught in review, 2026-10-21): `found=false` printed
+ * `miniappImage=undefined`, which reads as "unknown" when it means "there was no
+ * container to look in", and an undeclared-URL fixture printed
+ * `miniappImage=true` off any image at all. Both are said in words now.
+ */
+const cardLine = (card) =>
+  card.found
+    ? `card found=true miniappImage=${card.hasMiniappImage}${
+        card.miniappImageMeasured
+          ? ` (looking for ${card.fixtureHost})`
+          : ' (the fixture declares no url: not measurable)'
+      } pageDescriptorImage=${card.hasPageDeclaredImage} miniappButton=${card.hasMiniappButton} iframes=${card.iframeCount ?? 0}`
+    : 'card found=false (no container carries the fixture text)';
+
 const report = [];
 const log = (line) => {
   report.push(line);
   console.log(line);
 };
+
+// ── provenance, first ───────────────────────────────────────────────────────
+// A measurement without its head is not a measurement: the review of this
+// card's first run could not attribute a single number to a client revision.
+// The probe states the tree IT lives in, the server it drove, and the head that
+// served it — the last two cannot be read from inside the browser, so they are
+// env-stated and print "(not stated)" rather than a guess.
+const probePath = fileURLToPath(import.meta.url);
+const gitHead = (dir) => {
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: dir,
+      encoding: 'utf8',
+    }).trim();
+  } catch {
+    return '(not a git checkout)';
+  }
+};
+log('── provenance ──');
+log(`probe: ${probePath} (this tree's HEAD: ${gitHead(path.dirname(probePath))})`);
+log(`server the probe drove: ${SERVER}`);
+log(
+  `head the dev server served: ${process.env.MINIAPP_SERVED_HEAD ?? '(not stated — pass MINIAPP_SERVED_HEAD=<sha>)'}`,
+);
+log(
+  `read node: ${process.env.MINIAPP_NODE ?? '(not stated — pass MINIAPP_NODE=<url>)'}`,
+);
+log(`fixture: fid ${FIXTURE.fid}, cast ${FIXTURE.hash}, "${FIXTURE.text}", embed ${FIXTURE.url}`);
+log(
+  `aged second fixture (reported, not asserted): fid ${AGED_FIXTURE.fid}, cast ${AGED_FIXTURE.hash}, embed ${AGED_FIXTURE.url}`,
+);
+log(`signed in as: fid ${SIGNED_IN_FID} (${SIGNED_IN_USERNAME})`);
+log(`screenshots into: ${OUT}`);
+log(
+  `budgets: sign-in ${SIGNIN_BUDGET_MS / 1000}s · feed ${FEED_BUDGET_MS / 1000}s · surface ${SURFACE_BUDGET_MS / 1000}s · warm-up ${Number(process.env.MINIAPP_WARMUP_MS ?? 240_000) / 1000}s · screenshot ${SHOT_MS / 1000}s then ${SHOT_RETRY_MS / 1000}s`,
+);
 
 // `channel: 'chrome'` — the same real Chrome the sibling probes drive. The
 // bundled headless shell is not in this machine's playwright cache, and a
@@ -396,6 +502,24 @@ const runViewport = async ({ label, width, height }) => {
   });
 
   // ── sign in ─────────────────────────────────────────────────────────────
+  //
+  // The press happens IN PAGE, in one evaluate, rather than over the wire one
+  // element at a time. MEASURED (2026-10-22 00:33, load average 74 on 10 cores):
+  // a per-element `innerText()` loop is the slowest thing in this pass, and when
+  // the sign-in then does not land, the log said only "path=/welcome/ready" —
+  // no word on what was pressed or what the screen was holding. Both are logged
+  // now, and the press is made a second time when the first did not reach the
+  // client, because the sign-in is a modal with a surface of its own.
+  const pressGoSocial = () =>
+    page.evaluate(() => {
+      const target = Array.from(
+        document.querySelectorAll('button, a, [role=button]'),
+      ).find((el) => /go social/i.test((el.innerText || '').replace(/\s+/g, ' ')));
+      if (!target) return null;
+      target.click();
+      return (target.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    });
+  let pressed = null;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     await goTo(page, `${SERVER}/welcome/ready`);
     try {
@@ -405,15 +529,9 @@ const runViewport = async ({ label, width, height }) => {
             /go social/i.test((el.innerText || '').replace(/\s+/g, ' ')),
           ),
         undefined,
-        { timeout: 120_000 },
+        { timeout: SIGNIN_BUDGET_MS },
       );
-      for (const element of await page.$$('button, a, [role=button]')) {
-        const text = ((await element.innerText()) || '').replace(/\s+/g, ' ').trim();
-        if (/go social/i.test(text)) {
-          await element.click();
-          break;
-        }
-      }
+      pressed = await pressGoSocial();
       break;
     } catch {
       /* retry once */
@@ -428,11 +546,53 @@ const runViewport = async ({ label, width, height }) => {
   // screen and reported an empty feed. The path is asked for by name.
   const inClient = (s) =>
     !s.onboardingSheet && !s.deviceOnlyLanding && (s.path === '/' || s.path.startsWith('/~/'));
-  const afterSignIn = await readUntil(page, inClient, 120_000);
+
+  /** What the screen was holding when a wait ran out — evidence, not a guess. */
+  const holdingNow = () =>
+    page
+      .evaluate(() => ({
+        path: window.location.pathname,
+        dialog: (document.querySelector('[role=dialog]')?.innerText ?? '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 240),
+        buttons: Array.from(document.querySelectorAll('button, a, [role=button]'))
+          .map((el) => (el.innerText || '').replace(/\s+/g, ' ').trim())
+          .filter(Boolean)
+          .slice(0, 12),
+      }))
+      .catch(() => null);
+
+  let afterSignIn = await readUntil(page, inClient, SIGNIN_BUDGET_MS);
+  if (!inClient(afterSignIn)) {
+    const holding = await holdingNow();
+    log(
+      `\nsign-in did not reach the client after ${Math.round(SIGNIN_BUDGET_MS / 1000)}s: pressed=${JSON.stringify(pressed)} path=${afterSignIn.path}`,
+    );
+    if (holding) {
+      log(`  screen holding: dialog=${JSON.stringify(holding.dialog)}`);
+      log(`  screen holding: buttons=${JSON.stringify(holding.buttons)}`);
+    }
+    pressed = (await pressGoSocial().catch(() => pressed)) ?? pressed;
+    afterSignIn = await readUntil(page, inClient, SIGNIN_BUDGET_MS);
+  }
   const shotAfterSignIn = await shot(page, `${label}-1-after-signin`);
   log(`\n── ${label} (${width}px) ──`);
   log(`signed in -> path=${afterSignIn.path} onboarding=${afterSignIn.onboardingSheet} deviceOnly=${afterSignIn.deviceOnlyLanding}`);
   log(`screenshot: ${path.join(OUT, shotAfterSignIn)}`);
+
+  // The ARRIVAL window starts here.
+  //
+  // MEASURED, and it is why this marker exists (2026-10-22 01:40, this probe's
+  // first complete run): the request table used to start at the measured feed
+  // pass, so everything the client did while it was still arriving — the bundler
+  // and the feed's own warm-up render — was in NO slice at all. That is exactly
+  // where the fixture's card gets built (the resolver reads the page once, is
+  // refused, asks the index, and caches the answer), so the table could not say
+  // where the card's art and words came from. The arrival window is its own
+  // slice now, and a request that answers "where did this card come from" cannot
+  // fall between the slices again.
+  const netAtArrival = netSeen.length;
 
   // ── the feed, which is where an in-feed card must appear ────────────────
   //
@@ -521,7 +681,7 @@ const runViewport = async ({ label, width, height }) => {
       if (level.externalLinks.length) log(`      external links: ${JSON.stringify(level.externalLinks)}`);
       if (level.iframes.length) log(`      iframes: ${JSON.stringify(level.iframes)}`);
     }
-    log(`  miniapp image=${feedCard.hasMiniappImage} miniapp button=${feedCard.hasMiniappButton} launch affordance=${feedCard.hasLaunchAffordance} url shown=${feedCard.showsEmbedUrl}`);
+    log(`  miniapp image=${feedCard.hasMiniappImage} (host ${feedCard.fixtureHost || '(none declared)'}) pageDescriptorImage=${feedCard.hasPageDeclaredImage} miniapp button=${feedCard.hasMiniappButton} launch affordance=${feedCard.hasLaunchAffordance} url shown=${feedCard.showsEmbedUrl} iframes=${feedCard.iframeCount ?? 0}`);
   }
   log(`feed screenshot: ${path.join(OUT, feedShot)}`);
 
@@ -533,14 +693,21 @@ const runViewport = async ({ label, width, height }) => {
       : `not in the column; refusal="${feed.nodeRefusal ?? 'none'}"`,
   );
   check(
-    `${label}: the card shows the miniapp's own image (fc:miniapp imageUrl)`,
+    `${label}: the card carries an image from the app's own host (${feedCard.fixtureHost || '(none declared)'})`,
     Boolean(feedCard.found && feedCard.hasMiniappImage),
     feedCard.found
       ? JSON.stringify(feedCard.levels.flatMap((l) => l.images.map((i) => i.src)).slice(0, 5))
       : 'no card container found',
   );
   check(
-    `${label}: the card shows the miniapp's own button ("${FIXTURE.button}")`,
+    `${label}: the card carries the PAGE's own descriptor, not only the index's art`,
+    Boolean(feedCard.found && feedCard.hasPageDeclaredImage),
+    feedCard.found
+      ? `looking for ${FIXTURE.image} in ${JSON.stringify(feedCard.levels.flatMap((l) => l.images.map((i) => i.src)).slice(0, 5))}`
+      : 'no card container found',
+  );
+  check(
+    `${label}: the card carries the page's own button words ("${FIXTURE.button}")`,
     Boolean(feedCard.found && feedCard.hasMiniappButton),
     feedCard.found
       ? JSON.stringify(feedCard.levels.flatMap((l) => l.buttonTexts).slice(0, 10))
@@ -559,7 +726,7 @@ const runViewport = async ({ label, width, height }) => {
   const detailShot = await shot(page, `${label}-3-cast-detail`);
   log(`\ncast detail: path=${detail.path} fixtureTextOnScreen=${detail.columnText.includes(FIXTURE.text)}`);
   log(`  refusal sentence: ${detail.nodeRefusal ?? '(none)'}`);
-  log(`  card found=${detailCard.found} miniappImage=${detailCard.hasMiniappImage} miniappButton=${detailCard.hasMiniappButton} iframes=${detailCard.iframeCount ?? 0}`);
+  log(`  ${cardLine(detailCard)}`);
   if (detailCard.found) {
     for (const level of detailCard.levels) {
       log(
@@ -570,7 +737,12 @@ const runViewport = async ({ label, width, height }) => {
   }
   log(`cast-detail screenshot: ${path.join(OUT, detailShot)}`);
 
-  requests.push({ viewport: label, feed: feedNet, detail: netSeen.slice(netAtDetail) });
+  requests.push({
+    viewport: label,
+    arrival: netSeen.slice(netAtArrival, netAtFeed),
+    feed: feedNet,
+    detail: netSeen.slice(netAtDetail),
+  });
 
   // ── the aged fixture's own page, reported not asserted ──────────────────
   // It is in `dwr`'s follow graph but 326 days old, so it can never reach that
@@ -586,7 +758,7 @@ const runViewport = async ({ label, width, height }) => {
   const agedCard = await inspectFixtureCard(page, AGED_FIXTURE);
   const agedShot = await shot(page, `${label}-4-aged-fixture-detail`);
   log(`\nsecond (aged) fixture, cast detail: fixtureTextOnScreen=${aged.columnText.includes(AGED_FIXTURE.text)}`);
-  log(`  card found=${agedCard.found} miniappImage=${agedCard.hasMiniappImage} miniappButton=${agedCard.hasMiniappButton} iframes=${agedCard.iframeCount ?? 0}`);
+  log(`  ${cardLine(agedCard)}`);
   if (agedCard.found) {
     for (const level of agedCard.levels) {
       log(
@@ -600,10 +772,34 @@ const runViewport = async ({ label, width, height }) => {
   await context.close();
 };
 
-await runViewport({ label: 'mobile-390', width: 390, height: 844 });
-await runViewport({ label: 'desktop-1440', width: 1440, height: 900 });
+// MEASURED (2026-10-21 22:54): the first run of this probe died here with
+// `page.waitForTimeout: Target page, context or browser has been closed` — and
+// the whole report died with it, so the one run whose column DID carry the
+// fixture left no request table and no checks. A dead viewport is reported now,
+// never fatal: the other viewport still runs, the checks section still prints,
+// and the report is still written.
+const crashed = [];
+for (const viewport of [
+  { label: 'mobile-390', width: 390, height: 844 },
+  { label: 'desktop-1440', width: 1440, height: 900 },
+]) {
+  try {
+    await runViewport(viewport);
+  } catch (error) {
+    const line = `${viewport.label}: ${String(error).split('\n')[0]}`;
+    crashed.push(line);
+    log(`\n!! ${viewport.label} ended early — ${line}`);
+  }
+}
 
-await browser.close();
+// A run that lost a viewport must not read as a clean sweep: the count says so.
+check(
+  'every viewport reached the end of its own pass',
+  crashed.length === 0,
+  crashed.length > 0 ? crashed.join('; ') : 'both passes completed',
+);
+
+await browser.close().catch(() => {});
 
 // ── the evidence, grouped ──────────────────────────────────────────────────
 log('\n── requests, by route and answer ──');
@@ -615,7 +811,7 @@ const MODULE_REQUEST = /^\/(@fs|@vite|@react-refresh|src|node_modules)\//;
 let moduleRequests = 0;
 const byRoute = new Map();
 for (const group of requests) {
-  for (const scope of ['feed', 'detail']) {
+  for (const scope of ['arrival', 'feed', 'detail']) {
     for (const entry of group[scope]) {
       const route = (() => {
         try {
