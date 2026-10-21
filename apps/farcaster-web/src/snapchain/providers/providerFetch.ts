@@ -15,12 +15,11 @@
  *                      reads (feed, unseen, notifications) only exist here.
  *   neynar             the thin mapper in `neynarMap.ts`, for the reads Neynar
  *                      actually serves. Everything else is refused by name.
- *   farcaster-public   `api.farcaster.xyz`. A page cannot read it at all
- *                      (measured 2026-10-21; see `publicServerOffTheWeb`), so
- *                      its requests are refused here in the words of their own
- *                      classification: no cross-origin fetch is fired at an
- *                      origin that would refuse it, and no credential is ever
- *                      forwarded anywhere.
+ *   farcaster-public   the same request path at `api.farcaster.xyz`, whose
+ *                      public reads already speak the hosted shapes — no mapper
+ *                      needed, and no credential forwarded. Its signed-in
+ *                      endpoints answer 401, which this turns into a sentence
+ *                      saying that read needs a node.
  *
  * Two rules this file exists to enforce:
  *
@@ -40,9 +39,11 @@
  * (`local`, see `answerLocalDraftRequest`).
  */
 
+import { loadAppKey } from '~/snapchain/appKeyStorage';
 import {
   classifyHostedRequest,
   hostedApiPath,
+  type HostedRouteMatch,
 } from '~/snapchain/nodeApi/hostedRoutes';
 import {
   answerLocalDraftRequest,
@@ -56,15 +57,27 @@ import {
   REQUEST_BODY_PREVIEW_LIMIT,
   type RequestLogEntry,
 } from '~/snapchain/nodeApi/nodeBackedFetch';
+import { NodeBackedWrites } from '~/snapchain/nodeApi/nodeWrites';
+import { castAuthorOf, channelParentUrlFor } from '~/snapchain/nodeApi/reads';
 
-import { NEYNAR_BASE_URL } from './catalog';
-import { answerFromNeynar } from './neynarMap';
+import {
+  providerCanServe,
+  providerPlainName,
+  type ServeableRouteKind,
+} from './capabilities';
+import {
+  FARCASTER_PUBLIC_BASE_URL,
+  NEYNAR_BASE_URL,
+  NEYNAR_NODE_BASE_URL,
+} from './catalog';
+import { answerFromNeynar, fetchCastAuthorFromNeynar } from './neynarMap';
 import { neynarApiKeyFromEnv } from './preferences';
 import type { NodeProvider } from './providerTypes';
 import {
   PUBLIC_SERVER_OFF_THE_WEB_STATUS,
   publicServerCannotAnswer,
 } from './publicServerOffTheWeb';
+import { getProviderSnapshot } from './runtime';
 
 export interface ProviderBackedFetchOptions {
   /** Which provider is live right now, asked fresh on every request. */
@@ -93,6 +106,12 @@ export interface ProviderBackedFetchOptions {
    * `VITE_SNAPCHAIN_DEBUG=true`) reads this same array.
    */
   requestLog?: RequestLogEntry[];
+  /**
+   * The reader's servers, in the order they want them tried. Defaults to the
+   * runtime's live order, which is what the pill and the picker read. Injectable
+   * so a test can describe an order without a watch running.
+   */
+  getProviderOrder?: () => NodeProvider[];
   /**
    * Where cast drafts are kept. Defaults to a store over this browser's own
    * storage; injectable so a test can use a storage of its own.
@@ -185,6 +204,7 @@ export const createProviderBackedFetch = ({
   onRead,
   createNodeAdapter = createNodeBackedFetch,
   requestLog: requestLogOption,
+  getProviderOrder,
   drafts: draftsOption,
 }: ProviderBackedFetchOptions): ProviderBackedFetchHandle => {
   const drafts = draftsOption ?? new LocalDraftStore();
@@ -198,14 +218,16 @@ export const createProviderBackedFetch = ({
   // node never lands here.
   const adapters = new Map<string, ReturnType<typeof createNodeBackedFetch>>();
   const nodeAdapter = (
-    baseUrl: string,
+    provider: NodeProvider,
   ): ReturnType<typeof createNodeBackedFetch> => {
+    const baseUrl = provider.baseUrl || nodeBaseUrl;
     const existing = adapters.get(baseUrl);
     if (existing) {
       return existing;
     }
     const created = createNodeAdapter({
       nodeBaseUrl: baseUrl,
+      nodeLabel: providerPlainName(provider),
       getSignedInFid,
       fetchImpl: boundFetch,
       ...(countCap ? { countCap } : {}),
@@ -220,8 +242,80 @@ export const createProviderBackedFetch = ({
     return created;
   };
 
+  /**
+   * The Neynar half of a write.
+   *
+   * Neynar is two servers (see `catalog.ts`): the index that answers reads, and
+   * its own Snapchain node at `NEYNAR_NODE_BASE_URL`, which is where a message
+   * this device signed is handed over — exactly as it would be handed to any
+   * other node, with the reader's key in a header and nothing else different.
+   * MEASURED live: `/v1/info` and `/v1/submitMessage` both answer there with the
+   * key this build was given, and a bad signer is refused with the same
+   * `invalid signer` a public node gives.
+   *
+   * Its one extra power over a public node is used here and nowhere else: it can
+   * turn a cast *hash* into its author's FID (`fetchCastAuthorFromNeynar`), which
+   * is what a reaction needs to address itself to a cast the client has not read
+   * through a node yet.
+   */
+  const neynarWriterFor = (
+    key: string,
+    entry: RequestLogEntry,
+  ): NodeBackedWrites =>
+    new NodeBackedWrites({
+      nodeBaseUrl: NEYNAR_NODE_BASE_URL,
+      nodeLabel: 'Neynar',
+      headers: { 'x-api-key': key },
+      fetchImpl: boundFetch,
+      getAppKeyHex: (fid) => loadAppKey(fid),
+      castAuthor: castAuthorOf,
+      resolveCastAuthor: (hash) =>
+        fetchCastAuthorFromNeynar({
+          hash,
+          apiKey: key,
+          fetchImpl: boundFetch,
+          baseUrl: NEYNAR_BASE_URL,
+        }),
+      channelParentUrl: channelParentUrlFor,
+      onEvidence: (evidence) => {
+        entry.write = evidence;
+      },
+    });
+
   const log: ProviderBackedFetchHandle['log'] = [];
   const requestLog: RequestLogEntry[] = requestLogOption ?? [];
+
+  /**
+   * The first server on the reader's list that can answer this request.
+   *
+   * The list is the same one the pill and the picker read, and the preferred
+   * server is tried first — so a request only leaves the reader's first choice
+   * when that choice genuinely cannot serve it (`capabilities.ts`). Nothing is
+   * measured here: whether a server *can* answer is a fact about the server's
+   * shape, not about its health, and health is the failover engine's job.
+   */
+  const firstCapableProvider = ({
+    kind,
+    path,
+    preferred,
+  }: {
+    kind: ServeableRouteKind;
+    path: string;
+    preferred: NodeProvider;
+  }): NodeProvider | null => {
+    const order = getProviderOrder
+      ? getProviderOrder()
+      : getProviderSnapshot().order;
+    const candidates = [
+      preferred,
+      ...order.filter((provider) => provider.id !== preferred.id),
+    ];
+    return (
+      candidates.find(
+        (provider) => providerCanServe({ provider, kind, path }).can,
+      ) ?? null
+    );
+  };
   const debugEnabled = isRequestDebugEnabled();
   if (debugEnabled) {
     (globalThis as unknown as Record<string, unknown>).__nodeBackedRequests =
@@ -246,25 +340,80 @@ export const createProviderBackedFetch = ({
     }
   };
 
-  // (Farcaster's own public server used to be answered right here, by fetching
-  // the same path cross-origin and passing the hosted body through. That is
-  // gone: measured 2026-10-21, a page on another origin cannot read that server
-  // at all, so every one of those fetches came back a CORS failure while the
-  // client showed "Failed to fetch". What replaced it is `publicServerOffTheWeb`
-  // and the refusal in `providerBackedFetch`.)
+  /** Same request, at Farcaster's own public server, without our session. */
+  const answerFromFarcasterPublic = async (
+    { url, method }: ParsedRequest,
+    provider: NodeProvider,
+  ): Promise<Response> => {
+    const endpoint = hostedApiPath(url.pathname);
+
+    if (method !== 'GET' && method !== 'HEAD') {
+      return errorResponse(
+        501,
+        `${method} ${endpoint} is a write, and Farcaster's own public server does not take writes from this client. Posting goes through your node (or ours) instead.`,
+      );
+    }
+
+    const target = `${provider.baseUrl || FARCASTER_PUBLIC_BASE_URL}${endpoint}${url.search}`;
+    let response: Response;
+    try {
+      response = await boundFetch(target, {
+        method: 'GET',
+        credentials: 'omit',
+      });
+    } catch (error) {
+      return errorResponse(
+        502,
+        `Farcaster's own public server did not answer: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return errorResponse(
+        501,
+        `${endpoint} needs a signed-in session, which only Farcaster's own app can hold. This client reads that from a node — not from the public server.`,
+      );
+    }
+
+    // The body is already in the hosted shapes the client expects, so it is
+    // passed through as-is; only the status and content type are re-stated.
+    const text = await response.text();
+    return new Response(text, {
+      status: response.status,
+      headers: {
+        'content-type':
+          response.headers.get('content-type') ??
+          'application/json; charset=utf-8',
+      },
+    });
+  };
 
   const answer = async (
     parsed: ParsedRequest,
     provider: NodeProvider,
+    route: HostedRouteMatch,
+    entry: RequestLogEntry,
   ): Promise<Response> => {
     switch (provider.kind) {
       case 'neynar': {
-        const key = neynarApiKey ?? neynarApiKeyFromEnv();
+        // `undefined` asks this build's own configuration; an explicit `null`
+        // means "there is none", which is what a caller (or a test) needs to be
+        // able to say — `??` would silently read the key off the build's env.
+        const key =
+          neynarApiKey === undefined ? neynarApiKeyFromEnv() : neynarApiKey;
         if (key === null) {
           return errorResponse(
             501,
             'Neynar needs your own API key before it can answer. Run scripts/fiddy-setup.command to add one, or pick another server.',
           );
+        }
+        if (route.kind === 'write') {
+          return neynarWriterFor(key, entry).answer({
+            method: parsed.method,
+            path: route.path,
+            body: parsed.body,
+            fid: getSignedInFid(),
+          });
         }
         return answerFromNeynar({
           path: hostedApiPath(parsed.url.pathname),
@@ -276,13 +425,12 @@ export const createProviderBackedFetch = ({
         });
       }
 
-      // `farcaster-public` never reaches this switch: the caller refuses its
-      // requests in place, because a page cannot read that server at all (see
-      // `publicServerOffTheWeb`, and the guard in `providerBackedFetch`).
+      case 'farcaster-public':
+        return answerFromFarcasterPublic(parsed, provider);
 
       case 'snapchain':
       default: {
-        const adapter = nodeAdapter(provider.baseUrl || nodeBaseUrl);
+        const adapter = nodeAdapter(provider);
         return adapter.fetch(parsed.url.toString(), {
           method: parsed.method,
           ...(parsed.body !== undefined
@@ -353,41 +501,6 @@ export const createProviderBackedFetch = ({
       }
     }
 
-    // The cast submit itself is refused in one set of words, whichever server
-    // is live: no provider in this client's catalog posts a cast (a node has no
-    // writer wired up, and the public server and Neynar take no writes), and a
-    // provider's generic write guard would name a way to post that this device
-    // does not have yet. The classification's sentence says what is really
-    // missing (a signing app key), and the composer shows it to the person who
-    // pressed Cast.
-    if (
-      route.kind === 'hosted' &&
-      route.method === 'POST' &&
-      path === '/v2/casts'
-    ) {
-      const refusal = hostedRefusal(route);
-      recordSelfAnswered(
-        requestLog,
-        parsed,
-        route,
-        refusal,
-        bodyPreviewOf(parsed),
-      );
-      return refusal;
-    }
-
-    if (provider === null) {
-      // Nothing has been measured yet (or the reader's list is empty). The
-      // build's own node is the honest answer, exactly as before this file.
-      log.push({ path, providerId: 'build-configured', kind: 'snapchain' });
-      return nodeAdapter(nodeBaseUrl).fetch(parsed.url.toString(), {
-        method: parsed.method,
-        ...(parsed.body !== undefined
-          ? { body: JSON.stringify(parsed.body) }
-          : {}),
-      });
-    }
-
     // Farcaster's own public server cannot be read from a web page at all —
     // measured on the live site: eleven distinct reads, every one of them
     // refused by CORS (see `publicServerOffTheWeb`). So it is refused here
@@ -401,7 +514,15 @@ export const createProviderBackedFetch = ({
     // fixed the other half of this: `probeFarcasterPublic` now asks a read this
     // client actually makes, so in a page this server is measured as not
     // answering and is never made live in the first place.)
-    if (provider.kind === 'farcaster-public') {
+    //
+    // This sits before the classification's own hosted refusal and before the
+    // routing decision below, and for the same reason: when this server is the
+    // one the reader is on, the honest sentence names *both* whose job the
+    // request is and the measured fact that a page cannot read this server at
+    // all (`publicServerCannotAnswer` puts the route's own reason first). A
+    // write through it is refused by name too, whatever else is in the list —
+    // it takes no writes from a web page either.
+    if (provider !== null && provider.kind === 'farcaster-public') {
       // The routing log keeps it: this request WAS routed to that provider, and
       // the provider could not answer it — that is the fact worth recording.
       log.push({ path, providerId: provider.id, kind: provider.kind });
@@ -420,29 +541,93 @@ export const createProviderBackedFetch = ({
       return refusal;
     }
 
-    log.push({ path, providerId: provider.id, kind: provider.kind });
+    // A request no server in this catalog answers is refused in one set of words,
+    // before any provider sees it — an unclassified write says "no writer has been
+    // written", a read says "no reader". Both name the real gap instead of a
+    // provider's generic excuse.
+    if (route.kind === 'hosted') {
+      const refusal = hostedRefusal(route);
+      recordSelfAnswered(
+        requestLog,
+        parsed,
+        route,
+        refusal,
+        bodyPreviewOf(parsed),
+      );
+      return refusal;
+    }
+
+    if (provider === null) {
+      // Nothing has been measured yet (or the reader's list is empty). The
+      // build's own node is the honest answer, exactly as before this file —
+      // writes included, which is why the label is the neutral one.
+      log.push({ path, providerId: 'build-configured', kind: 'snapchain' });
+      return nodeAdapter({
+        id: 'build-configured',
+        kind: 'snapchain',
+        source: 'public',
+        label: 'The node this build was configured with',
+        detail: '',
+        baseUrl: nodeBaseUrl,
+        readOnly: false,
+      }).fetch(parsed.url.toString(), {
+        method: parsed.method,
+        ...(parsed.body !== undefined
+          ? { body: JSON.stringify(parsed.body) }
+          : {}),
+      });
+    }
+
+    // WHICH SERVER ANSWERS THIS ONE
+    //
+    // The order says which server the reader prefers; this decides which one can
+    // answer the request in front of us, and the two are not the same question
+    // (`capabilities.ts`). Two rules, both honest:
+    //
+    //   - A WRITE goes to the preferred server and nowhere else. A write commits
+    //     something under the reader's name; if their server cannot carry it,
+    //     they get that server's own refusal rather than this client silently
+    //     posting through another machine.
+    //   - A READ may go to the first server on their list that can serve it.
+    //     That is what makes "Neynar is the default" workable: Neynar's index has
+    //     profiles, threads and casts but not the follow-graph feed, so the feed
+    //     is read from the node behind it instead of failing on the default.
+    const answerer =
+      route.kind === 'write'
+        ? provider
+        : (firstCapableProvider({
+            kind: route.kind,
+            path,
+            preferred: provider,
+          }) ?? provider);
+
+    log.push({ path, providerId: answerer.id, kind: answerer.kind });
 
     // `init.headers` is deliberately not forwarded to a provider that is not a
     // node: what the client attaches is this device's session with Fiddy's own
     // API, and handing that to a third-party server is how a token leaks.
-    const response = await answer(parsed, provider);
-    if (provider.kind !== 'snapchain') {
-      // A provider that is not a node answers inside this seam, so nothing else
-      // would record what it was asked, or what a write was about to submit.
-      // (A node provider's requests are recorded by the adapter itself, which
-      // was handed this same sink.)
-      requestLog.push({
-        method: parsed.method,
-        path: parsed.url.pathname,
-        kind: route.kind,
-        status: response.status,
-        ...bodyPreviewOf(parsed),
-      });
+    //
+    // The entry is created before the answer so a write has somewhere to record
+    // what it signed (a node provider's adapter keeps its own, over this same
+    // sink); it is pushed for a non-node provider, whose requests nothing else
+    // in the client records.
+    const entry: RequestLogEntry = {
+      method: parsed.method,
+      path: parsed.url.pathname,
+      kind: route.kind,
+    };
+    if (answerer.kind !== 'snapchain') {
+      requestLog.push(entry);
+    }
+    const response = await answer(parsed, answerer, route, entry);
+    if (answerer.kind !== 'snapchain') {
+      entry.status = response.status;
+      Object.assign(entry, bodyPreviewOf(parsed));
     }
     // A 5xx is the provider failing; a 4xx is this client asking for something
     // that provider does not serve, which is our bug to fix, not a reason to
     // move the reader's feed to another machine.
-    onRead?.(provider.id, response.status < 500);
+    onRead?.(answerer.id, response.status < 500);
     return response;
   }) as typeof fetch;
 

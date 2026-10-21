@@ -21,6 +21,7 @@ import {
   farcasterPublicProvider,
   neynarProvider,
   ownNodeProvider,
+  publicNodeProvider,
 } from '~/snapchain/providers/catalog';
 import { createProviderBackedFetch } from '~/snapchain/providers/providerFetch';
 import type { NodeProvider } from '~/snapchain/providers/providerTypes';
@@ -421,10 +422,14 @@ describe('createProviderBackedFetch: the media pipeline', () => {
     });
 
     expect(response.status).toBe(501);
+    // The submit is a real write now (it used to be a `hosted` refusal), and
+    // this server cannot carry one — so the refusal is that server's own, not a
+    // sentence about a reader. What it carried is still on the log, which is
+    // what scripts/verify-media-upload.mjs reads.
     expect(requestLog.at(-1)).toMatchObject({
       method: 'POST',
       path: '/~api/v2/casts',
-      kind: 'hosted',
+      kind: 'write',
       status: 501,
     });
     // This is how scripts/verify-media-upload.mjs reads the payload a composer
@@ -523,38 +528,75 @@ describe('createProviderBackedFetch: pressing Cast', () => {
     expect(calls).toEqual([]);
   });
 
-  it('refuses the cast submit in the same words for every provider', async () => {
-    const refusals: string[] = [];
-    for (const provider of [
-      farcasterPublicProvider(),
-      neynarProvider(),
-      ownNodeProvider('https://mine.example'),
-    ]) {
-      const handle = createProviderBackedFetch({
-        getActiveProvider: () => provider,
-        getSignedInFid: () => 3,
-        nodeBaseUrl: '/snapchain-api',
-        fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
-        neynarApiKey: provider.kind === 'neynar' ? 'a-key' : null,
-        createNodeAdapter: stubNodeAdapter().factory,
-      });
+  it('hands a cast to the live server when that server can carry one', async () => {
+    // The seam no longer answers the submit itself: a node can carry a write, so
+    // the request goes to that node's adapter, which signs it. The signing half
+    // is `nodeWrites.test.ts`; this is the routing half.
+    const { calls, factory } = stubNodeAdapter();
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => ownNodeProvider('https://mine.example'),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
+      createNodeAdapter: factory,
+    });
 
-      const response = await handle.fetch(CASTS, {
-        method: 'POST',
-        body: JSON.stringify({ text: 'anything' }),
-      });
+    await handle.fetch(CASTS, {
+      method: 'POST',
+      body: JSON.stringify({ text: 'anything' }),
+    });
 
-      expect(response.status).toBe(501);
-      refusals.push(
-        ((await response.json()) as { errors: { message: string }[] }).errors[0]
-          ?.message ?? '',
-      );
-    }
+    // It reached a node's own adapter, and nothing refused it on the way.
+    expect(calls.length).toBe(1);
+  });
 
-    // One sentence, three servers: the public server's generic write guard names
-    // a way to post (a node writer) that this client does not have, so it is not
-    // the one a person should read.
-    expect(new Set(refusals).size).toBe(1);
-    expect(refusals[0]).toContain('app key');
+  it('refuses a cast on a server that takes no writes, in that server’s own words', async () => {
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => farcasterPublicProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
+    });
+
+    const response = await handle.fetch(CASTS, {
+      method: 'POST',
+      body: JSON.stringify({ text: 'anything' }),
+    });
+
+    expect(response.status).toBe(501);
+    const body = (await response.json()) as { errors: { message: string }[] };
+    expect(body.errors[0]!.message).toContain('does not take writes');
+  });
+});
+
+describe('createProviderBackedFetch: which server can answer', () => {
+  it('sends a read the preferred server cannot serve to one that can', async () => {
+    // The heart of "Neynar is the default": Neynar's index has profiles and
+    // threads, and no follow-graph feed at all. Rather than fail the feed on the
+    // default server, the seam sends it to the node behind it — and says which
+    // one answered.
+    const { calls, factory } = stubNodeAdapter();
+    const relay = publicNodeProvider('https://relay.example');
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => neynarProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
+      neynarApiKey: 'a-key',
+      createNodeAdapter: factory,
+      getProviderOrder: () => [
+        neynarProvider(),
+        relay,
+        farcasterPublicProvider(),
+      ],
+    });
+
+    await handle.fetch('https://farcaster.xyz/~api/v2/feed-items', {
+      method: 'POST',
+      body: JSON.stringify({ feedKey: 'home' }),
+    });
+
+    expect(calls.length).toBe(1);
+    expect(handle.log.at(-1)).toMatchObject({ providerId: relay.id });
   });
 });
