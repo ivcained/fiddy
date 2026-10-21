@@ -1,7 +1,15 @@
 // End-to-end: does a photo in a cast render as a PHOTO, from the live node?
 //
-//   SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com npx vite --port 5174
+//   SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
+//   VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
+//   npx vite --config scripts/probe.vite.config.mjs --port 5174
 //   EMBED_SERVER=https://localhost:5174 node scripts/verify-embed-images.mjs
+//
+// BOTH variables, MEASURED: `SNAPCHAIN_HTTP_URL` points the dev server's
+// `/snapchain-api` relay at the node, but the shell only runs the node-backed
+// client when the *build* names a server (`isNodeConfigured()` reads
+// `VITE_SNAPCHAIN_HTTP_URL`), and with only the first one a completed sign-in
+// lands on the device-only landing — zero casts read, no photo to check.
 //
 // The bug this measures (user-reported, screenshot verified): a cast whose embed
 // is a Cloudflare image-delivery URL — `https://imagedelivery.net/<account>/
@@ -130,19 +138,43 @@ const withSrc = (surface, needle) =>
 const loaded = (image) => image.naturalWidth > 0;
 
 /**
- * Wait until a picture whose src carries `needle` is in the DOM *and* loaded.
- * The feed is assembled from a real follow graph, so this waits in seconds.
+ * Bring a picture on screen. The feed is long and a cast card's photo is lazily
+ * loaded, so an off-screen <img> is in the DOM with `naturalWidth` 0 because its
+ * bytes were never requested — MEASURED: without this the reported cast's photo
+ * sat at 0x0 for the whole two-minute wait while the very same URL served
+ * `image/jpeg` to `curl`, and the first cast on screen (a poidh.xyz link) is not
+ * the one being looked for.
+ */
+const scrollToPhoto = async (page, needle) => {
+  await page.evaluate((asset) => {
+    const img = Array.from(document.querySelectorAll('img')).find((el) =>
+      (el.currentSrc || el.src || '').includes(asset),
+    );
+    if (img) {
+      img.scrollIntoView({ block: 'center', inline: 'center' });
+    }
+  }, needle);
+};
+
+/**
+ * Wait until a picture whose src carries `needle` is in the DOM *and* loaded,
+ * having first brought it on screen so the browser actually asks for it.
  */
 const waitForPhoto = async (page, needle, tries = 60) => {
+  let surface = await readImages(page);
   for (let i = 0; i < tries; i += 1) {
-    const surface = await readImages(page);
+    surface = await readImages(page);
     const matches = withSrc(surface, needle);
     if (matches.length > 0 && matches.some(loaded)) {
       return { surface, matches };
     }
+    if (matches.length > 0) {
+      await scrollToPhoto(page, needle);
+      await page.waitForTimeout(1000);
+      continue;
+    }
     await page.waitForTimeout(2000);
   }
-  const surface = await readImages(page);
   return { surface, matches: withSrc(surface, needle) };
 };
 
@@ -267,9 +299,13 @@ const run = async () => {
   });
   // MEASURED: `/welcome/ready` renders its steps in sequence, so "the page has
   // text" is already true while an earlier step is still on screen and the
-  // sign-in button does not exist yet. Wait for the button itself.
+  // sign-in button does not exist yet. Wait for the button itself. The deadline
+  // is Playwright's THIRD argument: passed second it is read as the page
+  // function's argument and the wait silently falls back to 30s, which a cold
+  // dev server on the first request can exceed while it compiles the app.
   await page.waitForFunction(
     () => /go social/i.test(document.body.innerText),
+    null,
     { timeout: 90000 },
   );
 
