@@ -143,7 +143,8 @@ const CORS = {
 // the client's own catalog is made of — `snapchain:<url>`).
 
 const THIRD_PARTY = {
-  'api.farcaster.xyz': 'Farcaster’s own public server (the farcaster-public provider)',
+  'api.farcaster.xyz':
+    'Farcaster’s own public server (the farcaster-public provider)',
   'api.neynar.com': 'Neynar (the neynar provider)',
 };
 
@@ -152,10 +153,18 @@ const parseRead = (entry) => {
   try {
     parsed = new URL(entry.url, SERVER);
   } catch {
-    return { ...entry, path: entry.url, serverKey: 'unparseable', server: `unparseable ${entry.url}`, nodeRoute: null };
+    return {
+      ...entry,
+      path: entry.url,
+      serverKey: 'unparseable',
+      server: `unparseable ${entry.url}`,
+      nodeRoute: null,
+    };
   }
   const relayPath = parsed.pathname.startsWith('/snapchain-api');
-  const path = relayPath ? parsed.pathname.replace(/^\/snapchain-api/, '') : parsed.pathname;
+  const path = relayPath
+    ? parsed.pathname.replace(/^\/snapchain-api/, '')
+    : parsed.pathname;
 
   let serverKey;
   let server;
@@ -195,7 +204,8 @@ const parseRead = (entry) => {
     // Only a Snapchain node answers the protocol's own routes; a third-party
     // provider answering `/v1/...` would be a different machine wearing the
     // same path, which is exactly why the server is reported next to the route.
-    nodeRoute: serverKey === 'relay' || serverKey.startsWith('node:') ? nodeRoute : null,
+    nodeRoute:
+      serverKey === 'relay' || serverKey.startsWith('node:') ? nodeRoute : null,
   };
 };
 
@@ -208,7 +218,11 @@ const isNodeServer = (key) => key === 'relay' || key.startsWith('node:');
 const describeServers = (reads) => {
   const byServer = new Map();
   for (const read of reads) {
-    const entry = byServer.get(read.serverKey) ?? { server: read.server, calls: 0, statuses: new Set() };
+    const entry = byServer.get(read.serverKey) ?? {
+      server: read.server,
+      calls: 0,
+      statuses: new Set(),
+    };
     entry.calls += 1;
     entry.statuses.add(read.status);
     byServer.set(read.serverKey, entry);
@@ -232,7 +246,11 @@ const readSurface = async (page) => {
     try {
       return await page.evaluate(surfaceProbe);
     } catch (error) {
-      if (!/Execution context was destroyed|Target closed|navigat|Cannot read properties of null/.test(String(error))) {
+      if (
+        !/Execution context was destroyed|Target closed|navigat|Cannot read properties of null/.test(
+          String(error),
+        )
+      ) {
         throw error;
       }
       await page.waitForTimeout(250);
@@ -261,11 +279,15 @@ const surfaceProbe = () => {
     // `main` is reported as such and the callers fall back to the whole page.
     columnText: (main?.innerText ?? '').replace(/\s+/g, ' ').trim(),
     columnPresent: Boolean(main),
-    onboardingSheet: Boolean(document.querySelector('[data-fiddy="onboarding"]')),
+    onboardingSheet: Boolean(
+      document.querySelector('[data-fiddy="onboarding"]'),
+    ),
     deviceOnlyLanding: Boolean(
       document.querySelector('[data-fiddy="device-only-session"]'),
     ),
-    dmsUnavailable: Boolean(document.querySelector('[data-fiddy="dms-unavailable"]')),
+    dmsUnavailable: Boolean(
+      document.querySelector('[data-fiddy="dms-unavailable"]'),
+    ),
     dmsNoteText: /direct casts\s+soon/i.test(text),
     /**
      * The client's own answer for a read it could not complete. That is a
@@ -277,10 +299,13 @@ const surfaceProbe = () => {
         text,
       ),
     /** The fork's own copy — the sentence the fixes above exist to replace. */
-    genericError: /Could not reach Farcaster|Error retrieving data|Something went wrong/i.test(
-      text,
-    ),
-    castLinks: Array.from(document.querySelectorAll('a[href*="/conversations/"]'))
+    genericError:
+      /Could not reach Farcaster|Error retrieving data|Something went wrong/i.test(
+        text,
+      ),
+    castLinks: Array.from(
+      document.querySelectorAll('a[href*="/conversations/"]'),
+    )
       .map((a) => a.getAttribute('href'))
       .slice(0, 12),
   };
@@ -303,7 +328,9 @@ const shot = async (page, name) => {
       animations: 'disabled',
     });
   } catch (error) {
-    console.log(`(screenshot ${name} skipped: ${String(error).split('\n')[0]})`);
+    console.log(
+      `(screenshot ${name} skipped: ${String(error).split('\n')[0]})`,
+    );
   }
 };
 
@@ -365,9 +392,12 @@ const run = async () => {
   const page = await ctx.newPage();
   const consoleErrors = [];
   page.on('console', (m) => {
-    if (m.type() === 'error') consoleErrors.push(m.text().replace(/\s+/g, ' ').slice(0, 240));
+    if (m.type() === 'error')
+      consoleErrors.push(m.text().replace(/\s+/g, ' ').slice(0, 240));
   });
-  page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${String(e).slice(0, 240)}`));
+  page.on('pageerror', (e) =>
+    consoleErrors.push(`pageerror: ${String(e).slice(0, 240)}`),
+  );
 
   /**
    * The casts a server actually returned, with the server that returned them.
@@ -390,9 +420,16 @@ const run = async () => {
    */
   const netSeen = [];
   page.on('response', async (response) => {
-    const read = parseRead({ url: response.url(), method: 'GET', status: response.status() });
+    const read = parseRead({
+      url: response.url(),
+      method: 'GET',
+      status: response.status(),
+    });
     if (read.nodeRoute) netSeen.push(read);
-    if (read.serverKey === 'app' || !/^\/v1\/(castsByFid|castsByParent|castById)$/.test(read.path)) {
+    if (
+      read.serverKey === 'app' ||
+      !/^\/v1\/(castsByFid|castsByParent|castById)$/.test(read.path)
+    ) {
       return;
     }
     if (response.status() !== 200) return;
@@ -401,7 +438,15 @@ const run = async () => {
       for (const msg of body.messages ?? []) {
         const text = msg?.data?.castAddBody?.text;
         if (typeof text === 'string' && text.trim().length > 12) {
-          servedCasts.push({ text, hash: msg.hash, fid: msg.data?.fid, route: read.path, status: response.status(), server: read.server, serverKey: read.serverKey });
+          servedCasts.push({
+            text,
+            hash: msg.hash,
+            fid: msg.data?.fid,
+            route: read.path,
+            status: response.status(),
+            server: read.server,
+            serverKey: read.serverKey,
+          });
         }
       }
     } catch {
@@ -412,11 +457,17 @@ const run = async () => {
   const readLog = async () => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       try {
-        return (await page.evaluate(() => window.__providerReadLog ?? [])).map(parseRead);
+        return (await page.evaluate(() => window.__providerReadLog ?? [])).map(
+          parseRead,
+        );
       } catch (error) {
         // Same mid-navigation window as `readSurface`: a log that cannot be read
         // yet is retried, never allowed to end the run.
-        if (!/Execution context was destroyed|Target closed|navigat|Cannot read properties of null/.test(String(error))) {
+        if (
+          !/Execution context was destroyed|Target closed|navigat|Cannot read properties of null/.test(
+            String(error),
+          )
+        ) {
           throw error;
         }
         await page.waitForTimeout(250);
@@ -464,7 +515,9 @@ const run = async () => {
   };
   /** The page column when there is one; the whole page when the layout has none. */
   const columnOf = (surface) =>
-    surface.columnPresent && surface.columnText ? surface.columnText : surface.text;
+    surface.columnPresent && surface.columnText
+      ? surface.columnText
+      : surface.text;
   /**
    * The refusal sentence a piece of surface text carries — the client's own
    * panel, or the fork's generic copy that panel replaces.
@@ -481,7 +534,8 @@ const run = async () => {
    */
   const CLIENT_PHRASE =
     /didn[’']t load from your node|isn[’']t on your node|could not be loaded from your node/i;
-  const FORK_COPY = /Could not reach Farcaster|Error retrieving data|Something went wrong/i;
+  const FORK_COPY =
+    /Could not reach Farcaster|Error retrieving data|Something went wrong/i;
   const refusalSentence = (text) => {
     for (const sentence of String(text ?? '').split(/(?<=[.!?])\s+/)) {
       if (CLIENT_PHRASE.test(sentence) || FORK_COPY.test(sentence)) {
@@ -501,7 +555,9 @@ const run = async () => {
     servedCasts.filter((cast) => onScreen(columnOf(surface), cast.text));
 
   const inClient = (surface) =>
-    !surface.onboardingSheet && !surface.deviceOnlyLanding && surface.path === '/';
+    !surface.onboardingSheet &&
+    !surface.deviceOnlyLanding &&
+    surface.path === '/';
 
   /**
    * Poll a surface until it answers. `done` decides what "answered" means, and
@@ -522,8 +578,10 @@ const run = async () => {
 
   const NOTIFICATION_ROUTES =
     /^\/v1\/(castsByMention|reactionsByFid|reactionsByCast|linksByTargetFid|castsByParent|castById)/;
-  const PROFILE_ROUTES = /^\/v1\/(userDataByFid|userNameProofByName|verificationsByFid)$/;
-  const CHANNEL_ROUTES = /^\/v1\/(castsByParent|castsByFid|userDataByFid|linksByFid|linksByTargetFid)/;
+  const PROFILE_ROUTES =
+    /^\/v1\/(userDataByFid|userNameProofByName|verificationsByFid)$/;
+  const CHANNEL_ROUTES =
+    /^\/v1\/(castsByParent|castsByFid|userDataByFid|linksByFid|linksByTargetFid)/;
 
   /**
    * Open a surface and wait for it to answer. `done` decides what "answered"
@@ -542,7 +600,10 @@ const run = async () => {
     let last = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const netAtVisit = netSeen.length;
-      await page.goto(`${SERVER}${path}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      await page.goto(`${SERVER}${path}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      });
       const surface = await readSurfaceUntil(done, budgetMs);
       const reads = await readLog(page);
       seen.push(...reads);
@@ -554,9 +615,13 @@ const run = async () => {
         (read) => isNodeServer(read.serverKey) && read.status === 200,
       );
       const neverPainted =
-        surface.text.trim().length < 40 || /^Loading Fiddy…?/.test(surface.text.trim());
+        surface.text.trim().length < 40 ||
+        /^Loading Fiddy…?/.test(surface.text.trim());
       const unfinished =
-        surface.cannotAnswer || surface.genericError || neverPainted || !answeredSomewhere;
+        surface.cannotAnswer ||
+        surface.genericError ||
+        neverPainted ||
+        !answeredSomewhere;
       last = { surface, reads, attempts: attempt };
       if (done(surface) || !unfinished) break;
     }
@@ -594,14 +659,20 @@ const run = async () => {
       try {
         await page.waitForFunction(
           (pattern) =>
-            Array.from(document.querySelectorAll('button, a, [role=button]')).some((el) =>
-              new RegExp(pattern, 'i').test((el.innerText || '').replace(/\s+/g, ' ')),
+            Array.from(
+              document.querySelectorAll('button, a, [role=button]'),
+            ).some((el) =>
+              new RegExp(pattern, 'i').test(
+                (el.innerText || '').replace(/\s+/g, ' '),
+              ),
             ),
           'go social',
           { timeout: 120_000 },
         );
         for (const element of await page.$$('button, a, [role=button]')) {
-          const text = ((await element.innerText()) || '').replace(/\s+/g, ' ').trim();
+          const text = ((await element.innerText()) || '')
+            .replace(/\s+/g, ' ')
+            .trim();
           if (goat.test(text)) {
             await element.click();
             clicked = text;
@@ -629,13 +700,18 @@ const run = async () => {
     'a completed sign-in lands in the client, not on a setup or device-only screen',
     inClient(afterSignIn) && clicked !== null,
     `clicked="${clicked}" path=${afterSignIn.path} deviceOnly=${afterSignIn.deviceOnlyLanding} onboarding=${afterSignIn.onboardingSheet}${
-      clicked === null ? ` | the sign-in button never appeared; screen: "${sawText}"` : ''
+      clicked === null
+        ? ` | the sign-in button never appeared; screen: "${sawText}"`
+        : ''
     }`,
   );
 
   // ── 2. the feed shows casts that a server really returned ─────────────────
   const netAtFeed = netSeen.length;
-  const feedSurface = await readSurfaceUntil((s) => matchedCasts(s).length > 0, FEED_BUDGET_MS);
+  const feedSurface = await readSurfaceUntil(
+    (s) => matchedCasts(s).length > 0,
+    FEED_BUDGET_MS,
+  );
   // The response bodies are parsed asynchronously by the listener above, so a
   // beat here lets the last ones land before the DOM is compared against them.
   await page.waitForTimeout(1500);
@@ -647,9 +723,13 @@ const run = async () => {
   const CAST_ROUTES = /^\/v1\/(castsByFid|castsByParent|castById)$/;
   const feedNetReads = netSeen.slice(netAtFeed);
   const pageCastReads = feedReads.filter((read) => CAST_ROUTES.test(read.path));
-  const netCastReads = feedNetReads.filter((read) => CAST_ROUTES.test(read.path));
+  const netCastReads = feedNetReads.filter((read) =>
+    CAST_ROUTES.test(read.path),
+  );
   const castReads = [...pageCastReads, ...netCastReads];
-  const nodeCastReads = castReads.filter((read) => isNodeServer(read.serverKey) && read.status === 200);
+  const nodeCastReads = castReads.filter(
+    (read) => isNodeServer(read.serverKey) && read.status === 200,
+  );
   const lenses = `page's own log ×${pageCastReads.length}, network ×${netCastReads.length}`;
 
   check(
@@ -711,10 +791,13 @@ const run = async () => {
   for (const candidate of candidates) {
     const castVisit = await visitSurface({
       path: `/~/conversations/${candidate.hash}`,
-      done: (surface) => matchedCasts(surface).length > 0 && !surface.cannotAnswer,
+      done: (surface) =>
+        matchedCasts(surface).length > 0 && !surface.cannotAnswer,
     });
     const threadReads = castVisit.reads.filter(
-      (read) => /^\/v1\/(castsByParent|castById)$/.test(read.path) && read.status === 200,
+      (read) =>
+        /^\/v1\/(castsByParent|castById)$/.test(read.path) &&
+        read.status === 200,
     );
     const threadCasts = matchedCasts(castVisit.surface);
     castSurface = castVisit.surface;
@@ -725,7 +808,9 @@ const run = async () => {
         ? `${threadCasts.length} cast texts a server returned are on screen`
         : 'no cast text a server returned is on screen'
     }; thread reads: ${threadReads.length > 0 ? describeServers(threadReads) : 'none'}${
-      castVisit.attempts > 1 ? '; opened twice (first load refused to render)' : ''
+      castVisit.attempts > 1
+        ? '; opened twice (first load refused to render)'
+        : ''
     }`;
     if (castOk) break;
   }
@@ -751,16 +836,20 @@ const run = async () => {
   });
   const profileReads = profileVisit.reads.filter(
     (read) =>
-      PROFILE_ROUTES.test(read.path) && read.status === 200 && isNodeServer(read.serverKey),
+      PROFILE_ROUTES.test(read.path) &&
+      read.status === 200 &&
+      isNodeServer(read.serverKey),
   );
   await shot(page, 'profile');
   check(
     'a profile page renders and names the account, with its reads going to a server the client read from',
     profileNamed(profileVisit.surface) && profileReads.length > 0,
-    `${profileReads.length > 0 ? describeServers(profileReads) : 'no profile read answered'}; page column names dwr: ${
-      profileNamed(profileVisit.surface)
-    }${profileVisit.attempts > 1 ? '; opened twice (first load refused to render)' : ''}${
-      profileVisit.surface.cannotAnswer ? ` | panel: ${profileVisit.surface.text.slice(0, 90)}` : ''
+    `${profileReads.length > 0 ? describeServers(profileReads) : 'no profile read answered'}; page column names dwr: ${profileNamed(
+      profileVisit.surface,
+    )}${profileVisit.attempts > 1 ? '; opened twice (first load refused to render)' : ''}${
+      profileVisit.surface.cannotAnswer
+        ? ` | panel: ${profileVisit.surface.text.slice(0, 90)}`
+        : ''
     }`,
   );
 
@@ -772,7 +861,9 @@ const run = async () => {
   });
   const channelReads = channelVisit.reads.filter(
     (read) =>
-      CHANNEL_ROUTES.test(read.path) && read.status === 200 && isNodeServer(read.serverKey),
+      CHANNEL_ROUTES.test(read.path) &&
+      read.status === 200 &&
+      isNodeServer(read.serverKey),
   );
   await shot(page, 'channel');
   check(
@@ -796,7 +887,8 @@ const run = async () => {
   // `notificationTabs` never arrives, the page renders nothing and neither
   // marker appears — which is the honest reading of that surface.
   const notificationsRendered = (surface) =>
-    /No notifications yet\./.test(columnOf(surface)) || /\bAll\b/.test(columnOf(surface));
+    /No notifications yet\./.test(columnOf(surface)) ||
+    /\bAll\b/.test(columnOf(surface));
   const notificationsVisit = await visitSurface({
     path: '/~/notifications',
     done: notificationsRendered,
@@ -819,7 +911,8 @@ const run = async () => {
   );
   check(
     'the notifications surface does not render an error page',
-    !notificationsVisit.surface.cannotAnswer && !notificationsVisit.surface.genericError,
+    !notificationsVisit.surface.cannotAnswer &&
+      !notificationsVisit.surface.genericError,
     notificationsVisit.surface.cannotAnswer
       ? notificationsVisit.surface.text.slice(0, 160)
       : notificationsVisit.surface.text.slice(0, 90),
@@ -836,10 +929,34 @@ const run = async () => {
   const reloadReads = await readLog(page);
   seen.push(...reloadReads);
   const reloadNetReads = netSeen.slice(netAtReload);
+  // Which server answered the reload's cast reads.
+  //
+  // A node is one answer; the provider ladder (`~/snapchain/providers`, landed
+  // 2026-10-21) can answer the same read from a named third-party server when
+  // the build holds a key for it — MEASURED on this revision: with the
+  // `VITE_NEYNAR_API_KEY` the dev `.env.local` carries, the ladder answered the
+  // reload's cast reads from `api.neynar.com` (69 casts back on screen, the
+  // page's own pill said Neynar), and this check read RED because it insisted on
+  // a node. That was the probe measuring its own expectation again — the same
+  // family of defect the re-point above fixed — so it counts a read server,
+  // names which one, and keeps the clause that actually fails when the client is
+  // broken: cast text on screen, which a client showing "Home isn't on your
+  // node" (card `t_f7c34463`) cannot produce.
+  const isReadServerAnswer = (read) => isNodeServer(read.serverKey);
   const reloadNodeReads = reloadReads.filter(
     (read) =>
-      /^\/v1\/castsByFid/.test(read.path) && read.status === 200 && isNodeServer(read.serverKey),
+      /^\/v1\/castsByFid/.test(read.path) &&
+      read.status === 200 &&
+      isReadServerAnswer(read),
   );
+  const reloadProviderReads = reloadReads.filter(
+    (read) =>
+      /^\/v1\/castsByFid/.test(read.path) &&
+      read.status === 200 &&
+      !isReadServerAnswer(read) &&
+      read.serverKey in THIRD_PARTY,
+  );
+  const reloadServedReads = [...reloadNodeReads, ...reloadProviderReads];
   const reloadMatches = matchedCasts(reloadSurface);
   // MEASURED (2026-10-21, review round 1 + this card's own runs): this is the
   // check that flips on a live node — the review's two runs of the previous
@@ -862,7 +979,9 @@ const run = async () => {
     /^\/(?:v2\/feed-items|v1\/castsByFid)/.test(read.path),
   );
   const reloadOk =
-    inClient(reloadSurface) && reloadMatches.length > 0 && reloadNodeReads.length > 0;
+    inClient(reloadSurface) &&
+    reloadMatches.length > 0 &&
+    reloadServedReads.length > 0;
   const columnWords = wordsFor(columnOf(reloadSurface));
   // Only a failing check explains itself: a passing one keeps the detail the
   // release doc quotes (the reads, and the casts back on screen). On a failure
@@ -879,12 +998,16 @@ const run = async () => {
   if (columnWords) {
     reloadStateParts.push(columnWords);
   } else {
-    reloadStateParts.push(`page column: "${columnOf(reloadSurface).slice(0, 160).trim()}"`);
+    reloadStateParts.push(
+      `page column: "${columnOf(reloadSurface).slice(0, 160).trim()}"`,
+    );
     const elsewhere = wordsFor(reloadSurface.text);
-    if (elsewhere) reloadStateParts.push(`elsewhere on the page — ${elsewhere}`);
+    if (elsewhere)
+      reloadStateParts.push(`elsewhere on the page — ${elsewhere}`);
   }
   if (reloadFailures.length > 0) {
-    const listed = reloadFeedFailures.length > 0 ? reloadFeedFailures : reloadFailures;
+    const listed =
+      reloadFeedFailures.length > 0 ? reloadFeedFailures : reloadFailures;
     const label =
       reloadFeedFailures.length > 0
         ? `${reloadFeedFailures.length} feed read${reloadFeedFailures.length === 1 ? '' : 's'}`
@@ -892,16 +1015,21 @@ const run = async () => {
     reloadStateParts.push(
       `${label} did not answer 200: ${listed
         .slice(0, 4)
-        .map((read) => `${read.status} ${read.method} ${read.path} (${read.server})`)
+        .map(
+          (read) =>
+            `${read.status} ${read.method} ${read.path} (${read.server})`,
+        )
         .join('; ')}`,
     );
   }
-  const reloadState = reloadOk ? '' : reloadStateParts.map((part) => ` | ${part}`).join('');
+  const reloadState = reloadOk
+    ? ''
+    : reloadStateParts.map((part) => ` | ${part}`).join('');
   await shot(page, 'after-reload');
   check(
     'after a reload the client still reads the feed from a server it read from',
     reloadOk,
-    `${reloadNodeReads.length > 0 ? describeServers(reloadNodeReads) : 'no castsByFid read answered by a node after the reload'} | casts back on screen: ${reloadMatches.length}${reloadState}`,
+    `${reloadServedReads.length > 0 ? describeServers(reloadServedReads) : 'no castsByFid read was answered after the reload'} | casts back on screen: ${reloadMatches.length}${reloadState}`,
   );
 
   // ── 5. no surface fell back to the fork's generic copy ────────────────────
@@ -919,11 +1047,16 @@ const run = async () => {
     generic.length === 0,
     generic.length === 0
       ? `${surfacesSeen.length} surfaces read, none with the fork’s generic copy`
-      : generic.map((entry) => `${entry.name}: ${entry.surface.text.slice(0, 90)}`).join(' | '),
+      : generic
+          .map((entry) => `${entry.name}: ${entry.surface.text.slice(0, 90)}`)
+          .join(' | '),
   );
 
   // ── 6. the client's own words about where its reads come from ─────────────
-  await page.goto(`${SERVER}/~/settings/node`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await page.goto(`${SERVER}/~/settings/node`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60_000,
+  });
   await page.waitForTimeout(12_000);
   let providerWords = null;
   try {
@@ -942,14 +1075,20 @@ const run = async () => {
         .map((el) => el.innerText.replace(/\s+/g, ' ').trim().slice(0, 160));
       const pill = Array.from(document.querySelectorAll('div,span,button'))
         .map((el) => (el.innerText || '').trim())
-        .filter((text) => /^(Backup|Public|Your own|Shared|Checking…|Offline)$/.test(text));
-      const rightNow = /Right now: ([^.]+)\./.exec(container.innerText.replace(/\s+/g, ' '));
+        .filter((text) =>
+          /^(Backup|Public|Your own|Shared|Checking…|Offline)$/.test(text),
+        );
+      const rightNow = /Right now: ([^.]+)\./.exec(
+        container.innerText.replace(/\s+/g, ' '),
+      );
       return { rows, pill: pill[0] ?? null, rightNow: rightNow?.[1] ?? null };
     });
   } catch (error) {
     // The provider card is reported evidence, not a check — losing it must not
     // lose the run (measured: a mid-navigation evaluate has thrown here).
-    console.log(`(the provider card could not be read: ${String(error).split('\n')[0]})`);
+    console.log(
+      `(the provider card could not be read: ${String(error).split('\n')[0]})`,
+    );
   }
 
   await browser.close();
@@ -957,7 +1096,11 @@ const run = async () => {
   // ── the report: what left the page, and what answered it ──────────────────
   const byServer = new Map();
   for (const read of seen) {
-    const entry = byServer.get(read.serverKey) ?? { read, calls: 0, routes: new Map() };
+    const entry = byServer.get(read.serverKey) ?? {
+      read,
+      calls: 0,
+      routes: new Map(),
+    };
     entry.calls += 1;
     const key = `${read.status} ${read.method} ${read.path.split('?')[0]}`;
     entry.routes.set(key, (entry.routes.get(key) ?? 0) + 1);
@@ -974,10 +1117,16 @@ const run = async () => {
     byRoute.set(key, entry);
   }
   const routeReport = [...byRoute.values()]
-    .map((e) => ({ key: e.key, calls: e.calls, statuses: [...e.statuses].sort() }))
+    .map((e) => ({
+      key: e.key,
+      calls: e.calls,
+      statuses: [...e.statuses].sort(),
+    }))
     .sort((a, b) => a.key.localeCompare(b.key));
 
-  const gapLines = consoleErrors.filter((line) => /HandledFetchError|501/.test(line));
+  const gapLines = consoleErrors.filter((line) =>
+    /HandledFetchError|501/.test(line),
+  );
   const failed = checks.filter((c) => !c.ok);
 
   console.log(
@@ -986,21 +1135,31 @@ const run = async () => {
     } ──`,
   );
   for (const c of checks) {
-    console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
+    console.log(
+      `${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? ` — ${c.detail}` : ''}`,
+    );
   }
 
   console.log(`\n── where the client says its answers come from ──`);
   if (providerWords) {
-    console.log(`  pill: ${providerWords.pill ?? '(none)'}; Right now: ${providerWords.rightNow ?? '(not measured yet)'}`);
+    console.log(
+      `  pill: ${providerWords.pill ?? '(none)'}; Right now: ${providerWords.rightNow ?? '(not measured yet)'}`,
+    );
     for (const row of providerWords.rows) console.log(`  ${row}`);
   } else {
     console.log('  (the provider card did not render on this run)');
   }
 
   console.log(`\n── reads that left the page (${seen.length}), by server ──`);
-  for (const [, entry] of [...byServer.entries()].sort((a, b) => b[1].calls - a[1].calls)) {
-    console.log(`  ${entry.read.server} — ${entry.calls} read${entry.calls === 1 ? '' : 's'}`);
-    for (const [key, calls] of [...entry.routes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)) {
+  for (const [, entry] of [...byServer.entries()].sort(
+    (a, b) => b[1].calls - a[1].calls,
+  )) {
+    console.log(
+      `  ${entry.read.server} — ${entry.calls} read${entry.calls === 1 ? '' : 's'}`,
+    );
+    for (const [key, calls] of [...entry.routes.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)) {
       console.log(`      ×${String(calls).padStart(3)}  ${key}`);
     }
   }
@@ -1012,26 +1171,38 @@ const run = async () => {
   console.log(`\n── what the reload document did (after goto('/')) ──`);
   const reloadByServer = new Map();
   for (const read of [...reloadReads, ...reloadNetReads]) {
-    const entry = reloadByServer.get(read.serverKey) ?? { server: read.server, calls: 0, routes: new Map() };
+    const entry = reloadByServer.get(read.serverKey) ?? {
+      server: read.server,
+      calls: 0,
+      routes: new Map(),
+    };
     entry.calls += 1;
     const key = `${read.status} ${read.method} ${read.path.split('?')[0]}`;
     entry.routes.set(key, (entry.routes.get(key) ?? 0) + 1);
     reloadByServer.set(read.serverKey, entry);
   }
   if (reloadByServer.size === 0) console.log('  (no read left the page)');
-  for (const [, entry] of [...reloadByServer.entries()].sort((a, b) => b[1].calls - a[1].calls)) {
-    console.log(`  ${entry.server} — ${entry.calls} read${entry.calls === 1 ? '' : 's'}`);
-    for (const [key, calls] of [...entry.routes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)) {
+  for (const [, entry] of [...reloadByServer.entries()].sort(
+    (a, b) => b[1].calls - a[1].calls,
+  )) {
+    console.log(
+      `  ${entry.server} — ${entry.calls} read${entry.calls === 1 ? '' : 's'}`,
+    );
+    for (const [key, calls] of [...entry.routes.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)) {
       console.log(`      ×${String(calls).padStart(3)}  ${key}`);
     }
   }
   console.log(
-    `  casts a server returned, back on screen: ${reloadMatches.length} of ${servedCasts.length}; castsByFid 200s in the reload's own log: ${reloadNodeReads.length}`,
+    `  casts a server returned, back on screen: ${reloadMatches.length} of ${servedCasts.length}; castsByFid 200s in the reload's own log: ${reloadServedReads.length}`,
   );
 
   console.log(`\n── node routes the client used (${routeReport.length}) ──`);
   for (const r of routeReport) {
-    console.log(`${r.statuses.join('/')}  x${String(r.calls).padStart(3)}  ${r.key}`);
+    console.log(
+      `${r.statuses.join('/')}  x${String(r.calls).padStart(3)}  ${r.key}`,
+    );
   }
 
   console.log(`\n── endpoints the node could not answer (501) ──`);
@@ -1046,7 +1217,8 @@ const run = async () => {
 
   if (ISOLATE) {
     console.log(`\n── every other server blocked (${blocked.length}) ──`);
-    for (const url of [...new Set(blocked)].slice(0, 12)) console.log(`  ${url}`);
+    for (const url of [...new Set(blocked)].slice(0, 12))
+      console.log(`  ${url}`);
   }
 
   console.log(
