@@ -14,6 +14,7 @@ import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { PreloadAuthedResources } from '~/components/PrefetchAuthedResources';
 import { DeviceOnlySessionLanding } from '~/components/session/DeviceOnlySessionLanding';
 import { PostForYouStep } from '~/components/session/PostForYouStep';
+import { SignerApprovalGate } from '~/components/session/SignerApprovalGate';
 import { useDeviceOnlySession } from '~/components/session/useDeviceOnlySession';
 import { EnsureCachedCurrentUser } from '~/components/users/EnsureCachedCurrentUser';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
@@ -355,6 +356,15 @@ const AuthedLayout: FC = () => {
                                                   renders nothing unless the
                                                   offer applies. */}
                                               <PostForYouStep />
+                                              {/* Pressing the heart, or
+                                                  sending a cast, with no
+                                                  posting key yet: the exact
+                                                  write waiting is held by the
+                                                  write seam and this is the
+                                                  approval it asks for, in
+                                                  place. It renders nothing
+                                                  unless a write is waiting. */}
+                                              <SignerApprovalGate />
                                             </div>
                                           </CastComposerSessionProvider>
                                         </BespokeTransactionModalProvider>

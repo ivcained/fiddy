@@ -199,4 +199,63 @@ describe('ConnectSheet', () => {
       expect(copy).not.toMatch(word);
     }
   });
+
+  it('asks by itself when something is waiting on it, and names what that is', async () => {
+    // The inline case: the person pressed the heart, the write is held, and
+    // this sheet is the thing they are being asked for. There is no first
+    // screen to press — and the sentence says what the approval will finish.
+    startConnect.mockResolvedValue({
+      status: {
+        state: 'waiting',
+        approvalUrl: APPROVAL,
+        fid: null,
+        username: null,
+      },
+      reused: false,
+    });
+
+    const { container } = render(
+      <ConnectSheet
+        autoStart
+        completing="Your like goes out by itself — there is nothing to press when you come back."
+      />,
+    );
+
+    await screen.findByText('One tap in Farcaster to finish');
+    expect(startConnect).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toMatch(/Your like goes out by itself/);
+    // Asking, not connecting: the connect door's own first screen never shows.
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
+  });
+
+  it('hands the approval to its caller instead of signing anybody in', async () => {
+    startConnect.mockResolvedValue({
+      status: {
+        state: 'waiting',
+        approvalUrl: APPROVAL,
+        fid: null,
+        username: null,
+      },
+      reused: false,
+    });
+    const onApproved = vi.fn();
+
+    render(<ConnectSheet autoStart onApproved={onApproved} />);
+    await screen.findByText('One tap in Farcaster to finish');
+
+    connectStatus.mockResolvedValue({
+      state: 'connected',
+      approvalUrl: null,
+      fid: 3,
+      username: 'dwr',
+    });
+    await screen.findByText('One tap in Farcaster to finish');
+    // The sheet polls every 2.5 s, so this waits for a poll that has not
+    // happened yet rather than for a state the render just set.
+    await vi.waitFor(() => expect(onApproved).toHaveBeenCalledWith(3, 'dwr'), {
+      timeout: 8000,
+    });
+    // The sheet's own Connected screen — which offers to sign in — is not shown.
+    expect(screen.queryByText('Connected as @dwr')).toBeNull();
+  });
 });

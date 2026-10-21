@@ -30,8 +30,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createNodeBackedFetch } from '~/snapchain/nodeApi/nodeBackedFetch';
 import {
+  approvalLabelFor,
+  type ManagedWrite,
   NO_APP_KEY,
   UNKNOWN_CAST_AUTHOR,
+  type WriteApprovalRequest,
+  writeIntentFor,
 } from '~/snapchain/nodeApi/nodeWrites';
 import { rememberCastAuthor } from '~/snapchain/nodeApi/reads';
 
@@ -636,5 +640,183 @@ describe('the app key store', () => {
     expect(response.status).toBe(501);
     expect(await messageOf(response)).toContain('Issue app key');
     expect(fake.submitted).toEqual([]);
+  });
+});
+
+/**
+ * The write that has no key yet — and the approval asked for in place.
+ *
+ * This is the half of onboarding card 4/5 that lives in the writer: pressing the
+ * heart, or sending a cast, before this device holds any posting key must not
+ * answer with a sentence about a screen two taps away. The pending write itself
+ * is handed to the asker (`~/snapchain/accounts/postingKeyApproval`, in the app),
+ * and the *same request* is answered again once the person has approved — so the
+ * reader gets the like they pressed, and the caller gets the answer a like
+ * always gets.
+ *
+ * What is pinned here, without a browser and without a service:
+ *
+ *   - the asker is asked once, with the write's own name attached ("like"), and
+ *     the carried write is the same one (the reaction really goes out, and the
+ *     node's own state is read back before the answer says it landed);
+ *   - a decline, an asker that cannot be reached, and an approval that did not
+ *     really happen all leave the refusal *exactly* as it was — the same status,
+ *     the same sentence, nothing signed;
+ *   - a retry never asks the same person twice, so a broken approval cannot
+ *     loop the screen.
+ */
+describe('a write with no posting key yet', () => {
+  const likeRequestBody = JSON.stringify({ castHash: TARGET.hash });
+
+  const writerWithApproval = ({
+    state = {},
+    appKeyHex = null as unknown as string,
+    ask,
+    granted,
+  }: {
+    state?: Partial<FakeNodeState>;
+    appKeyHex?: string | null;
+    ask?: (request: WriteApprovalRequest) => Promise<Response | null>;
+    /** The granted poster's answer, when the approval really produced a key. */
+    granted?: { available: () => boolean; post: (write: ManagedWrite) => void };
+  } = {}) => {
+    const fake = createFakeNode(state);
+    const handle = createNodeBackedFetch({
+      nodeBaseUrl: 'http://node.test',
+      nodeLabel: 'Your node',
+      getSignedInFid: () => FID,
+      fetchImpl: fake.fetchImpl,
+      getAppKeyHex: async () => appKeyHex,
+      ...(granted === undefined
+        ? {}
+        : {
+            managedPoster: {
+              available: async () => granted.available(),
+              post: async (write: ManagedWrite) => {
+                granted.post(write);
+                return { ok: true as const, hash: null };
+              },
+            },
+          }),
+      ...(ask === undefined ? {} : { askForPostingKey: ask }),
+    });
+    return { ...fake, handle };
+  };
+
+  const pressLike = (handle: { fetch: typeof fetch }) =>
+    handle.fetch('https://farcaster.xyz/~api/v2/cast-likes', {
+      method: 'PUT',
+      body: likeRequestBody,
+    });
+
+  it('names the write in the person’s own word, from the intent it classified', () => {
+    const labelOf = (method: string, path: string, body: unknown) =>
+      approvalLabelFor(writeIntentFor({ method, path, body })!);
+
+    expect(labelOf('PUT', '/v2/cast-likes', { castHash: TARGET.hash })).toBe(
+      'like',
+    );
+    expect(labelOf('DELETE', '/v2/cast-likes', { castHash: TARGET.hash })).toBe(
+      'change',
+    );
+    expect(labelOf('PUT', '/v2/recasts', { castHash: TARGET.hash })).toBe(
+      'recast',
+    );
+    expect(labelOf('PUT', '/v2/follows', { targetFid: 999 })).toBe('follow');
+    expect(labelOf('DELETE', '/v2/follows', { targetFid: 999 })).toBe('change');
+    expect(labelOf('POST', '/v2/casts', { text: 'hello' })).toBe('post');
+  });
+
+  it('asks where the person is, and carries the very same like with the key they granted', async () => {
+    // The state shows the like afterwards: the service that holds the granted
+    // posting key really posted it, and this writer still reads the node's own
+    // state back before it says so.
+    const asked: WriteApprovalRequest[] = [];
+    const posted: ManagedWrite[] = [];
+    let keyExists = false;
+    const fake = writerWithApproval({
+      state: { likedBy: [FID] },
+      ask: async (request) => {
+        asked.push(request);
+        keyExists = true;
+        return request.carry();
+      },
+      granted: {
+        available: () => keyExists,
+        post: (write) => posted.push(write),
+      },
+    });
+
+    const response = await pressLike(fake.handle);
+
+    expect(asked.length).toBe(1);
+    expect(asked[0]!.fid).toBe(FID);
+    expect(asked[0]!.label).toBe('like');
+    // The carried write is the same write: one like, on the same cast.
+    expect(posted).toEqual([
+      { kind: 'reaction', add: true, reaction: 'like', castHash: TARGET.hash },
+    ]);
+    expect(response.status).toBe(200);
+    // Nothing was signed by this device — the granted key did it.
+    expect(fake.submitted).toEqual([]);
+  });
+
+  it('keeps the old sentence, and signs nothing, when the person says not now', async () => {
+    const asked: WriteApprovalRequest[] = [];
+    const fake = writerWithApproval({
+      ask: async (request) => {
+        asked.push(request);
+        return null;
+      },
+    });
+
+    const response = await pressLike(fake.handle);
+
+    expect(asked.length).toBe(1);
+    expect(response.status).toBe(501);
+    expect(await messageOf(response)).toBe(NO_APP_KEY);
+    expect(fake.submitted).toEqual([]);
+    // The request log says what happened, so a probe can read it.
+    expect(fake.handle.log.at(-1)).toMatchObject({
+      kind: 'write',
+      status: 501,
+      write: { accepted: false, landed: null, refusal: NO_APP_KEY },
+    });
+  });
+
+  it('asks once: an approval that did not really happen cannot loop the screen', async () => {
+    const asked: WriteApprovalRequest[] = [];
+    const fake = writerWithApproval({
+      // An approval that leaves no key anywhere: the retry finds nothing.
+      ask: async (request) => {
+        asked.push(request);
+        return request.carry();
+      },
+    });
+
+    const response = await pressLike(fake.handle);
+
+    expect(asked.length).toBe(1);
+    expect(response.status).toBe(501);
+    expect(await messageOf(response)).toBe(NO_APP_KEY);
+    expect(fake.submitted).toEqual([]);
+  });
+
+  it('is unchanged with nobody to ask, and with an asker that cannot be reached', async () => {
+    const silent = writerWithApproval({ ask: undefined });
+    const refused = await pressLike(silent.handle);
+    expect(refused.status).toBe(501);
+    expect(await messageOf(refused)).toBe(NO_APP_KEY);
+    expect(silent.submitted).toEqual([]);
+
+    const broken = writerWithApproval({
+      ask: async () => {
+        throw new Error('no storage method found');
+      },
+    });
+    const answered = await pressLike(broken.handle);
+    expect(answered.status).toBe(501);
+    expect(await messageOf(answered)).toContain('could not build');
+    expect(broken.submitted).toEqual([]);
   });
 });

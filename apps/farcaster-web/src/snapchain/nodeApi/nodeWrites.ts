@@ -266,6 +266,52 @@ export interface ManagedPoster {
   >;
 }
 
+/**
+ * What a write is, in the words a person would use for it. The writer derives
+ * it from the intent it already classified, so the screen that asks for a key
+ * can say what the person was doing ("your like") without knowing the protocol
+ * — and `change` is the honest name for undoing something.
+ */
+export type WriteApprovalLabel =
+  | 'like'
+  | 'recast'
+  | 'follow'
+  | 'post'
+  | 'change';
+
+/**
+ * The third way a write with no key can be answered: ask the person to approve
+ * a posting key *where they are*, and — if they do — carry the very same write.
+ *
+ * Defined here, as a shape, for the same reason `ManagedWrite` is: this module
+ * depends on nothing but what it needs, and the implementation
+ * (`~/snapchain/accounts/postingKeyApproval`, which puts the approval screen up)
+ * satisfies it structurally. A test can therefore pass three lines of fake and
+ * assert the writer's half without a browser or a service.
+ */
+export interface WriteApprovalRequest {
+  /** The signed-in account the write belongs to. */
+  fid: number;
+  /** What the person was doing, for the sentence that asks them. */
+  label: WriteApprovalLabel;
+  /**
+   * Carry the write that has been waiting. Called *only* after the approval
+   * really happened; its answer is the answer the original request gets, so a
+   * like that is approved here reports what a like reports when a key was
+   * already present — including a refusal, if the node refuses it.
+   */
+  carry: () => Promise<Response>;
+}
+
+/**
+ * The asker. `null` means the person did not approve (they said not now, the
+ * screen went away, or they took longer than the asker was willing to wait), and
+ * the write keeps the sentence it has always had.
+ */
+export type WriteApproval = (
+  request: WriteApprovalRequest,
+) => Promise<Response | null>;
+
 export interface NodeBackedWritesOptions {
   /** The node that will carry the message — the live provider's own address. */
   nodeBaseUrl: string;
@@ -308,6 +354,20 @@ export interface NodeBackedWritesOptions {
    * Advanced") would be about a step they do not need.
    */
   managedPoster?: ManagedPoster;
+  /**
+   * Asked when a write arrives with no key to sign it — and only then.
+   *
+   * With this wired, a reader who presses the heart before they have ever
+   * approved a posting key is not sent to Advanced: the pending write is handed
+   * to this asker, which puts one friendly approval screen in front of them
+   * (`~/components/session/SignerApprovalGate`) and answers with the carried
+   * write. A null answer, or no asker at all, leaves the refusal exactly as it
+   * was — see `withoutAKey`.
+   *
+   * Asked **once** per write: the carried write is answered with `allowAsk:
+   * false`, so a retry that still has no key cannot loop back into the screen.
+   */
+  askForPostingKey?: WriteApproval | null;
 }
 
 /** Default deadline for one write, end to end (submit + read-back). */
@@ -355,6 +415,24 @@ export const UNKNOWN_CAST_AUTHOR =
   'A node addresses a cast by its author and its hash, and this client has not read who wrote this one. Open the cast from your feed or a profile first, then try again.';
 
 /**
+ * What the person was doing, in their own words — from the intent the writer
+ * already classified.
+ *
+ * A unit test pins this mapping, because it is the one thing the approval
+ * screen's sentence depends on: asking somebody to approve posting for a
+ * *like* when they pressed Follow would be a small lie in the wrong place.
+ */
+export const approvalLabelFor = (intent: WriteIntent): WriteApprovalLabel => {
+  if (intent.kind === 'cast') {
+    return 'post';
+  }
+  if (intent.kind === 'link') {
+    return intent.add ? 'follow' : 'change';
+  }
+  return intent.add ? intent.reaction : 'change';
+};
+
+/**
  * How a write carried by a *granted* posting key is named, in the evidence log
  * and in the sentences a person reads. It is named as what it is to them — the
  * thing they switched on — rather than as the endpoint it happens to be.
@@ -400,6 +478,32 @@ export class NodeBackedWrites {
     body: unknown;
     fid: number | undefined;
   }): Promise<Response> {
+    return this.answerWith({ method, path, body, fid }, true);
+  }
+
+  /**
+   * The write, and who may be asked about it.
+   *
+   * `allowAsk` is the loop breaker. The first attempt at a write may put the
+   * approval screen up; the attempt that runs *after* an approval may not. If
+   * that second attempt still finds no key — an approval that was not really
+   * there, a service that lost the connection — it is refused in the sentence
+   * it has always been refused in, rather than asking the same person again.
+   */
+  private async answerWith(
+    {
+      method,
+      path,
+      body,
+      fid,
+    }: {
+      method: string;
+      path: string;
+      body: unknown;
+      fid: number | undefined;
+    },
+    allowAsk: boolean,
+  ): Promise<Response> {
     const intent = writeIntentFor({ method, path, body });
     if (intent === null) {
       return errorResponse(
@@ -424,7 +528,7 @@ export class NodeBackedWrites {
 
     const appKeyHex = await this.appKeyFor(fid);
     if (appKeyHex === null || appKeyHex.length === 0) {
-      return errorResponse(501, NO_APP_KEY);
+      return this.withoutAKey({ intent, fid, method, path, body, allowAsk });
     }
     const signerPrivateKey = hexToBytes(appKeyHex);
 
@@ -440,6 +544,69 @@ export class NodeBackedWrites {
     } catch (error) {
       return this.failureResponse(intent, error);
     }
+  }
+
+  /**
+   * A write this device has no key for — the one place the reader is offered a
+   * way forward instead of a sentence about Advanced.
+   *
+   * MEASURED (2026-10-21, the live client, signed in, no pass): the composer
+   * reaches `POST /v2/casts` and the heart reaches `PUT /v2/cast-likes`; both
+   * were answered `501` with `NO_APP_KEY`, which names a screen two taps away
+   * from where the person is standing. So, when an asker is wired (it is, in the
+   * app — `~/snapchain/accounts/postingKeyApproval`), the pending write is
+   * handed over *whole*: the asker puts one approval screen up, and the same
+   * request is answered again once the person has approved it. The reader gets
+   * the like they pressed, and the caller gets the answer a like always gets.
+   *
+   * Everything else is unchanged, on purpose: with nobody to ask, an asker that
+   * cannot be reached, a person who says not now, or an approval that did not
+   * really happen, this answers exactly what it answered before — the same
+   * status, the same sentence, the same evidence entry, and nothing signed.
+   */
+  private async withoutAKey({
+    intent,
+    fid,
+    method,
+    path,
+    body,
+    allowAsk,
+  }: {
+    intent: WriteIntent;
+    fid: number;
+    method: string;
+    path: string;
+    body: unknown;
+    allowAsk: boolean;
+  }): Promise<Response> {
+    const ask = this.options.askForPostingKey;
+    if (allowAsk && ask !== undefined && ask !== null) {
+      let carried: Response | null;
+      try {
+        carried = await ask({
+          fid,
+          label: approvalLabelFor(intent),
+          // The same request, answered again — and this time it may not ask.
+          carry: () => this.answerWith({ method, path, body, fid }, false),
+        });
+      } catch (error) {
+        // The approval screen itself failed. That is a write that could not be
+        // carried, in the node's own words where there are any.
+        return this.failureResponse(intent, error);
+      }
+      if (carried !== null) {
+        return carried;
+      }
+    }
+
+    this.evidence({
+      node: this.nodeLabel,
+      nodeBaseUrl: this.nodeBaseUrl,
+      accepted: false,
+      landed: null,
+      refusal: NO_APP_KEY,
+    });
+    return errorResponse(501, NO_APP_KEY);
   }
 
   // ------------------------------------------------------------- the writes

@@ -61,6 +61,27 @@ type View =
 export interface ConnectSheetProps {
   /** Called when the sheet is done — the page closes it, a modal dismisses it. */
   onClose?: () => void;
+  /**
+   * Ask straight away, with no first screen: used when the person is already in
+   * the middle of something that needs the key (pressing the heart, sending a
+   * cast) and has just been told, in one sentence, why the screen is up. The
+   * same request, the same poll, the same sheet — one press fewer.
+   */
+  autoStart?: boolean;
+  /**
+   * The moment the service says the posting key exists. With this, the sheet
+   * never shows its own "Connected" screen and never signs anybody in: the
+   * caller is carrying out the write that was waiting
+   * (`~/snapchain/accounts/postingKeyApproval`), and says so itself.
+   */
+  onApproved?: (fid: number, username: string | null) => void;
+  /**
+   * What happens once the approval is given, as one sentence the caller wrote
+   * ("Your like goes out by itself — there is nothing to press when you come
+   * back."). Shown on the waiting screen only, and only when something really is
+   * waiting: this sheet never promises to finish a thing it was not told about.
+   */
+  completing?: string | null;
 }
 
 const statusToView = (status: ConnectStatus): View => {
@@ -76,150 +97,162 @@ const statusToView = (status: ConnectStatus): View => {
   return { name: 'idle' };
 };
 
-export const ConnectSheet = memo<ConnectSheetProps>(({ onClose }) => {
-  const { authToken, signIn } = useAuth();
-  const [view, setView] = useState<View>({ name: 'idle' });
-  const [slow, setSlow] = useState(false);
-  const [working, setWorking] = useState(false);
+export const ConnectSheet = memo<ConnectSheetProps>(
+  ({ onClose, autoStart = false, onApproved, completing = null }) => {
+    const { authToken, signIn } = useAuth();
+    const [view, setView] = useState<View>({ name: 'idle' });
+    const [slow, setSlow] = useState(false);
+    const [working, setWorking] = useState(false);
 
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+    const mounted = useRef(true);
+    useEffect(() => {
+      mounted.current = true;
+      return () => {
+        mounted.current = false;
+      };
+    }, []);
 
-  /**
-   * What is already true, asked once when the sheet opens: somebody who approved
-   * a minute ago and navigated back must not be shown the first screen again.
-   * A service we cannot reach leaves the first screen up (the button retries and
-   * says what happened); it never becomes a scary screen of its own.
-   */
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        const status = await connectStatus();
+    /**
+     * What the sheet does with an answer from the service.
+     *
+     * One place, so the first read, the button and the poll cannot disagree:
+     * `connected` either goes to the caller (when something is waiting on it) or
+     * to this sheet's own Connected screen (when a person is connecting an
+     * account they want to keep).
+     */
+    const apply = useCallback(
+      (status: ConnectStatus): void => {
         rememberConnectStatus(status);
-        if (live && mounted.current) {
-          setView(statusToView(status));
-        }
-      } catch {
-        // Stay on the first screen; pressing the button asks again and reports.
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  /** While a link is waiting, watch for the approval — nobody presses twice. */
-  const waitingUrl = view.name === 'waiting' ? view.approvalUrl : null;
-  useEffect(() => {
-    if (waitingUrl === null) {
-      return undefined;
-    }
-    let live = true;
-    const startedAt = Date.now();
-    let timer: ReturnType<typeof setTimeout>;
-
-    const ask = async () => {
-      try {
-        const status = await connectStatus();
-        rememberConnectStatus(status);
-        if (!live || !mounted.current) {
+        if (!mounted.current) {
           return;
         }
         const next = statusToView(status);
-        if (next.name !== 'waiting') {
-          setView(next);
+        if (next.name === 'connected' && onApproved !== undefined) {
+          onApproved(next.fid, next.username);
           return;
         }
-      } catch {
-        // A blip is not news: keep the screen as it is and ask again.
-      }
-      if (!live || !mounted.current) {
-        return;
-      }
-      const elapsed = Date.now() - startedAt;
-      if (elapsed > SLOW_HINT_AFTER_MS) {
-        setSlow(true);
-      }
-      timer = setTimeout(
-        ask,
-        elapsed > SLOW_HINT_AFTER_MS ? SLOW_POLL_MS : POLL_MS,
-      );
-    };
+        setView(next);
+      },
+      [onApproved],
+    );
 
-    timer = setTimeout(ask, POLL_MS);
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [waitingUrl]);
-
-  const begin = useCallback(async () => {
-    setWorking(true);
-    setSlow(false);
-    try {
-      const { status } = await startConnect();
-      rememberConnectStatus(status);
-      if (!mounted.current) {
-        return;
-      }
-      setView(statusToView(status));
-    } catch (error) {
-      if (!mounted.current) {
-        return;
-      }
-      setView({ name: 'problem', message: (error as Error).message });
-    } finally {
-      if (mounted.current) {
-        setWorking(false);
-      }
-    }
-  }, []);
-
-  const turnOff = useCallback(async () => {
-    setWorking(true);
-    try {
-      const status = await stopConnect();
-      rememberConnectStatus(status);
-      if (mounted.current) {
-        setView({ name: 'stopped' });
-      }
-    } catch (error) {
-      if (mounted.current) {
+    const begin = useCallback(async () => {
+      setWorking(true);
+      setSlow(false);
+      try {
+        const { status } = await startConnect();
+        apply(status);
+      } catch (error) {
+        if (!mounted.current) {
+          return;
+        }
         setView({ name: 'problem', message: (error as Error).message });
+      } finally {
+        if (mounted.current) {
+          setWorking(false);
+        }
       }
-    } finally {
-      if (mounted.current) {
-        setWorking(false);
-      }
-    }
-  }, []);
+    }, [apply]);
 
-  /**
-   * Sign in as the account that just approved Fiddy, using the same
-   * device-only session the Farcaster sign-in produces — this person has just
-   * proven, in their own Farcaster app, that the account is theirs.
-   */
-  const continueAs = useCallback(
-    async (fid: number, username: string | null) => {
+    /**
+     * What is already true, asked once when the sheet opens: somebody who
+     * approved a minute ago and navigated back must not be shown the first
+     * screen again. A service we cannot reach leaves the first screen up (the
+     * button retries and says what happened); it never becomes a scary screen of
+     * its own.
+     *
+     * With `autoStart` — the person pressed Cast, or the heart, and the approval
+     * is what they are being asked for — there is nothing to wait for: a
+     * service that has no request yet gets one, and a request that is already
+     * waiting is shown as the link it is.
+     */
+    useEffect(() => {
+      let live = true;
+      void (async () => {
+        try {
+          const status = await connectStatus();
+          if (!live || !mounted.current) {
+            return;
+          }
+          if (status.state === 'none' && autoStart) {
+            await begin();
+            return;
+          }
+          apply(status);
+        } catch {
+          // Stay on the first screen; pressing the button asks again and
+          // reports. With nothing to press (autoStart), the same call is tried
+          // once more so the person is not left on an empty screen.
+          if (autoStart && live && mounted.current) {
+            await begin();
+          }
+        }
+      })();
+      return () => {
+        live = false;
+      };
+      // `begin` and `apply` are stable for the life of the sheet unless the
+      // caller changes its own handler; the read is meant to happen once.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    /** While a link is waiting, watch for the approval — nobody presses twice. */
+    const waitingUrl = view.name === 'waiting' ? view.approvalUrl : null;
+    useEffect(() => {
+      if (waitingUrl === null) {
+        return undefined;
+      }
+      let live = true;
+      const startedAt = Date.now();
+      let timer: ReturnType<typeof setTimeout>;
+
+      const ask = async () => {
+        try {
+          const status = await connectStatus();
+          rememberConnectStatus(status);
+          if (!live || !mounted.current) {
+            return;
+          }
+          const next = statusToView(status);
+          if (next.name !== 'waiting') {
+            if (next.name === 'connected' && onApproved !== undefined) {
+              onApproved(next.fid, next.username);
+              return;
+            }
+            setView(next);
+            return;
+          }
+        } catch {
+          // A blip is not news: keep the screen as it is and ask again.
+        }
+        if (!live || !mounted.current) {
+          return;
+        }
+        const elapsed = Date.now() - startedAt;
+        if (elapsed > SLOW_HINT_AFTER_MS) {
+          setSlow(true);
+        }
+        timer = setTimeout(
+          ask,
+          elapsed > SLOW_HINT_AFTER_MS ? SLOW_POLL_MS : POLL_MS,
+        );
+      };
+
+      timer = setTimeout(ask, POLL_MS);
+      return () => {
+        live = false;
+        clearTimeout(timer);
+      };
+    }, [waitingUrl, onApproved]);
+
+    const turnOff = useCallback(async () => {
       setWorking(true);
       try {
-        const token = buildLocalAuthToken({ fid });
-        const onboardingState = buildLocalOnboardingState({
-          fid,
-          ...(username === null ? {} : { username }),
-        });
-        await setItem({
-          key: await getOnboardingStateKey(token.secret),
-          value: onboardingState,
-        });
-        await signIn({ authToken: token });
-        window.location.replace(routes.homeFeed.path);
+        const status = await stopConnect();
+        rememberConnectStatus(status);
+        if (mounted.current) {
+          setView({ name: 'stopped' });
+        }
       } catch (error) {
         if (mounted.current) {
           setView({ name: 'problem', message: (error as Error).message });
@@ -229,147 +262,186 @@ export const ConnectSheet = memo<ConnectSheetProps>(({ onClose }) => {
           setWorking(false);
         }
       }
-    },
-    [signIn],
-  );
+    }, []);
 
-  if (view.name === 'starting') {
-    return (
-      <FiddySheet
-        name="connect-starting"
-        title="Setting it up…"
-        sub="One moment while we ask Farcaster for a posting key for you."
-        egg="small"
-      />
+    /**
+     * Sign in as the account that just approved Fiddy, using the same
+     * device-only session the Farcaster sign-in produces — this person has just
+     * proven, in their own Farcaster app, that the account is theirs.
+     */
+    const continueAs = useCallback(
+      async (fid: number, username: string | null) => {
+        setWorking(true);
+        try {
+          const token = buildLocalAuthToken({ fid });
+          const onboardingState = buildLocalOnboardingState({
+            fid,
+            ...(username === null ? {} : { username }),
+          });
+          await setItem({
+            key: await getOnboardingStateKey(token.secret),
+            value: onboardingState,
+          });
+          await signIn({ authToken: token });
+          window.location.replace(routes.homeFeed.path);
+        } catch (error) {
+          if (mounted.current) {
+            setView({ name: 'problem', message: (error as Error).message });
+          }
+        } finally {
+          if (mounted.current) {
+            setWorking(false);
+          }
+        }
+      },
+      [signIn],
     );
-  }
 
-  if (view.name === 'waiting') {
+    if (view.name === 'starting') {
+      return (
+        <FiddySheet
+          name="connect-starting"
+          title="Setting it up…"
+          sub={
+            completing === null || completing.length === 0
+              ? 'One moment while we ask Farcaster for a posting key for you.'
+              : 'One moment while we ask Farcaster for a posting key for you. Then it goes out by itself.'
+          }
+          egg="small"
+        />
+      );
+    }
+
+    if (view.name === 'waiting') {
+      return (
+        <FiddySheet
+          name="connect-waiting"
+          title="One tap in Farcaster to finish"
+          sub={
+            completing === null || completing.length === 0
+              ? 'Open this in the Farcaster app on your phone and approve Fiddy. This screen notices by itself — you can leave it open.'
+              : `Open this in the Farcaster app on your phone and approve Fiddy. ${completing}`
+          }
+          primary={{
+            label: 'Open Farcaster',
+            onClick: () => window.open(view.approvalUrl, '_blank', 'noopener'),
+          }}
+          quiet={{ label: 'Not now', onClick: () => onClose?.() }}
+          note={
+            slow
+              ? 'Still waiting. If nothing happened on your phone, open the link again from this screen.'
+              : 'The link below is the request; approving it costs you nothing.'
+          }
+        >
+          <div className="fiddy-connect-qr" data-fiddy="connect-qr">
+            <QRCode
+              bgColor="#161715"
+              ecLevel="M"
+              eyeRadius={0}
+              fgColor="#eef0e8"
+              size={196}
+              value={view.approvalUrl}
+            />
+          </div>
+          <a
+            className="fiddy-connect-link"
+            data-fiddy="connect-approval-link"
+            href={view.approvalUrl}
+            rel="noreferrer noopener"
+            target="_blank"
+          >
+            Open the approval page in Farcaster
+          </a>
+        </FiddySheet>
+      );
+    }
+
+    if (view.name === 'connected') {
+      const handle = view.username === null ? null : `@${view.username}`;
+      return (
+        <FiddySheet
+          name="connect-connected"
+          title={handle === null ? 'Connected' : `Connected as ${handle}`}
+          sub="Fiddy can post for you — turn it off anytime."
+          egg="small"
+          primary={
+            authToken === undefined
+              ? {
+                  label: 'Continue',
+                  onClick: () => void continueAs(view.fid, view.username),
+                  disabled: working,
+                }
+              : { label: 'Done', onClick: () => onClose?.() }
+          }
+          quiet={{
+            label: 'Turn it off',
+            onClick: () => void turnOff(),
+            disabled: working,
+          }}
+          note="Your account stays yours: Fiddy holds a posting key you granted, and you can take it back here or in your Farcaster app's settings."
+        >
+          <p className="fiddy-connect-body" data-fiddy="connect-promise">
+            You will not be asked for a passphrase, and you were not charged
+            anything.
+          </p>
+        </FiddySheet>
+      );
+    }
+
+    if (view.name === 'stopped') {
+      return (
+        <FiddySheet
+          name="connect-stopped"
+          title="Fiddy's access is off"
+          sub="Your posting key is gone. Fiddy cannot post for you until you connect again."
+          egg="small"
+          primary={{
+            label: 'Connect again',
+            onClick: () => void begin(),
+            disabled: working,
+          }}
+          quiet={{ label: 'Done', onClick: () => onClose?.() }}
+        />
+      );
+    }
+
+    if (view.name === 'problem') {
+      return (
+        <FiddySheet
+          name="connect-problem"
+          title="That did not go through"
+          sub={view.message}
+          egg="small"
+          primary={{
+            label: 'Try again',
+            onClick: () => void begin(),
+            disabled: working,
+          }}
+          quiet={{ label: 'Close', onClick: () => onClose?.() }}
+          note="Nothing changed in your account. You can keep reading Farcaster here, and post in your Farcaster app as usual."
+        />
+      );
+    }
+
     return (
       <FiddySheet
-        name="connect-waiting"
-        title="One tap in Farcaster to finish"
-        sub="Open this in the Farcaster app on your phone and approve Fiddy. This screen notices by itself — you can leave it open."
-        egg="small"
+        name="connect-idle"
+        title="Connect your Farcaster account"
+        sub="Let Fiddy post for you — your posts, your replies, your likes — without a fee and without a passphrase."
+        egg="hero"
         primary={{
-          label: 'Open Farcaster',
-          onClick: () => window.open(view.approvalUrl, '_blank', 'noopener'),
+          label: 'Connect',
+          onClick: () => void begin(),
+          disabled: working,
         }}
         quiet={{ label: 'Not now', onClick: () => onClose?.() }}
         note={
-          slow
-            ? 'Still waiting. If nothing happened on your phone, open the link again from this screen.'
-            : 'The link below is the request; approving it costs you nothing.'
+          view.notice ??
+          'Fiddy asks your Farcaster app for a posting key. Your account, its key and its recovery phrase stay where they are.'
         }
-      >
-        <div className="fiddy-connect-qr" data-fiddy="connect-qr">
-          <QRCode
-            bgColor="#161715"
-            ecLevel="M"
-            eyeRadius={0}
-            fgColor="#eef0e8"
-            size={196}
-            value={view.approvalUrl}
-          />
-        </div>
-        <a
-          className="fiddy-connect-link"
-          data-fiddy="connect-approval-link"
-          href={view.approvalUrl}
-          rel="noreferrer noopener"
-          target="_blank"
-        >
-          Open the approval page in Farcaster
-        </a>
-      </FiddySheet>
-    );
-  }
-
-  if (view.name === 'connected') {
-    const handle = view.username === null ? null : `@${view.username}`;
-    return (
-      <FiddySheet
-        name="connect-connected"
-        title={handle === null ? 'Connected' : `Connected as ${handle}`}
-        sub="Fiddy can post for you — turn it off anytime."
-        egg="small"
-        primary={
-          authToken === undefined
-            ? {
-                label: 'Continue',
-                onClick: () => void continueAs(view.fid, view.username),
-                disabled: working,
-              }
-            : { label: 'Done', onClick: () => onClose?.() }
-        }
-        quiet={{
-          label: 'Turn it off',
-          onClick: () => void turnOff(),
-          disabled: working,
-        }}
-        note="Your account stays yours: Fiddy holds a posting key you granted, and you can take it back here or in your Farcaster app's settings."
-      >
-        <p className="fiddy-connect-body" data-fiddy="connect-promise">
-          You will not be asked for a passphrase, and you were not charged
-          anything.
-        </p>
-      </FiddySheet>
-    );
-  }
-
-  if (view.name === 'stopped') {
-    return (
-      <FiddySheet
-        name="connect-stopped"
-        title="Fiddy's access is off"
-        sub="Your posting key is gone. Fiddy cannot post for you until you connect again."
-        egg="small"
-        primary={{
-          label: 'Connect again',
-          onClick: () => void begin(),
-          disabled: working,
-        }}
-        quiet={{ label: 'Done', onClick: () => onClose?.() }}
       />
     );
-  }
-
-  if (view.name === 'problem') {
-    return (
-      <FiddySheet
-        name="connect-problem"
-        title="That did not go through"
-        sub={view.message}
-        egg="small"
-        primary={{
-          label: 'Try again',
-          onClick: () => void begin(),
-          disabled: working,
-        }}
-        quiet={{ label: 'Close', onClick: () => onClose?.() }}
-        note="Nothing changed in your account. You can keep reading Farcaster here, and post in your Farcaster app as usual."
-      />
-    );
-  }
-
-  return (
-    <FiddySheet
-      name="connect-idle"
-      title="Connect your Farcaster account"
-      sub="Let Fiddy post for you — your posts, your replies, your likes — without a fee and without a passphrase."
-      egg="hero"
-      primary={{
-        label: 'Connect',
-        onClick: () => void begin(),
-        disabled: working,
-      }}
-      quiet={{ label: 'Not now', onClick: () => onClose?.() }}
-      note={
-        view.notice ??
-        'Fiddy asks your Farcaster app for a posting key. Your account, its key and its recovery phrase stay where they are.'
-      }
-    />
-  );
-});
+  },
+);
 
 ConnectSheet.displayName = 'ConnectSheet';

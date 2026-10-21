@@ -12,7 +12,10 @@
  *
  * Provides:
  * - Node status (health check, version, shards)
- * - App key management (issue/revoke gasless keys)
+ * - Letting Fiddy post for you: one tap in the reader's own Farcaster app
+ *   (`PostingKeyCard` — no fee, no passphrase), which is the primary flow
+ * - App key management (issue/revoke gasless keys), behind a collapsed
+ *   disclosure because issuing one asks for the account's recovery phrase
  * - Cast composer using your own node
  * - Feed from your own node
  * - Client include/exclude filter
@@ -83,6 +86,7 @@ import { NodeChoiceCard } from './Component/NodeChoiceCard';
 import { NodeComposer } from './Component/NodeComposer';
 import { NodeFeed } from './Component/NodeFeed';
 import { NodeStatusCard } from './Component/NodeStatusCard';
+import { PostingKeyCard } from './Component/PostingKeyCard';
 import { ProviderListCard } from './Component/ProviderListCard';
 import { SeedPhraseWarningModal } from './Component/SeedPhraseWarningModal';
 
@@ -118,6 +122,12 @@ const SettingsNodePage = memo(() => {
 
   // App key state
   const [appKey, setAppKey] = useState<AppKey | null>(null);
+  /**
+   * The recovery-phrase path is collapsed by default — `open` is the reader's
+   * own toggle, OR a live key: a key that exists must not be hidden, because
+   * that is where it is revoked from.
+   */
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [signerState, setSignerState] = useState<{
     hasKey: boolean;
     gaslessSignerCount: number;
@@ -127,6 +137,8 @@ const SettingsNodePage = memo(() => {
   } | null>(null);
   const [issueLoading, setIssueLoading] = useState(false);
   const [issueStep, setIssueStep] = useState<IssueAppKeyStep | null>(null);
+  /** Is there a key on this device, or one the node is holding for it? */
+  const appKeyLive = appKey !== null || signerState?.signer !== undefined;
 
   // Seed phrase modal state
   const [showSeedPhraseModal, setShowSeedPhraseModal] = useState(false);
@@ -682,19 +694,50 @@ const SettingsNodePage = memo(() => {
               onRefresh={refreshHealth}
             />
 
-            {/* App Key Card */}
-            <AppKeyCard
-              signer={signerState?.signer}
-              publicKeyHex={appKey?.publicKeyHex}
-              gaslessSignerCount={signerState?.gaslessSignerCount ?? 0}
-              gaslessSignerLimit={signerState?.gaslessSignerLimit ?? 1000}
-              currentUserNonce={signerState?.currentUserNonce ?? 0}
-              loading={issueLoading}
-              issueStep={issueStep}
-              error={postError}
-              onIssue={() => setShowSeedPhraseModal(true)}
-              onRevoke={handleRevokeKey}
-            />
+            {/* Posting key: the primary way to let Fiddy post for you — one
+                tap in the reader's own Farcaster app, no fee and no passphrase.
+                Everything below it is the slower, developer-shaped path. */}
+            <PostingKeyCard fid={fid ?? undefined} />
+
+            {/* App key: this device's own key, which is minted by signing the
+                approval with the account's own recovery phrase. That is why it
+                lives behind a collapsed disclosure that says so out loud: a
+                normal reader never has to see a phrase prompt, and a developer
+                (or a test account) can still find the old flow where it was. */}
+            <details
+              className="rounded-lg border p-3 border-default"
+              data-fiddy="advanced-app-key"
+              open={advancedOpen || appKeyLive}
+              onToggle={(event) =>
+                setAdvancedOpen(
+                  (event.currentTarget as HTMLDetailsElement).open,
+                )
+              }
+            >
+              <summary className="cursor-pointer text-sm text-muted">
+                {appKeyLive
+                  ? 'Advanced: this device’s own app key (test-account recovery phrase)'
+                  : 'Advanced: test account recovery phrase (developers only)'}
+              </summary>
+              <p className="mb-3 mt-2 text-xs text-muted">
+                This path asks for your account’s recovery phrase, signs one
+                approval with it in this browser tab, and keeps the key it makes
+                on this device. Use a test account. If you only want Fiddy to
+                post for you, use the card above instead — it needs neither.
+              </p>
+              <AppKeyCard
+                signer={signerState?.signer}
+                publicKeyHex={appKey?.publicKeyHex}
+                gaslessSignerCount={signerState?.gaslessSignerCount ?? 0}
+                gaslessSignerLimit={signerState?.gaslessSignerLimit ?? 1000}
+                currentUserNonce={signerState?.currentUserNonce ?? 0}
+                loading={issueLoading}
+                issueStep={issueStep}
+                error={postError}
+                onIssue={() => setShowSeedPhraseModal(true)}
+                onRevoke={handleRevokeKey}
+              />
+            </details>
 
             {/* Composer */}
             <NodeComposer

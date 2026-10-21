@@ -20,6 +20,7 @@ import React, {
 import { baseApiUrl, localApiEnabled, wsUrl } from '~/constants/api';
 import { isDev } from '~/constants/env';
 import { useRecentFetch } from '~/contexts/RecentFetchProvider';
+import { askForPostingKey } from '~/snapchain/accounts/postingKeyApproval';
 import { isNodeBackedClientEnabled } from '~/snapchain/nodeApi';
 import { resolveEffectiveNodeBaseUrl } from '~/snapchain/nodeChoice';
 import {
@@ -109,6 +110,11 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         // passes its status check and fails every read still has to lose its
         // place.
         onRead: (providerId, ok) => noteProviderReadResult({ providerId, ok }),
+        // A write with no key to sign it is not refused at the person: the
+        // approval screen goes up where they are, and the very same write is
+        // carried once they approve it (`postingKeyApproval` is the store that
+        // screen and this seam share).
+        askForPostingKey,
       }).fetch;
       // The address the build was configured with is the only input that can
       // change under a running tab and needs the adapter rebuilt; the live

@@ -50,6 +50,7 @@ import { mediaUploadUrl } from './mediaUpload';
 import {
   type ManagedPoster,
   NodeBackedWrites,
+  type WriteApproval,
   type WriteEvidence,
 } from './nodeWrites';
 import {
@@ -113,6 +114,14 @@ export interface NodeBackedFetchOptions {
    * test can drive a granted-key write without a network.
    */
   managedPoster?: ManagedPoster | null;
+  /**
+   * Asked when a write arrives with no key to sign it, so the reader can approve
+   * a posting key where they are instead of being sent to Advanced
+   * (`~/snapchain/accounts/postingKeyApproval` is the app's own). Defaults to
+   * none, so a test or a probe that must see the bare refusal can leave it out;
+   * `null` says the same thing out loud.
+   */
+  askForPostingKey?: WriteApproval | null;
   /**
    * The server's plain name, used by the sentences a write's failures are
    * phrased in ("your node would not accept this like: …").
@@ -434,6 +443,7 @@ export const createNodeBackedFetch = ({
   drafts: draftsOption,
   getAppKeyHex: getAppKeyHexOption,
   managedPoster: managedPosterOption,
+  askForPostingKey: askForPostingKeyOption,
   nodeLabel = 'your node',
   onWriteEvidence,
   log: logOption,
@@ -534,6 +544,10 @@ export const createNodeBackedFetch = ({
         : {
             managedPoster: managedPosterOption ?? grantedPosterFromThisDevice,
           }),
+      ...(askForPostingKeyOption === null ||
+      askForPostingKeyOption === undefined
+        ? {}
+        : { askForPostingKey: askForPostingKeyOption }),
       castAuthor: castAuthorOf,
       channelParentUrl: channelParentUrlFor,
       apiCastFor: (message) => reader.apiCastFor(message),
