@@ -20,6 +20,8 @@
  *   POST   /api/agents/instances/:id/integrations   begin a channel connection
  *   GET    /api/fiddy/hatch-quote                   price certificate (opt-in)
  *   GET    /api/hermes/catalog                      the live Hermes catalog
+ *   POST   /api/agents/brains/probe                 read-only model list of an AI service
+ *   PUT    /api/agents/instances/:id/brain          point an agent at a different AI service
  *
  * The hatch-quote route is not deployed on every control plane. A 404 there is
  * a normal answer ("hatching is not open on this service"), not a crash, and
@@ -244,7 +246,7 @@ const parseError = async (response: Response): Promise<AgentServiceError> => {
 };
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
   /** Public endpoints (the Hermes catalog) need no token. */
   anonymous?: boolean;
@@ -528,5 +530,94 @@ export const fetchHermesCatalog = async (
     skills: Number(payload.counts?.skills ?? 0) || 0,
     plugins: Number(payload.counts?.plugins ?? 0) || 0,
     examples,
+  };
+};
+
+/**
+ * Which AI service an agent thinks with — described the way the service wants it,
+ * and never stored here.
+ *
+ * `key` is the owner's own credential for their own AI service. It is passed
+ * straight through to the agent service, which is the only party that talks to
+ * the workspace it belongs on: this client does not keep it, does not put it in
+ * the setup file, and does not put it on any agent of its own. The choice of
+ * brain (which service, which model, which address) is what this client keeps.
+ */
+export interface BrainChoice {
+  kind: 'default' | 'preset' | 'custom';
+  /** Preset id for `preset`; the service picks the address itself. */
+  presetId?: string | null;
+  /** The owner's own address for `custom`. */
+  baseUrl?: string | null;
+  model?: string | null;
+  /** The owner's key for their service, for this call only. */
+  key?: string | null;
+}
+
+export interface BrainProbe {
+  ok: boolean;
+  /** Plain machine status; the surface turns it into plain words. */
+  status: string;
+  code: string;
+  /** Model ids the service listed, when it lists them. */
+  models: string[];
+}
+
+/**
+ * Ask the agent service to check an AI service, read-only.
+ *
+ * It runs on the service rather than in this browser for a measurable reason:
+ * the big providers answer a page's cross-origin request with no CORS headers at
+ * all, so a browser-side check would fail for everyone and blame the owner's
+ * perfectly good key. Anonymous, because the screen that asks for it (choosing a
+ * brain on the way in) happens before anyone has paired.
+ */
+export const probeBrain = async (
+  session: AgentServiceSession | null,
+  choice: BrainChoice,
+  fetchImpl?: typeof fetch,
+): Promise<BrainProbe> => {
+  const payload = await request<{
+    ok?: unknown;
+    status?: unknown;
+    code?: unknown;
+    models?: unknown;
+  }>(session, '/api/agents/brains/probe', {
+    method: 'POST',
+    body: choice,
+    anonymous: true,
+    fetchImpl,
+  });
+  return {
+    ok: payload.ok === true,
+    status: typeof payload.status === 'string' ? payload.status : 'unknown',
+    code: typeof payload.code === 'string' ? payload.code : 'BRAIN_UNKNOWN',
+    models: (Array.isArray(payload.models) ? payload.models : []).flatMap(
+      (model): string[] => (typeof model === 'string' && model ? [model] : []),
+    ),
+  };
+};
+
+/** Point this agent at the AI service the owner chose. Owner's agent only. */
+export const applyBrain = async (
+  session: AgentServiceSession,
+  agentId: string,
+  choice: BrainChoice,
+  fetchImpl?: typeof fetch,
+): Promise<{ changed: boolean; readback: Record<string, unknown> | null }> => {
+  const payload = await request<{
+    ok?: unknown;
+    readback?: unknown;
+  }>(session, `/api/agents/instances/${encodeURIComponent(agentId)}/brain`, {
+    method: 'PUT',
+    body: { brain: choice },
+    fetchImpl,
+  });
+  return {
+    changed: payload.ok === true,
+    readback:
+      payload.readback && typeof payload.readback === 'object'
+        ? (payload.readback as Record<string, unknown>)
+        : null,
   };
 };

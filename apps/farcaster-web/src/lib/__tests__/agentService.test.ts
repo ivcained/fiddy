@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AgentServiceError,
   type AgentServiceSession,
+  applyBrain,
   chatWithAgent,
   connectChannel,
   fetchHatchQuote,
@@ -13,6 +14,7 @@ import {
   listAgents,
   listChannels,
   normaliseServiceUrl,
+  probeBrain,
 } from '~/lib/agentService';
 
 const session: AgentServiceSession = {
@@ -272,5 +274,118 @@ describe('fetchHermesCatalog', () => {
       { headers: Record<string, string> },
     ];
     expect(init.headers.authorization).toBeUndefined();
+  });
+});
+
+describe('probeBrain', () => {
+  it('sends the choice to the service and carries no token when nobody is paired', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        ok: true,
+        status: 'ok',
+        code: 'BRAIN_OK',
+        models: ['gpt-one', 'gpt-two', 42],
+      }),
+    );
+
+    const probe = await probeBrain(
+      null,
+      {
+        kind: 'custom',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'gpt-one',
+        key: 'sk-0123456789abcdef',
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    expect(probe).toEqual({
+      ok: true,
+      status: 'ok',
+      code: 'BRAIN_OK',
+      models: ['gpt-one', 'gpt-two'],
+    });
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      { method: string; headers: Record<string, string>; body: string },
+    ];
+    // Signed out, the check goes to the default service with no credential of
+    // ours attached: the owner's key is the only one in the request.
+    expect(url).toBe('https://mate.legitclub.com/api/agents/brains/probe');
+    expect(init.method).toBe('POST');
+    expect(Object.keys(init.headers).sort()).toEqual([
+      'accept',
+      'content-type',
+    ]);
+    expect(JSON.parse(init.body)).toMatchObject({
+      kind: 'custom',
+      baseUrl: 'https://api.example.com/v1',
+      model: 'gpt-one',
+      key: 'sk-0123456789abcdef',
+    });
+  });
+
+  it('reports a refusal as a code the surface can put into words', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        ok: false,
+        status: 'key_refused',
+        code: 'BRAIN_KEY_REFUSED',
+        models: [],
+      }),
+    );
+    const probe = await probeBrain(
+      session,
+      { kind: 'preset', presetId: 'openai', model: 'gpt-one', key: 'sk-wrong' },
+      fetchImpl as unknown as typeof fetch,
+    );
+    expect(probe).toMatchObject({
+      ok: false,
+      status: 'key_refused',
+      code: 'BRAIN_KEY_REFUSED',
+    });
+  });
+});
+
+describe('applyBrain', () => {
+  it("changes the brain on the owner's own agent and reads nothing else back", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        ok: true,
+        readback: { provider: 'custom:brain', model: 'my-model' },
+      }),
+    );
+
+    const result = await applyBrain(
+      session,
+      'ab12cd34ef',
+      {
+        kind: 'custom',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'my-model',
+        key: 'sk-0123456789abcdef',
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.readback).toMatchObject({ model: 'my-model' });
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      { method: string; headers: Record<string, string>; body: string },
+    ];
+    expect(url).toBe(
+      'https://agents.example.com/api/agents/instances/ab12cd34ef/brain',
+    );
+    expect(init.method).toBe('PUT');
+    expect(init.headers.authorization).toBe('Bearer session-token-1234');
+    expect(JSON.parse(init.body)).toEqual({
+      brain: {
+        kind: 'custom',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'my-model',
+        key: 'sk-0123456789abcdef',
+      },
+    });
   });
 });

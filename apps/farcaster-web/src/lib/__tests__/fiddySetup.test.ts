@@ -33,24 +33,26 @@ describe('fiddySetup', () => {
   it('keeps answers across a save and a reload', () => {
     saveFiddySetup({
       agentName: 'Sprout',
-      brain: 'other',
-      brainServiceUrl: 'https://agents.example.com',
+      brain: 'custom',
+      brainServiceUrl: 'https://api.example.com/v1',
+      brainModel: 'my-model',
       channels: { ...defaultFiddySetup().channels, telegram: true },
     });
 
     const setup = loadFiddySetup();
     expect(setup.agentName).toBe('Sprout');
-    expect(setup.brain).toBe('other');
-    expect(setup.brainServiceUrl).toBe('https://agents.example.com');
+    expect(setup.brain).toBe('custom');
+    expect(setup.brainServiceUrl).toBe('https://api.example.com/v1');
+    expect(setup.brainModel).toBe('my-model');
     expect(allowedChannelCount(setup)).toBe(2);
     expect(setup.channels.telegram).toBe(true);
   });
 
   it('merges a patch instead of replacing what was already answered', () => {
     saveFiddySetup({ agentName: 'Sprout' });
-    saveFiddySetup({ brain: 'gemini' });
+    saveFiddySetup({ brain: 'google' });
     expect(loadFiddySetup().agentName).toBe('Sprout');
-    expect(loadFiddySetup().brain).toBe('gemini');
+    expect(loadFiddySetup().brain).toBe('google');
   });
 
   it('falls back to defaults on garbage instead of throwing', () => {
@@ -76,14 +78,42 @@ describe('fiddySetup', () => {
     expect(setup.channels.email).toBe(false);
   });
 
-  it('never stores a credential: only an address survives a save', () => {
+  it('never stores a credential: only an address and a model name survive a save', () => {
     saveFiddySetup({
-      brain: 'other',
-      brainServiceUrl: 'https://agents.example.com',
+      brain: 'custom',
+      brainServiceUrl: 'https://api.example.com/v1',
+      brainModel: 'my-model',
+      // A key is not part of the setup, and passing one must not smuggle it in.
+      key: 'sk-owner-secret-9f3a1c',
     } as never);
     const raw = window.localStorage.getItem('fiddy.setup') ?? '';
-    expect(raw).toContain('https://agents.example.com');
+    expect(raw).toContain('https://api.example.com/v1');
+    expect(raw).toContain('my-model');
     expect(raw.toLowerCase()).not.toContain('token');
     expect(raw.toLowerCase()).not.toContain('key');
+    expect(raw).not.toContain('sk-owner-secret-9f3a1c');
+  });
+
+  it("carries an older build's answers forward instead of resetting them", () => {
+    // 'claude', 'gemini' and 'other' were the same choices under other names.
+    for (const [stored, expected] of [
+      ['claude', 'anthropic'],
+      ['gemini', 'google'],
+      ['other', 'custom'],
+    ] as const) {
+      window.localStorage.setItem(
+        'fiddy.setup',
+        JSON.stringify({ brain: stored }),
+      );
+      expect(loadFiddySetup().brain).toBe(expected);
+    }
+  });
+
+  it('refuses to put a model name back into a field when it does not look like one', () => {
+    window.localStorage.setItem(
+      'fiddy.setup',
+      JSON.stringify({ brain: 'custom', brainModel: 'model; rm -rf /' }),
+    );
+    expect(loadFiddySetup().brainModel).toBeNull();
   });
 });

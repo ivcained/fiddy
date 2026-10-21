@@ -1,21 +1,40 @@
 /**
  * The setup this browser holds for Fiddy: what your agent is called, which
- * brain it uses, and which apps you have let it touch.
+ * brain it uses (and which model of that brain), and which apps you have let it
+ * touch.
  *
  * Deliberately local. There is no Fiddy account to create and no server this is
  * sent to; it is a preference file, so someone can leave a step and come back
  * without re-answering. It is also the only reason the onboarding can offer
  * "skip for now" honestly.
  *
- * What must NOT live here: any provider key. The one credential this client can
- * hold — the session key for an agent service you run yourself — belongs to
+ * What must NOT live here: any AI service's key. The one credential this client
+ * can hold — the session key for an agent service you run yourself — belongs to
  * `~/lib/agentService` and is stored by that module alone. This file keeps the
- * service *address* and nothing else.
+ * service *address* and the *model name* and nothing else, so someone can leave
+ * the step and come back to it without their key being kept anywhere.
  */
 
 import { useEffect, useState } from 'react';
 
-export type BrainId = 'fiddy' | 'claude' | 'gemini' | 'other';
+export type BrainId =
+  | 'fiddy'
+  | 'openai'
+  | 'anthropic'
+  | 'google'
+  | 'openrouter'
+  | 'nous'
+  | 'custom';
+
+export const BRAIN_IDS: BrainId[] = [
+  'fiddy',
+  'openai',
+  'anthropic',
+  'google',
+  'openrouter',
+  'nous',
+  'custom',
+];
 
 export type ChannelId =
   | 'farcaster'
@@ -28,10 +47,12 @@ export type ChannelId =
 export interface FiddySetup {
   /** What the owner called their agent. */
   agentName: string;
-  /** Which brain is selected. Only 'fiddy' and 'other' are wired today. */
+  /** Which brain is selected. Everything but 'fiddy' needs the owner's own service. */
   brain: BrainId;
-  /** Address of the agent service behind 'other'. Never a key. */
+  /** Address of the owner's own AI service, for 'custom'. Never a key. */
   brainServiceUrl: string | null;
+  /** Which model of that service, for everything but 'fiddy'. Never a key. */
+  brainModel: string | null;
   /** Tool-server address, for builders. Saved, not used yet. */
   toolServerUrl: string | null;
   /** Per-app permission, as the owner last set it. */
@@ -60,6 +81,7 @@ export const defaultFiddySetup = (): FiddySetup => ({
   agentName: DEFAULT_AGENT_NAME,
   brain: 'fiddy',
   brainServiceUrl: null,
+  brainModel: null,
   toolServerUrl: null,
   channels: {
     // Farcaster is the app you are already in, so it starts allowed. The rest
@@ -77,16 +99,54 @@ export const defaultFiddySetup = (): FiddySetup => ({
 const asString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 
+/**
+ * Older builds offered 'claude', 'gemini' and 'other'. They are the same
+ * choices, named differently, so they are carried over rather than reset: the
+ * person who picked Claude meant Claude, and Claude is now a card that works.
+ */
+const LEGACY_BRAINS: Record<string, BrainId> = {
+  claude: 'anthropic',
+  gemini: 'google',
+  other: 'custom',
+};
+
 const asBrain = (value: unknown): BrainId =>
-  value === 'claude' || value === 'gemini' || value === 'other'
-    ? value
-    : 'fiddy';
+  typeof value === 'string' && (BRAIN_IDS as string[]).includes(value)
+    ? (value as BrainId)
+    : typeof value === 'string' && LEGACY_BRAINS[value]
+      ? LEGACY_BRAINS[value]
+      : 'fiddy';
+
+/** A model name we would put back in a field: short, single line, printable. */
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/;
+
+const asModel = (value: unknown): string | null =>
+  typeof value === 'string' && MODEL_NAME.test(value.trim())
+    ? value.trim()
+    : null;
 
 /**
  * Read, never throw. Stored state from an older build, a half-written value or
  * a disabled storage API all resolve to the defaults rather than an error the
  * owner cannot act on.
  */
+/** Only real channels, only booleans: a permission nobody granted is not one. */
+const sanitiseChannels = (
+  value: unknown,
+  fallback: Record<ChannelId, boolean>,
+): Record<ChannelId, boolean> => {
+  const channels = { ...fallback };
+  if (value && typeof value === 'object') {
+    for (const id of CHANNEL_IDS) {
+      const stored = (value as Record<string, unknown>)[id];
+      if (typeof stored === 'boolean') {
+        channels[id] = stored;
+      }
+    }
+  }
+  return channels;
+};
+
 export const loadFiddySetup = (): FiddySetup => {
   const base = defaultFiddySetup();
   try {
@@ -98,22 +158,13 @@ export const loadFiddySetup = (): FiddySetup => {
     if (!parsed || typeof parsed !== 'object') {
       return base;
     }
-    const channels = { ...base.channels };
-    const storedChannels = parsed.channels;
-    if (storedChannels && typeof storedChannels === 'object') {
-      for (const id of CHANNEL_IDS) {
-        const value = (storedChannels as Record<string, unknown>)[id];
-        if (typeof value === 'boolean') {
-          channels[id] = value;
-        }
-      }
-    }
     return {
       agentName: asString(parsed.agentName) ?? base.agentName,
       brain: asBrain(parsed.brain),
       brainServiceUrl: asString(parsed.brainServiceUrl),
+      brainModel: asModel(parsed.brainModel),
       toolServerUrl: asString(parsed.toolServerUrl),
-      channels,
+      channels: sanitiseChannels(parsed.channels, base.channels),
       completedAt:
         typeof parsed.completedAt === 'number' ? parsed.completedAt : null,
     };
@@ -122,8 +173,38 @@ export const loadFiddySetup = (): FiddySetup => {
   }
 };
 
+/**
+ * Only the fields this file owns are written. A patch is not spread blindly,
+ * because that is how a key would end up in local storage the first time a
+ * caller passed one by mistake: the setup holds a choice and an address, never a
+ * credential.
+ */
 export const saveFiddySetup = (patch: Partial<FiddySetup>): FiddySetup => {
-  const next: FiddySetup = { ...loadFiddySetup(), ...patch };
+  const current = loadFiddySetup();
+  const next: FiddySetup = {
+    agentName:
+      typeof patch.agentName === 'string' && patch.agentName.trim()
+        ? patch.agentName.trim().slice(0, 24)
+        : current.agentName,
+    brain: patch.brain === undefined ? current.brain : asBrain(patch.brain),
+    brainServiceUrl:
+      patch.brainServiceUrl === undefined
+        ? current.brainServiceUrl
+        : asString(patch.brainServiceUrl),
+    brainModel:
+      patch.brainModel === undefined
+        ? current.brainModel
+        : asModel(patch.brainModel),
+    toolServerUrl:
+      patch.toolServerUrl === undefined
+        ? current.toolServerUrl
+        : asString(patch.toolServerUrl),
+    channels: sanitiseChannels(patch.channels, current.channels),
+    completedAt:
+      typeof patch.completedAt === 'number'
+        ? patch.completedAt
+        : current.completedAt,
+  };
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
