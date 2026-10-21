@@ -23,6 +23,7 @@
  * (`~/pages/settingsNode`).
  */
 
+export * from './embedCards';
 export * from './embedKinds';
 export * from './fromNode';
 export * from './hostedRoutes';

@@ -55,6 +55,7 @@ import {
   utf8ByteLength,
 } from 'farcaster-node-client';
 
+import { type EmbedCard, openGraphFromCard } from './embedCards';
 import { type EmbedKindAnswer, embedKindFromExtension } from './embedKinds';
 
 /** Zero-safe count with the caveat that produced it. */
@@ -209,12 +210,19 @@ export const castEmbedsFromNode = ({
   body,
   quotedCasts = [],
   embedKind,
+  cardOf,
 }: {
   body: NodeCastAddBody;
   /** Casts already resolved for `body.embeds` quote targets, by `fid:hash`. */
   quotedCasts?: ApiQuoteCastEmbed[];
   /** What a caller has already learned about a URL's media type. */
   embedKind?: (url: string) => EmbedKindAnswer | undefined;
+  /**
+   * What a caller has already learned about a link's own page: its title, its
+   * picture, and its mini-app card when it declares one (`embedCards.ts`).
+   * Absent means the embed keeps the URL as its only open-graph fact.
+   */
+  cardOf?: (url: string) => EmbedCard | undefined;
 }): CastEmbedsFromNodeResult => {
   const images: ApiCastImageEmbed[] = [];
   const videos: ApiCastVideoEmbed[] = [];
@@ -244,7 +252,12 @@ export const castEmbedsFromNode = ({
           sourceUrl: embed.url,
         });
       } else {
-        urls.push({ type: 'url', openGraph: { url: embed.url } });
+        // A link embed carries what its own page said about it — and, when that
+        // page is a mini app, the card whose button opens it.
+        urls.push({
+          type: 'url',
+          openGraph: openGraphFromCard(embed.url, cardOf?.(embed.url)),
+        });
       }
       continue;
     }
@@ -424,6 +437,8 @@ export interface ApiCastFromNodeOptions {
   viewerContext?: ApiCast['viewerContext'];
   /** What the caller has already learned about embed URLs (see embedKinds). */
   embedKind?: (url: string) => EmbedKindAnswer | undefined;
+  /** What the caller has already learned about a link's own page (embedCards). */
+  cardOf?: (url: string) => EmbedCard | undefined;
   /**
    * The profile of every account this cast mentions, by fid. The caller reads
    * these (one batched `userDataByFid` per page — see `reads.ts`), because a
@@ -452,9 +467,15 @@ export const apiCastFromNode = ({
   quotedCasts,
   viewerContext,
   embedKind,
+  cardOf,
   mentionUsers,
 }: ApiCastFromNodeOptions): ApiCast => {
-  const { embeds } = castEmbedsFromNode({ body, quotedCasts, embedKind });
+  const { embeds } = castEmbedsFromNode({
+    body,
+    quotedCasts,
+    embedKind,
+    cardOf,
+  });
 
   // A cast's mentions are rendered into its text (see castTextWithMentions) and
   // listed as profiles. Both halves need the mentioned accounts' own user data,

@@ -50,6 +50,11 @@ import {
 } from 'farcaster-node-client';
 
 import {
+  createEmbedCardResolver,
+  type EmbedCard,
+  type EmbedCardResolver,
+} from './embedCards';
+import {
   createEmbedKindResolver,
   type EmbedKindAnswer,
   type EmbedKindResolver,
@@ -166,6 +171,13 @@ export interface NodeBackedReadsOptions {
    * can answer without a network.
    */
   embedKinds?: EmbedKindResolver;
+  /**
+   * What each link embed's own page says about itself — its title, its picture,
+   * and the mini-app card whose button launches it (`embedCards.ts`). Defaults
+   * to the real thing: one bounded, cached read of the URL. Injectable so a
+   * test can answer without a network.
+   */
+  embedCards?: EmbedCardResolver;
 }
 
 interface CacheEntry<T> {
@@ -209,6 +221,7 @@ export class NodeBackedReads {
   private readonly getSignedInFid: () => number | undefined;
   private readonly countCap: number;
   private readonly embedKinds: EmbedKindResolver;
+  private readonly embedCards: EmbedCardResolver;
 
   private readonly userCache = new Map<number, CacheEntry<ApiUser>>();
   private readonly userPromiseCache = new Map<number, Promise<ApiUser>>();
@@ -222,6 +235,7 @@ export class NodeBackedReads {
     getSignedInFid,
     countCap = DEFAULT_COUNT_CAP,
     embedKinds = createEmbedKindResolver(),
+    embedCards,
   }: NodeBackedReadsOptions) {
     this.node = node;
     this.nodeBaseUrl = nodeBaseUrl.replace(/\/$/, '');
@@ -229,6 +243,9 @@ export class NodeBackedReads {
     this.getSignedInFid = getSignedInFid;
     this.countCap = countCap;
     this.embedKinds = embedKinds;
+    // The page reads go through the same fetch seam as everything else, so a
+    // test that fakes the node's fetch does not quietly reach the open web.
+    this.embedCards = embedCards ?? createEmbedCardResolver({ fetchImpl });
   }
 
   /**
@@ -241,18 +258,46 @@ export class NodeBackedReads {
   ): EmbedKindAnswer | undefined => this.embedKinds.kindOf(url);
 
   /**
+   * What a link's own page said about it, as far as it could be read. The cast
+   * translator turns this into the open-graph a card is drawn from — and into
+   * the mini-app embed whose button launches the app.
+   */
+  private readonly cardLookup = (url: string): EmbedCard | undefined =>
+    this.embedCards.cardOf(url);
+
+  /**
    * Ask what this page's embed URLs are, together, before any cast is built.
    *
    * One batch per page rather than per cast: the probes share one concurrency
    * pool and one deadline, and the answer is cached, so the per-cast call in
    * `buildCast` is a lookup rather than a second round of network.
+   *
+   * Two questions, in this order, because the second one is about links: what
+   * each URL *is* (`embedKinds`, a HEAD/ranged GET/`Image()` probe), then what
+   * each URL that turned out to be a page *says* (`embedCards`, one bounded
+   * read of the page's tags). A URL already known to be an image or a video is
+   * never asked the second question — reading a photo's bytes as HTML would
+   * cost a download and answer nothing.
    */
   private async classifyEmbeds(messages: NodeMessage[]): Promise<void> {
-    const urls = messages.flatMap((message) => embedUrlsOf(message.castAdd));
+    await this.prepareEmbeds(
+      messages.flatMap((message) => embedUrlsOf(message.castAdd)),
+    );
+  }
+
+  /** The two batched questions, for any set of embed URLs (one cast or one page). */
+  private async prepareEmbeds(urls: string[]): Promise<void> {
     if (urls.length === 0) {
       return;
     }
     await this.embedKinds.classify(urls);
+    const links = urls.filter((url) => {
+      const kind = this.embedKinds.kindOf(url);
+      return kind !== 'image' && kind !== 'video';
+    });
+    if (links.length > 0) {
+      await this.embedCards.resolve(links);
+    }
   }
 
   /** The account every signed-in read is relative to. */
@@ -657,10 +702,7 @@ export class NodeBackedReads {
     // by hash, say) asks here, so a photo is a photo on the first paint either
     // way. Either way it is one bounded wait, never two.
     if (!embedsAsked) {
-      const embedUrls = embedUrlsOf(body);
-      if (embedUrls.length > 0) {
-        await this.embedKinds.classify(embedUrls);
-      }
+      await this.prepareEmbeds(embedUrlsOf(body));
     }
 
     const mentionUsersPromise =
@@ -729,6 +771,7 @@ export class NodeBackedReads {
       recasts,
       quotedCasts: quoted.filter((cast) => cast !== undefined),
       embedKind: this.embedKindLookup,
+      cardOf: this.cardLookup,
       mentionUsers: mentioned,
       ...(viewerContext && Object.keys(viewerContext).length > 0
         ? { viewerContext }
@@ -746,7 +789,9 @@ export class NodeBackedReads {
   ): Promise<ApiCast[]> {
     this.rememberCasts(messages);
     // The page's embed URLs are asked about together, before any cast is built:
-    // a photo is drawn as a photo on the first paint rather than after a reload.
+    // a photo is drawn as a photo on the first paint rather than after a reload,
+    // and a link's own title, picture and mini-app card are in hand before the
+    // card is drawn (`preparedEmbeds`).
     await this.classifyEmbeds(messages);
     // ...and so is every account the page mentions, for the same reason: a
     // mention is drawn as a handle on the first paint, once per distinct FID for

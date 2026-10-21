@@ -45,6 +45,7 @@
  */
 
 import { loadAppKey } from '~/snapchain/appKeyStorage';
+import { createEmbedCardResolver } from '~/snapchain/nodeApi/embedCards';
 import {
   classifyHostedRequest,
   hostedApiPath,
@@ -75,7 +76,11 @@ import {
   NEYNAR_BASE_URL,
   NEYNAR_NODE_BASE_URL,
 } from './catalog';
-import { answerFromNeynar, fetchCastAuthorFromNeynar } from './neynarMap';
+import {
+  answerFromNeynar,
+  fetchCastAuthorFromNeynar,
+  fetchFrameCardFromNeynar,
+} from './neynarMap';
 import { neynarApiKeyFromEnv } from './preferences';
 import type { NodeProvider } from './providerTypes';
 import {
@@ -222,6 +227,46 @@ export const createProviderBackedFetch = ({
   // readers, so it is worth keeping between requests. A provider that is not a
   // node never lands here.
   const adapters = new Map<string, ReturnType<typeof createNodeBackedFetch>>();
+
+  /**
+   * The key this build (or this test) has for Neynar, resolved once per call.
+   *
+   * `undefined` asks this build's own configuration; an explicit `null` means
+   * "there is none" — `??` would silently read a key off the build's env.
+   */
+  const neynarKey = (): string | null =>
+    neynarApiKey === undefined ? neynarApiKeyFromEnv() : neynarApiKey;
+
+  /**
+   * What a link embed's own page says about itself, with an index behind it.
+   *
+   * The page is read first — that is the author's own card, and it is the only
+   * source that can name the button the app declared. The index is asked only
+   * when the page could not be read at all: measured, most app pages do not
+   * grant a browser permission to read them, and Neynar has already read those
+   * pages, so its catalog can still answer for an app it knows. Without a key
+   * there is no index, and the resolver simply reads the page.
+   *
+   * This is a *card* lookup, not a read of the reader's timeline: it never
+   * touches the provider chain, so it cannot move a reader off their node, and
+   * the key travels in a header to Neynar alone.
+   */
+  const embedCards = createEmbedCardResolver({
+    fetchImpl: boundFetch,
+    indexLookup: async (url) => {
+      const key = neynarKey();
+      if (key === null) {
+        return null;
+      }
+      return fetchFrameCardFromNeynar({
+        url,
+        apiKey: key,
+        fetchImpl: boundFetch,
+        baseUrl: NEYNAR_BASE_URL,
+      });
+    },
+  });
+
   const nodeAdapter = (
     provider: NodeProvider,
   ): ReturnType<typeof createNodeBackedFetch> => {
@@ -235,6 +280,7 @@ export const createProviderBackedFetch = ({
       nodeLabel: providerPlainName(provider),
       getSignedInFid,
       fetchImpl: boundFetch,
+      embedCards,
       ...(countCap ? { countCap } : {}),
       // The same draft store the seam answers with, so a draft written while a
       // node was live is the draft read back when it is not.
