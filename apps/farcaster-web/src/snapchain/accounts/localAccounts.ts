@@ -48,6 +48,15 @@ export interface LocalAccount {
   createdAt: number;
   /** When a signing key for this device was last installed for this account. */
   signedInAt?: number;
+  /**
+   * How the account was made, when it was made with a social sign-up
+   * (see `~/lib/socialAccount`): the words behind it are held by the sign-up
+   * provider rather than written down here, and the person is named by their
+   * email or handle rather than by an address they have never seen.
+   */
+  walletCustody?: 'privy';
+  provider?: string;
+  email?: string;
 }
 
 /** One account per custody address. */
@@ -191,6 +200,14 @@ export const describeLocalAccount = (account: LocalAccount): string => {
 
   if (account.fid !== undefined) {
     return `account ${account.fid}`;
+  }
+
+  // An account signed up with Google or X has no number yet and a name the
+  // person recognises — the email or handle they signed up with. The address it
+  // is keyed by is the wallet held for them, which is nobody's idea of a name,
+  // so it is the last resort rather than the first.
+  if (account.email) {
+    return account.email;
   }
 
   return `${account.custodyAddress.slice(0, 6)}…${account.custodyAddress.slice(-4)}`;

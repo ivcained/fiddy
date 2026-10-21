@@ -260,6 +260,13 @@ export const FiddyOnboardingPage = lazyWithPreload(() =>
   })),
 );
 
+/** Where a social sign-up lands: the account it just made. */
+export const FiddyAccountPage = lazyWithPreload(() =>
+  import('~/pages/fiddyAccount/FiddyAccountPage').then((res) => ({
+    default: res.FiddyAccountPage,
+  })),
+);
+
 export const FiddyBrainsPage = lazyWithPreload(() =>
   import('~/pages/fiddyBrains/FiddyBrainsPage').then((res) => ({
     default: res.FiddyBrainsPage,

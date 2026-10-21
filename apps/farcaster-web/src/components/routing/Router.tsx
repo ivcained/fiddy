@@ -688,6 +688,13 @@ const Router: React.FC = () => {
               path={routes.fiddyWelcomeReady.path}
               element={<FiddyOnboardingPage step="ready" />}
             />
+            {/* Where a Google or X sign-up lands. Outside the scaffolding on
+                purpose: the account it describes exists before there is a
+                session to hold it, which is exactly the state it explains. */}
+            <Route
+              path={routes.fiddyAccount.path}
+              element={<routes.fiddyAccount.Component />}
+            />
             {/* Together. Both routes sit outside the scaffolding because both
                 work signed out: `together` is where a session starts, and
                 `togetherJoin` is the other end of an invite link, opened by

@@ -1,10 +1,24 @@
-import { FC, memo, useState } from 'react';
+import { FC, lazy, memo, Suspense, useState } from 'react';
 
+import { Divider2 } from '~/components/Divider';
 import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
 import { Link } from '~/components/links/Link';
 import { LoginWithMobile } from '~/components/login/LoginWithMobile';
+import { SocialSignUpOptions } from '~/components/login/SocialSignUpOptions';
 import { DefaultModalContainer } from '~/components/modals/DefaultModalContainer';
 import { Modal } from '~/components/modals/Modal';
+import { areSocialSignUpsAvailable } from '~/lib/socialSignUp';
+
+/**
+ * The only module that imports Privy, in its own chunk, fetched the first time
+ * this modal opens — so the front door never waits for a third-party script a
+ * build without an app id will never use (see ~/providers/PrivyRoot).
+ */
+const SocialSignUpPrivy = lazy(() =>
+  import('~/components/login/SocialSignUpPrivy').then((module) => ({
+    default: module.SocialSignUpPrivy,
+  })),
+);
 
 type LoginModalProps = {
   onClose: () => void;
@@ -37,6 +51,15 @@ const LoginModal: FC<LoginModalProps> = memo(({ onClose }) => {
    */
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
 
+  /**
+   * The two social doors, above the Farcaster handshake rather than in front of
+   * it. Signing in with Farcaster is the client's own path and is left exactly
+   * as measured; a person who wants the faster way in simply presses the faster
+   * way in and ignores the QR that is already being drawn. With no app id
+   * configured this whole block is absent — not empty, absent.
+   */
+  const socialDoors = areSocialSignUpsAvailable();
+
   if (isCreatingAccount) {
     return <CreateAccountSheet onClose={() => setIsCreatingAccount(false)} />;
   }
@@ -46,11 +69,31 @@ const LoginModal: FC<LoginModalProps> = memo(({ onClose }) => {
       <DefaultModalContainer onClose={onClose}>
         <div className="flex size-full flex-col items-center justify-center p-4">
           <div
-            className="relative flex w-full max-w-md flex-col items-start justify-center rounded-[12px] bg-[#141414] p-4"
+            className="relative flex max-h-[85dvh] w-full max-w-md flex-col items-start justify-center overflow-y-auto rounded-[12px] bg-[#141414] p-4"
             onClick={(e) => {
               e.stopPropagation();
             }}
           >
+            {socialDoors ? (
+              <div className="w-full" data-fiddy="login-social">
+                <Suspense
+                  fallback={
+                    <SocialSignUpOptions
+                      disabled
+                      onPress={() => undefined}
+                      unavailableNote="Getting Google and X ready — one moment."
+                    />
+                  }
+                >
+                  <SocialSignUpPrivy />
+                </Suspense>
+
+                <div className="w-full py-6">
+                  <Divider2 text="or use a Farcaster account" />
+                </div>
+              </div>
+            ) : null}
+
             <LoginWithMobile onClose={onClose} />
 
             {/* Already on Farcaster: let Fiddy post for you as well as read.

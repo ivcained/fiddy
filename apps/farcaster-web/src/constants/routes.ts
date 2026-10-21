@@ -49,6 +49,7 @@ import {
   DownloadPage,
   FarcasterConnectPage,
   FiddyAppsPage,
+  FiddyAccountPage,
   FiddyBrainsPage,
   FiddyConnectPage,
   FiddyOnboardingPage,
@@ -150,6 +151,7 @@ import {
   VanityReferralLandingPage,
   WalletPage,
 } from '~/lazy/pages';
+import { SOCIAL_ACCOUNT_PATH } from '~/lib/socialSignUp';
 import { ChannelEditSection } from '~/types/routing';
 
 import {
@@ -1017,6 +1019,18 @@ const routes = {
     search: {},
     family: family('default'),
     Component: FiddyOnboardingPage,
+  },
+  /* Where a Google or X sign-up lands. A route rather than a sheet, because it
+     is a place a person is sent to and can come back to — the account it
+     describes outlives the sign-up that made it. The path is declared in
+     `~/lib/socialSignUp` (SOCIAL_ACCOUNT_PATH) so the sign-up flow can name it
+     without importing this table. */
+  fiddyAccount: {
+    path: SOCIAL_ACCOUNT_PATH,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyAccountPage,
   },
   savedStarterPacks: {
     path: `${appPathPrefix}/saved/starter-packs`,

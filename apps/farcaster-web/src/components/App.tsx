@@ -32,6 +32,7 @@ import { UnifiedMetaMaskProvider } from '~/contexts/UnifiedMetaMaskProvider';
 import { VideoPlayStatusProvider } from '~/contexts/VideoPlayStatusProvider';
 import { WebFarcasterApiClientProvider } from '~/contexts/WebFarcasterApiClientProvider';
 import { InteractedSnapUrlsWebProvider } from '~/providers/InteractedSnapUrlsWebProvider';
+import { PrivyRoot } from '~/providers/PrivyRoot';
 import { wagmiConfig } from '~/utils/wagmi';
 
 import { FullScreenErrorBoundary } from './errors/FullScreenErrorBoundary';
@@ -175,7 +176,14 @@ const App: FC = () => {
                                                         <BrowserRouter>
                                                           <UnifiedMetaMaskProvider>
                                                             <SolanaWalletProvider>
-                                                              <Router />
+                                                              {/* Privy's provider is mounted here, low and
+                                                                  late: it appears only when this build has an
+                                                                  app id, and only once its chunk has arrived,
+                                                                  so nothing above it waits for a third-party
+                                                                  script. See ~/providers/PrivyRoot. */}
+                                                              <PrivyRoot>
+                                                                <Router />
+                                                              </PrivyRoot>
                                                             </SolanaWalletProvider>
                                                           </UnifiedMetaMaskProvider>
                                                         </BrowserRouter>
