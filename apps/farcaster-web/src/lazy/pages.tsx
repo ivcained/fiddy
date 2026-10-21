@@ -272,6 +272,21 @@ export const FiddyAppsPage = lazyWithPreload(() =>
   })),
 );
 
+/* Together — shared spaces: "work with your people". The list/create surface
+   and the invite landing are separate pages because the landing has to work for
+   somebody who has never been here and has no session at all. */
+export const TogetherPage = lazyWithPreload(() =>
+  import('~/pages/together/TogetherPage').then((res) => ({
+    default: res.TogetherPage,
+  })),
+);
+
+export const TogetherJoinPage = lazyWithPreload(() =>
+  import('~/pages/together/TogetherJoinPage').then((res) => ({
+    default: res.TogetherJoinPage,
+  })),
+);
+
 export const HomeLandingPage = lazyWithPreload(() =>
   import('~/pages/homeLanding/HomeLandingPage').then((res) => ({
     default: res.HomeLandingPage,

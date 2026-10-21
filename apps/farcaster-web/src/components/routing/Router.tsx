@@ -674,6 +674,18 @@ const Router: React.FC = () => {
               path={routes.fiddyWelcomeReady.path}
               element={<FiddyOnboardingPage step="ready" />}
             />
+            {/* Together. Both routes sit outside the scaffolding because both
+                work signed out: `together` is where a session starts, and
+                `togetherJoin` is the other end of an invite link, opened by
+                someone who has never seen this app. */}
+            <Route
+              path={routes.together.path}
+              element={<routes.together.Component />}
+            />
+            <Route
+              path={routes.togetherJoin.path}
+              element={<routes.togetherJoin.Component />}
+            />
             <Route
               path={routes.download.path}
               element={<routes.download.Component />}

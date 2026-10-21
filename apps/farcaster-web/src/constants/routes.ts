@@ -137,6 +137,8 @@ import {
   SuggestedStarterPacksPage,
   SupportPage,
   TermsOfUsePage,
+  TogetherJoinPage,
+  TogetherPage,
   TokenPage,
   TopSearchPage,
   TrendingTopicPage,
@@ -937,7 +939,27 @@ const routes = {
      for step 1 (where the older links and docs point); `fiddyWelcomeApps` is
      no longer a step and redirects to `fiddyWelcomeReady` — connecting apps is
      `fiddyApps` above, inside the client. */
-
+  /* Together — one project, one board, your people. `together` is where you
+     list and open spaces; `togetherJoin` is the other end of an invite link and
+     must be reachable signed out, because the person opening it has no session
+     yet. The invite links the service mints point at exactly this path. */
+  together: {
+    path: `${appPathPrefix}/together`,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: TogetherPage,
+  },
+  togetherJoin: {
+    path: `${appPathPrefix}/together/join/:token`,
+    params: { token: '' } as { token: string },
+    search: {},
+    family: family('default'),
+    Component: TogetherJoinPage,
+  },
+  /* The setup flow. One route per screen: a step can be linked, reloaded and
+     re-entered, and the front door (`routes.homeFeed` signed out) renders the
+     first one. */
   fiddyWelcome: {
     path: '/welcome',
     params: {},
