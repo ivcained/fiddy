@@ -1,17 +1,20 @@
 # Releasing the client to fiddy.fun
 
 Status 2026-10-21. The node-backed client (`apps/farcaster-web`) is live at
-**https://fiddy.fun**, release `89cdd016b5001f75548d92550ab7fa5b8b2d4ee1`.
-Everything in the tables below was run, not reasoned about.
+**https://fiddy.fun**, release `a0e53d5eda61f76b16c50e56a2179f71b7922fff`. The
+release before it (`89cdd01…`) is still on disk, so a rollback is one command.
+Everything below was run, not reasoned about — and every table row says which
+release it was run against.
 
 ## What fiddy.fun serves now
 
 | URL | What answers | Where it comes from |
 | --- | --- | --- |
-| `/` | the node-backed client | `releases/89cdd01…/web/` (this release) |
+| `/` | the node-backed client | `releases/a0e53d5…/web/` (this release) |
 | `/assets/*` | the client's hashed bundle | same |
-| `/preview/` | the read-only preview, byte-identical to what used to be at `/` | `releases/89cdd01…/web/preview/` |
-| `/farcaster` | the same preview page (the miniapp's launch URL is unchanged) | `releases/89cdd01…/web/preview/index.html` |
+| `/shell-bootstrap.js` | the shell's theme bootstrap — a same-origin classic script | same; this file is why `script-src` can be `'self'` (see the CSP section) |
+| `/preview/` | the read-only preview, byte-identical to what used to be at `/` | `releases/a0e53d5…/web/preview/` |
+| `/farcaster` | the same preview page (the miniapp's launch URL is unchanged) | `releases/a0e53d5…/web/preview/index.html` |
 | `/snapchain-api/*` | the Snapchain node, relayed | nginx → `https://haatz.quilibrium.com` |
 | `/api/fiddy/media`, `/api/fiddy/media/<sha256>.<ext>` | our media host | nginx → `:3219` (`fiddy-auth`) |
 | `/api/farcaster/status`, `/api/farcaster/poidh/bounties` | the preview's read API | nginx → `:3218` (`fiddy-preview.service`) |
@@ -23,7 +26,7 @@ The release tree keeps three things the vhost and systemd depend on:
 - `server/server.mjs` — `fiddy-preview.service` runs
   `/var/www/fiddy.fun/current/server/server.mjs`, so a release without it kills
   that service the next time it restarts. The release copies the previous
-  release's file verbatim (sha256 `493e1637…`);
+  release's file verbatim (sha256 `493e1637…`, unchanged in this release);
 - `web/preview/` — the previous release's page and assets, with its
   `/assets/…` references made relative so it resolves inside its own directory.
 
@@ -67,7 +70,7 @@ Evidence, all measured:
 
 So: the composer that failed was a locally served node-backed build; the fix in
 `t_54ee6c54` was already live in that surface after a refresh, and nothing of it
-was reachable at fiddy.fun until this release.
+was reachable at fiddy.fun until the first client release.
 
 ## The ritual
 
@@ -90,7 +93,12 @@ What it does, and why each step is not optional:
    Current release: node `https://haatz.quilibrium.com`, media
    `https://fiddy.fun`.
 3. **Local gate.** The built bundle must contain the adapter's 501 sentence, the
-   media path and the configured node, or nothing ships.
+   media path and the configured node, **and the built shell must carry no
+   inline script** — the host serves `script-src 'self'`, so an inline
+   `<script>` or an inline `on*=…` handler in `index.html` would be refused in
+   the browser after the release. A build that needs one does not ship
+   (`apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs`, taken from
+   the frozen tree).
 4. **Assemble** `web/` + `server/` + `web/preview/` as described above.
    Sourcemaps are left out: they are 44 MB of source for a public host.
 5. **Upload and extract** into a new immutable `releases/<sha>/`; the running
@@ -99,8 +107,11 @@ What it does, and why each step is not optional:
    carries the client's locations. Not the deploy command's exit code.
 7. **Cut over by symlink only** (`ln -sfn … && mv -Tf …`) plus one nginx reload
    in the same command; the previous release stays where it is.
-8. **Served gate** — fetch `/`, follow the asset it names, and compare it
-   byte-for-byte (`cmp`) with the build. Any mismatch rolls the symlink back.
+8. **Served gate on fiddy.fun** — fetch the build's two strings through the
+   public host, check the **served** `index.html` for inline script (the file the
+   browser actually runs, not the one the build wrote), and compare the served
+   asset byte-for-byte (`cmp`) with the build. Any mismatch rolls the symlink
+   back.
 
 nginx is **not** touched by the script. The client needs three locations that
 exist now and are checked in step 6:
@@ -109,43 +120,134 @@ exist now and are checked in step 6:
   `client_max_body_size 2m` (the server-level limit is 1 KB, and a browser
   cannot POST `application/octet-stream` across origins — hence the relay);
 - `location /` with `try_files $uri $uri/ /index.html` (a SPA needs route
-  fallback) and the client's CSP;
-- `location ^~ /preview/` and `location = /farcaster` → the preview page.
+  fallback) and the client's CSP — the one header in this vhost that changes
+  when the shell changes, documented below;
+- `location ^~ /preview/` and `location = /farcaster` → the preview page, under
+  the preview's own stricter CSP.
 
 ### Rollback
 
 ```bash
-ssh root@100.111.203.78 'ln -sfn /var/www/fiddy.fun/releases/9047c21de4b8bdf3aec52c5a92eb0fb7a4559505 \
+cd /Users/lc/Projects/fiddy && scripts/release-client.sh --rollback   # → releases/89cdd01…/
+ssh root@100.111.203.78 'ln -sfn /var/www/fiddy.fun/releases/89cdd016b5001f75548d92550ab7fa5b8b2d4ee1 \
   /var/www/fiddy.fun/current.new && mv -Tf /var/www/fiddy.fun/current.new /var/www/fiddy.fun/current'
 ```
 
-The Oct 17 release (`9047c21…`, the read-only preview, with its `server/`) is
-still on disk and byte-intact; the symlink is the whole switch. The vhost change
-is backed up at `/root/nginx-backups/fiddy.fun.*.bak`.
+The Oct 17 release (`9047c21…`, the read-only preview, with its `server/`) and
+the first client release (`89cdd01…`) are both still on disk and byte-intact; the
+symlink is the whole switch. The vhost change is backed up at
+`/root/nginx-backups/fiddy.fun.*.bak`.
 
-### The client's CSP is deliberately wider than the preview's
+## The client's CSP: `script-src 'self'`, plus one host for Cloudflare's beacon
 
-`script-src 'self' 'unsafe-inline'` (the app's own inline theme bootstrap is in
-`index.html`), `img-src … https:`, `media-src … blob: https:`,
-`font-src … https://fonts.gstatic.com`, `connect-src 'self' https: wss:`,
-`frame-src 'self' https:`. The client talks to the SIWF relay
-(`relay.farcaster.xyz`), the Farcaster websocket (`wss://ws.farcaster.xyz`) and
-**whatever node the reader picks in the picker** — an arbitrary https host, which
-is the point of the picker. The preview keeps its own strict CSP.
+As served — `curl -sSI https://fiddy.fun/` on 2026-10-21, from `location /` in
+`/etc/nginx/sites-available/fiddy.fun`:
+
+```
+default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https: wss:; frame-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self'
+```
+
+One token of that header changed on 2026-10-21 (vhost backed up at
+`/root/nginx-backups/fiddy.fun.20261021-031207.csp-self.bak`):
+
+```diff
+- script-src 'self' 'unsafe-inline';
++ script-src 'self' https://static.cloudflareinsights.com;
+```
+
+Nothing else in the header moved.
+
+### Why `script-src` has no `'unsafe-inline'`
+
+Two things in `apps/farcaster-web/index.html` used to need it, and both are gone
+(commit `7cd04fd`):
+
+1. **The theme bootstrap** — the `user-saved-theme` block that sets `html.dark`
+   before first paint, so the shell never flashes the fork's light ground. It
+   moved to `apps/farcaster-web/public/shell-bootstrap.js`, referenced as
+   `<script src="/shell-bootstrap.js">`. It stays a **classic** (non-deferred)
+   script on purpose: a module script is deferred, and a deferred bootstrap runs
+   after the body is parsed, which is exactly the flash it exists to prevent. The
+   served file is the repo's file, byte for byte (sha256 `f9ae13d9…`).
+2. **The font sheet's `onload="this.media='all'"`** — an inline event-handler
+   attribute is inline script, so moving only the `<script>` would have left the
+   CSP just as wide. The Inter sheet is now a normal render-blocking stylesheet;
+   the two preconnects above it are what keep the third-party fetch cheap.
+
+### The one third-party allowance, and why it is written down
+
+Cloudflare's zone injects `<script src="https://static.cloudflareinsights.com/beacon.min.js/…">`
+into the HTML at the edge (measured: present on `/` for a browser-like request,
+absent for curl's default UA; the injected tag carries its own `integrity=` SRI
+hash and `crossorigin`). With `'self'` alone the browser refuses it and
+logs a console error on every single load. The decision is to **allow that one
+host** by name rather than keep a permanent console error, and it is measured in
+a browser rather than assumed: the beacon is fetched and nothing about it is
+refused (probe check 6b below).
+
+### Why the rest of the header stays as wide as it is
+
+Each allowance was measured, not guessed:
+
+- `connect-src 'self' https: wss:` — the SIWF relay `relay.farcaster.xyz`, the
+  Farcaster websocket `wss://ws.farcaster.xyz`, and **whichever node the reader
+  picks in the node picker**, an arbitrary https host. Do not narrow this to
+  `'self'`: the picker breaks, and the relay alone is not enough for a reader on
+  their own node.
+- `img-src … https:` — avatars served through `wrpcd.net`.
+- `media-src … blob: https:` — the picked photo before it is uploaded (`blob:`)
+  and the uploaded one after.
+- `style-src https://fonts.googleapis.com` + `font-src https://fonts.gstatic.com`
+  — Inter.
+- `frame-src 'self' https:` — Farcaster's own sign-in frame.
+- `style-src 'unsafe-inline'` — **deliberately kept**: the document carries two
+  inline `<style>` blocks of its own (the ground colours, and the shell skeleton
+  that keeps a signed-in cold load from painting an empty body). Inline *style*
+  is not script; `style-src` is a different directive with a much smaller blast
+  radius, and hashing it would mean rebuilding the document for a cosmetic gain.
+
+### What holds the shape
+
+- `apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs` — cheap, no
+  browser: refuses a shell with an inline `<script>` or an inline `on*=`
+  handler. Runs in the ritual at step 3 **and** on the served page at step 8.
+- `apps/farcaster-web/scripts/verify-csp-script-src.mjs` — a real browser, ten
+  checks: no inline script, no inline handler, `script-src` exactly `'self'` +
+  the beacon host with no `unsafe-inline`/`unsafe-eval`, the bootstrap fetched
+  200, the beacon not refused, nothing of the page's own refused, nothing newly
+  refused hiding among the documented pre-existing refusals, and — with the app
+  bundle blocked, so only the document can run — the shell still paints dark,
+  and light for a reader who saved `light`.
+
+### Re-checking it
+
+```bash
+curl -fsS https://fiddy.fun/ -o /tmp/served-index.html
+node apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs /tmp/served-index.html
+node apps/farcaster-web/scripts/verify-csp-script-src.mjs      # https://fiddy.fun by default
+```
+
+The first two are seconds; the third is the measurement behind every claim in
+this section.
 
 ## Verified on the live host (2026-10-21)
 
+Every row names the release it was measured on.
+
 | Check | Result |
 | --- | --- |
-| Served bundle carries the adapter + media path | `grep` of the extracted web root **and** of the asset fetched through https://fiddy.fun |
-| Served bytes are the built bytes | `cmp` equal, sha256 `62e57d73a278db24…` (7,619,175 bytes) |
-| `/release.json` | `{"revision":"89cdd016b5001f…","mode":"node-backed-client","node":"https://haatz.quilibrium.com","media":"https://fiddy.fun"}` |
+| Served shell carries no inline script | `check-shell-has-no-inline-script.mjs` on the fetched `/` (12,489 bytes): *"no inline script, no inline handler — script-src 'self' is enough"* — on `a0e53d5` |
+| The CSP the browser is handed | the header above: `script-src 'self' https://static.cloudflareinsights.com`, no `'unsafe-inline'`, no `'unsafe-eval'` — on `a0e53d5` |
+| The CSP in a real browser, live page | `verify-csp-script-src.mjs` against `https://fiddy.fun`: **10/10** — the bootstrap fetched 200, the beacon fetched and not refused, the document alone still dark (and light for a saved `light`), 1 console error total and it is the documented PostHog one — on `a0e53d5` |
+| Served bytes ARE the built bytes | a fresh `git archive a0e53d5…` build reproduces them exactly: `/` `cmp` equal, sha256 `2a5fd7e1…` (12,489 bytes); the index chunk `/assets/index-DI2v8EDP.js` `cmp` equal, sha256 `873b279a…` (7,628,004 bytes); `/shell-bootstrap.js` sha256 `f9ae13d9…` (1,610 bytes) — on `a0e53d5` |
+| `/release.json` | `{"revision":"a0e53d5eda61f76b16c50e56a2179f71b7922fff","mode":"node-backed-client","node":"https://haatz.quilibrium.com","media":"https://fiddy.fun"}` — on `a0e53d5` |
+| A real sign-in, real browser, public site | the SIWF relay stubbed with a real SIWE message signed by a throwaway key: the ready step renders its own control, the click lands **in the client** — `path=/`, shell frame mounted, Cast control visible, no onboarding sheet, no device-only landing — on `a0e53d5` |
 | Node relay through the public host | `GET https://fiddy.fun/snapchain-api/v1/info` → 200 with the node's `dbStats` |
-| Composer, real browser, public site | `scripts/verify-media-upload.mjs` against `https://fiddy.fun`: sign-in lands in the client, the composer opens over the feed, the picked bytes are **POSTed to `https://fiddy.fun/api/fiddy/media` → 201**, the URL comes back on that host, the stored photo is readable by anyone (200, `image/jpeg`, 227,384 bytes), the served bytes hash to the name in the URL, the composer shows the photo with no failure copy, and nothing was posted to Farcaster |
-| Preview / neighbour surfaces | `/preview/` 200, `/farcaster` 200, `/client` 200, `/FSSC/` 200, `/start` 200, `/fiddy-card.png` 200, `/fiddy-splash.png` 200, `/manifest.json` 200, `mate.legitclub.com/api/health` 200 |
+| Composer, real browser, public site | `scripts/verify-media-upload.mjs` against `https://fiddy.fun`: **11/14** — sign-in lands in the client, the composer opens over the feed, the picked bytes are **POSTed to `https://fiddy.fun/api/fiddy/media` → 201**, the URL comes back on that host, the stored photo is readable (200, `image/jpeg`, 227,384 bytes), the served bytes hash to the name in the URL, the composer shows the photo with no failure copy, and nothing was posted to Farcaster. **Measured on `89cdd01`; not re-run on `a0e53d5`** — see the gap below |
+| Preview / neighbour surfaces | on `a0e53d5`: `/preview/` 200, `/farcaster` 200, `/client` 200, `/client/` 200, `/FSSC/` 200, `/start` 200, `/manifest.json` 200, `/fiddy-card.png` 200, `/fiddy-splash.png` 200, `/shell-bootstrap.js` 200, `/robots.txt` 200, `mate.legitclub.com/api/health` 200 |
 
-Three of the probe's fourteen checks are not satisfied against the production
-build, and each says why:
+Three of the composer probe's fourteen checks were not satisfied on `89cdd01`,
+and each says why:
 
 - **"the upload-URL request … was answered by the MEDIA route"** and **"the cast
   payload … references the media URL"** read `window.__nodeBackedRequests`,
@@ -164,10 +266,24 @@ build, and each says why:
 
 ## Known gaps (not this release's job)
 
+- **The composer row was measured on the previous release.** `a0e53d5` carries
+  other cards' composer and media-upload work, so that row is not evidence for
+  it. Re-running `scripts/verify-media-upload.mjs` against `a0e53d5` fails in
+  *the probe*, not in the client: it reads the page surface
+  (`document.body.innerText`) while the sign-in's own navigation replaces the
+  document, and throws on the null body
+  (`Execution context was destroyed, most likely because of a navigation` — the
+  same race `verify-cast-submit.mjs` was fixed for). That the client itself is
+  fine is measured above: a real sign-in on `a0e53d5` lands in the client.
+- `/client` and `/client/` (the static landing pages) keep
+  `script-src 'self' 'unsafe-inline'` in their own locations: their HTML carries
+  an inline `<script>` and no inline handler. Different page, different CSP —
+  tightening it means moving that script out, which is not the client's shell.
 - The client still makes a few hosted calls the public origin cannot serve:
   `api.farcaster.xyz/v1/audio-rooms` and `/v2/unseen` fail CORS, and PostHog
   analytics posts to `ph.neynar.com` with the fork's placeholder key
-  (`REPLACE_ME`). None of them touches the composer or the media path.
+  (`REPLACE_ME`), which the CSP also refuses (`script-src-elem`). None of them
+  touches the composer or the media path.
 - `VITE_WALLETCONNECT_PROJECT_ID` is not set in the release build (the working
   clone's `.env.local` holds a placeholder), so WalletConnect-based wallets
   stay unavailable; the node picker and the public relay work without it.
