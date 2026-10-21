@@ -229,7 +229,10 @@ pnpm --filter farcaster-web build
 `.node-version` pins 20.19.5, the runtime CI installs through `actions/setup-node`,
 and the root `.npmrc` pins pnpm to it too (`use-node-version`), so the four
 commands above already run on CI's runtime. Running `vitest`, `tsc` or `eslint`
-by hand with a newer Node on `PATH` does not give CI's result.
+by hand with a newer Node on `PATH` does not give CI's result. In CI pnpm fetches
+that version as well instead of reusing the runner's own `setup-node` copy:
+measured at ~40s of extra wall time across the three gates, all three still
+green.
 
 MEASURED 2026-10-21, one tree, only the runtime changed:
 
