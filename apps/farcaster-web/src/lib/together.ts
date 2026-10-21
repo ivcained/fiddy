@@ -82,6 +82,46 @@ export type TogetherEvent = {
   title?: string;
   status?: string;
   name?: string;
+  /** comment.added carries what was said, so the activity line can quote it. */
+  body?: string;
+};
+
+/** One thing somebody said on a card. The author is the identity Farcaster gave. */
+export type TogetherMessage = {
+  id: string;
+  space_id: string;
+  card_id: string;
+  author_fid: number;
+  author_name: string | null;
+  body: string;
+  created_at: number;
+};
+
+/** Somebody is typing right now — as long as their heartbeat is fresh. */
+export type TogetherTyping = {
+  fid: number;
+  username: string | null;
+  expires: number;
+};
+
+/** A card's conversation: what was said, who is typing, what you have not read. */
+export type TogetherThread = {
+  card: {
+    id: string;
+    title: string;
+    status: TogetherCardStatus;
+    version: number;
+  };
+  messages: TogetherMessage[];
+  typing: TogetherTyping[];
+  unread: number;
+  cursor: number;
+};
+
+/** What changed on each card since this member last opened THAT card. */
+export type TogetherUnread = {
+  cards: Record<string, number>;
+  total: number;
 };
 
 export type TogetherState = {
@@ -95,6 +135,8 @@ export type TogetherState = {
   members: TogetherMember[];
   cards: TogetherCard[];
   cursor: number;
+  /** Per-card unread activity; opening a card is what clears its entry. */
+  unread?: TogetherUnread;
   /** Casts the space wants to make, waiting for a member's Hermes to send them. */
   pending_announcements: number;
   /** Present only when the service was started with its offline verifier. */
@@ -361,6 +403,59 @@ export const updateCard = async (
 
 export const createInvite = async (token: string): Promise<TogetherInvite> =>
   request('/invites', { method: 'POST', token, body: {} });
+
+// --- the conversation on a card ---------------------------------------------
+
+/** How often an open thread asks what is new on it. */
+export const TOGETHER_THREAD_POLL_INTERVAL_MS = 2_000;
+
+/**
+ * How often a composer with unsent text re-announces that you are typing.
+ *
+ * Shorter than the service's own expiry, on purpose: a heartbeat that is late
+ * is invisible, and the clock on the other side clears it by itself.
+ */
+export const TOGETHER_TYPING_HEARTBEAT_MS = 2_000;
+
+const cardPath = (cardId: string): string =>
+  '/cards/' + encodeURIComponent(cardId);
+
+/** One card's conversation: what was said, who is typing, what you have missed. */
+export const readThread = async (
+  token: string,
+  cardId: string,
+): Promise<TogetherThread> => request(cardPath(cardId) + '/thread', { token });
+
+/** Say something on a card. The author is the identity the session proved. */
+export const postComment = async (
+  token: string,
+  cardId: string,
+  body: string,
+): Promise<TogetherMessage> =>
+  request(cardPath(cardId) + '/messages', {
+    method: 'POST',
+    token,
+    body: { body },
+  });
+
+/** A heartbeat, not a fact: pass false (or stop) and you are not typing. */
+export const sendTyping = async (
+  token: string,
+  cardId: string,
+  active = true,
+): Promise<{ card_id: string; typing: TogetherTyping[] }> =>
+  request(cardPath(cardId) + '/typing', {
+    method: 'POST',
+    token,
+    body: { active },
+  });
+
+/** Opening a card: the unread marker on it clears. */
+export const markCardRead = async (
+  token: string,
+  cardId: string,
+): Promise<{ card_id: string; seen_seq: number; unread: number }> =>
+  request(cardPath(cardId) + '/read', { method: 'POST', token, body: {} });
 
 /** Queue a cast for the space's channel. A member's own Hermes sends it. */
 export const announce = async (

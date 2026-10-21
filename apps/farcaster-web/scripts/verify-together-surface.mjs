@@ -102,7 +102,9 @@
 //   1. at 390x844 and 1440x900: the headline, the promise and the honest note,
 //      with no horizontal overflow at either width
 //   2. the Farcaster door leads to a real QR (a canvas) the service minted
-//   3. approving it in "the phone" lands on the create-space form
+//   3. approving it in "the phone" lands on the create-space form (fresh
+//      identities every run, so this is a real first run, never an adopted
+//      board)
 //   4. creating a space shows the board: the space name, `#channel`, the three
 //      columns (stacked at 390, three across at 1440), every button a tap target
 //   5. a card added by the owner is visible on the board
@@ -112,9 +114,35 @@
 //      members and the owner's card — the same board, not a copy
 //   8. the member moves the card to Done, and the owner's already-open page
 //      converges to Done on its own (its polling), with no reload
-//   9. no console error and no page error in either context
+//   9. TALKING ON THE CARD, in two real browsers:
+//        the member moves a card and the OWNER's open board marks that card
+//        unread on its own, no reload; opening it clears the marker;
+//        the owner comments; the member's board grows a marker on that same
+//        card, the member opens it, sees the owner's words under @elena, and
+//        their marker is gone;
+//        the member types and the OWNER's open card says "marcus is typing…",
+//        then stops saying it when the member stops (measured, not claimed);
+//        the member sends, and the owner's open card shows the reply with
+//        @marcus
+//      Every one of those is read off the card's OWN thread element, not the
+//      page's text: the board's activity feed quotes a comment a poll before
+//      the card's 2s thread poll has it, so a body-wide check would pass while
+//      the thread element was still empty.
+//  10. what a thread refuses: a member of a DIFFERENT space (their own space,
+//      their own session) asking for this card's thread is answered 404, and an
+//      unauthenticated request is answered 401
+//  11. no console error and no page error in either context
 //
 // Screenshots land in $TOGETHER_SHOT_DIR (default: the system temp dir).
+//
+// Knobs: TOGETHER_CHROMIUM points at a Chromium build already on the
+// machine so Playwright does not download one; TOGETHER_WIDTHS picks the
+// viewports to run ("390" for one of them, default both).
+//
+// Identities are derived per RUN from one base (FID_BASE below), so this probe
+// is re-runnable against a service whose database has outlived earlier runs: it
+// does not need a fresh DB, and a second run is not read as a broken sign-in.
+// TOGETHER_FID_BASE pins the base when a transcript has to be replayed exactly.
 
 import os from 'node:os';
 import path from 'node:path';
@@ -127,7 +155,11 @@ const OUT = process.env.TOGETHER_SHOT_DIR ?? os.tmpdir();
 const WIDTHS = [
   { label: '390', width: 390, height: 844 },
   { label: '1440', width: 1440, height: 900 },
-];
+].filter(
+  (width) =>
+    !process.env.TOGETHER_WIDTHS ||
+    process.env.TOGETHER_WIDTHS.split(',').map((w) => w.trim()).includes(width.label),
+);
 
 // The one boot budget — see "THE BOOT BUDGET" above. Milliseconds; read and
 // validated once, so a typo is a clear message up front instead of an odd
@@ -152,14 +184,72 @@ const record = (label, ok, detail = '') => {
 
 const expect = (label, ok, detail = '') => record(label, Boolean(ok), detail);
 
-const service = async (method, url, body) => {
+/**
+ * The 4xx/5xx resources a context saw, deduped. Printed beside a console error
+ * because the browser's own "Failed to load resource" message carries no URL:
+ * without this, a red "no browser errors" check tells you nothing about what
+ * failed, which is how a third-party CDN can look like a broken surface.
+ */
+const resources = (list) => {
+  if (list.length === 0) return '';
+  const counts = new Map();
+  for (const one of list) counts.set(one, (counts.get(one) ?? 0) + 1);
+  return (
+    'resources: ' +
+    [...counts].map(([one, count]) => `${count}x ${one}`).join(' | ')
+  );
+};
+
+const service = async (method, url, body, token) => {
   const response = await fetch(SERVICE + url, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: 'Bearer ' + token } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : undefined };
+};
+
+/**
+ * Whether an invite link the service minted points back at this app. The
+ * service mints it from its own `HERMES_MULTIPLAYER_INVITE_BASE_URL`, which on
+ * a dev machine may be spelled `127.0.0.1` where this probe was handed
+ * `localhost` — same host, same port, so that is a spelling difference, not a
+ * wrong link. The path and the port still have to be this app's.
+ */
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const pointsAtThisApp = (link) => {
+  try {
+    const expected = new URL(SERVER);
+    const got = new URL(link);
+    return (
+      (got.hostname === expected.hostname ||
+        (LOOPBACK.has(got.hostname) && LOOPBACK.has(expected.hostname))) &&
+      got.port === expected.port &&
+      got.pathname.startsWith('/~/together/join/')
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * A step that has to reach the board, and a failure that says what the page was
+ * showing instead of naming a selector nobody can act on — the difference
+ * between a three-minute opaque timeout and a named problem.
+ */
+const mustSee = async (page, selector, what) => {
+  try {
+    await page.waitForSelector(selector, { timeout: BOOT });
+  } catch {
+    const shown = await page
+      .evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 300))
+      .catch(() => '(the page could not be read)');
+    throw new Error(`${what} never happened — the page was showing: ${shown}`);
+  }
 };
 
 /** Plays the phone: the offline verifier approves whatever the page asked for. */
@@ -233,13 +323,118 @@ const layout = (page) =>
     };
   });
 
+/** Watches the page's own writes, so the probe knows the ids it is looking at. */
+const watchWrites = (page) => {
+  const created = { cards: [], spaces: [], sessions: [] };
+
+  page.on('response', async (response) => {
+    const path = new URL(response.url()).pathname;
+    const method = response.request().method();
+
+    try {
+      if (method === 'POST' && path.endsWith('/spaces/cards')) {
+        created.cards.push((await response.json()).id);
+      } else if (method === 'POST' && path.endsWith('/spaces')) {
+        const body = await response.json();
+        created.spaces.push(body.space_id);
+        created.sessions.push(body.session_token);
+      } else if (method === 'GET' && /\/spaces\/auth\/[\w-]+$/.test(path)) {
+        const body = await response.json();
+
+        if (body.session_token) {
+          created.sessions.push(body.session_token);
+        }
+      }
+    } catch {
+      // Not JSON we care about; ignore.
+    }
+  });
+
+  const wait = (list, what) => async () => {
+    const deadline = Date.now() + BOOT;
+    while (Date.now() < deadline) {
+      if (list.length > 0) {
+        return list[list.length - 1];
+      }
+
+      await page.waitForTimeout(100);
+    }
+
+    throw new Error(`the page never produced ${what}`);
+  };
+
+  return {
+    card: wait(created.cards, 'a card'),
+    space: wait(created.spaces, 'a space'),
+    session: wait(created.sessions, 'a session token'),
+  };
+};
+
+/** The one card's thread, as the browser is rendering it. */
+const threadText = (page) =>
+  page.evaluate(
+    () => document.querySelector('[data-testid^="thread-"]')?.innerText ?? '',
+  );
+
+/**
+ * Waits until the card's OWN thread element carries the text, and only then
+ * lets the caller read `threadText`.
+ *
+ * Waiting on `document.body` here is a race the board's activity feed wins: a
+ * comment is also a space event, so the feed quotes the body about one poll
+ * before the card's own 2s thread poll has it. The body check then passes while
+ * the thread element is still empty, and the assertion that follows reads a
+ * false negative on a feature that has already worked.
+ */
+const waitForThread = (page, text) =>
+  page.waitForFunction(
+    (needle) =>
+      (document.querySelector('[data-testid^="thread-"]')?.innerText ?? '')
+        .includes(needle),
+    text,
+    { timeout: BOOT },
+  );
+
+/**
+ * Waits until the card's open thread no longer carries the text — the other
+ * half of a presence measurement, asserted in the same place it appeared.
+ */
+const waitForThreadToClear = (page, text) =>
+  page.waitForFunction(
+    (needle) =>
+      !(document.querySelector('[data-testid^="thread-"]')?.innerText ?? '')
+        .includes(needle),
+    text,
+    { timeout: BOOT },
+  );
+
+/**
+ * Fids are derived per RUN, not fixed: the service keeps its database between
+ * runs, and an identity that already owns a space is landed on that board
+ * instead of the create form — which then reads as a sign-in failure at the
+ * create step. Three identities per width, spaced by ten per width index.
+ * TOGETHER_FID_BASE pins them when a transcript has to be replayable.
+ */
+const FID_BASE =
+  Number(process.env.TOGETHER_FID_BASE) || 200000000 + (Date.now() % 100000000);
+
 const run = async (browser, width, index) => {
-  const ownerFid = 910000 + index * 10;
-  const memberFid = 910001 + index * 10;
+  const ownerFid = FID_BASE + index * 10;
+  const memberFid = ownerFid + 1;
+  const strangerFid = ownerFid + 2;
   const errors = [];
   const context = await browser.newContext({
     viewport: { width: width.width, height: width.height },
     colorScheme: 'dark',
+  });
+  // Every response this context saw with a 4xx/5xx, so a console error that is
+  // only "Failed to load resource" says which resource — the browser's own
+  // message carries no URL, and a red check nobody can act on is not evidence.
+  const badResponses = [];
+  context.on('response', (response) => {
+    if (response.status() >= 400) {
+      badResponses.push(`${response.status()} ${response.url()}`);
+    }
   });
   const page = await context.newPage();
   // Everything in this context waits on the same budget: the explicit waits
@@ -255,6 +450,8 @@ const run = async (browser, width, index) => {
   });
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
   const nextRequestId = watchSignIns(page);
+  const writes = watchWrites(page);
+
 
   console.log(`\n${width.label}x${width.height}`);
 
@@ -302,7 +499,7 @@ const run = async (browser, width, index) => {
   await page.fill('input[placeholder="Fiddy launch"]', 'Fiddy launch');
   await page.fill('input[placeholder="fiddy"]', 'fiddy');
   await page.getByRole('button', { name: 'Create the space' }).click();
-  await page.waitForSelector('text=#fiddy', { timeout: BOOT });
+  await mustSee(page, 'text=#fiddy', 'creating the space');
   const board = await layout(page);
   expect(
     `${width.label}: the space name heads the board`,
@@ -327,13 +524,14 @@ const run = async (browser, width, index) => {
   await page.getByRole('button', { name: 'Add card' }).click();
   await page.waitForSelector('text=Ship the Together surface', { timeout: BOOT });
   expect(`${width.label}: the card is on the board`, true);
+  const cardId = await writes.card();
 
   // 6. the invite link is a real URL into this app
   await page.getByRole('button', { name: 'Invite someone' }).click();
   const link = (await page.locator('code').first().textContent())?.trim() ?? '';
   expect(
     `${width.label}: the invite link points at this app`,
-    link.startsWith(SERVER) && link.includes('/~/together/join/'),
+    pointsAtThisApp(link),
     link,
   );
   await page.screenshot({ path: path.join(OUT, `together-board-${width.label}.png`) });
@@ -343,6 +541,12 @@ const run = async (browser, width, index) => {
   const guestContext = await browser.newContext({
     viewport: { width: width.width, height: width.height },
     colorScheme: 'dark',
+  });
+  const guestBadResponses = [];
+  guestContext.on('response', (response) => {
+    if (response.status() >= 400) {
+      guestBadResponses.push(`${response.status()} ${response.url()}`);
+    }
   });
   const guest = await guestContext.newPage();
   guest.setDefaultTimeout(BOOT);
@@ -372,7 +576,7 @@ const run = async (browser, width, index) => {
   await guest.screenshot({ path: path.join(OUT, `together-join-${width.label}.png`) });
 
   await guest.getByRole('link', { name: 'Open the board' }).click();
-  await guest.waitForSelector('text=Ship the Together surface', { timeout: BOOT });
+  await mustSee(guest, 'text=Ship the Together surface', 'the member opening the board');
   expect(
     `${width.label}: the member sees BOTH members on the board`,
     (await guest.getByText(/@elena/).count()) > 0 &&
@@ -397,11 +601,216 @@ const run = async (browser, width, index) => {
   );
   await page.screenshot({ path: path.join(OUT, `together-done-${width.label}.png`) });
 
-  expect(`${width.label}: no browser errors`, errors.length === 0, errors.join(' | '));
+  // 9. Talking on the card, in two real browsers ----------------------------
+  const openCard = async (target) =>
+    target.getByRole('button', { name: /Comments/ }).first().click();
+  const composer = (target) =>
+    target.getByPlaceholder('Say something on this card');
+  const comment = (target) =>
+    target.getByRole('button', { name: 'Comment', exact: true }).click();
+
+  // What "changed" means here, and whose board it marks: the member's OWN move
+  // is never unread to them, and a board's history from before they joined is
+  // not retroactively unread either (the watermark starts at the join). So the
+  // first marker belongs to the OWNER's already-open board, which has just
+  // watched the member move the card — over its own polling, no reload.
+  await page.waitForSelector('[data-testid="unread-badge"]', {
+    timeout: BOOT,
+  });
+  const ownerBadge =
+    (await page.getByTestId('unread-badge').first().textContent())?.trim() ?? '';
+  expect(
+    `${width.label}: the owner's board marks the card the member changed`,
+    ownerBadge === '2 new',
+    ownerBadge,
+  );
+
+  // Opening that card is what clears its marker.
+  await openCard(page);
+  await page.waitForFunction(
+    () => !document.querySelector('[data-testid="unread-badge"]'),
+    null,
+    { timeout: BOOT },
+  );
+  expect(`${width.label}: opening the card cleared the owner's marker`, true);
+
+  // The owner says something on that card.
+  await composer(page).fill('the invite link is live — try it from your phone');
+  await comment(page);
+  await waitForThread(page, 'the invite link is live');
+  const ownerSaid = await threadText(page);
+  expect(
+    `${width.label}: the owner's comment is on the card`,
+    ownerSaid.includes('the invite link is live'),
+  );
+  expect(
+    `${width.label}: and carries the handle they signed in with`,
+    ownerSaid.includes('@elena'),
+  );
+
+  // The member's board learns about it over its own polling — no reload — and
+  // the marker lands on the card that changed, for the one member who has not
+  // read it.
+  await guest.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="unread-badge"]')
+        ?.textContent?.includes('1 new') ?? false,
+    null,
+    { timeout: BOOT },
+  );
+  expect(
+    `${width.label}: the member's board marks that card while they watch`,
+    true,
+  );
+
+  // Opening the card: the words, the author, and the marker gone.
+  await openCard(guest);
+  await guest.waitForFunction(
+    () =>
+      (document.querySelector('[data-testid^="thread-"]')?.innerText ?? '')
+        .includes('the invite link is live'),
+    null,
+    { timeout: BOOT },
+  );
+  const memberRead = await threadText(guest);
+  expect(
+    `${width.label}: the member reads the SAME comment on the SAME card`,
+    memberRead.includes('the invite link is live'),
+  );
+  expect(
+    `${width.label}: with the owner's Farcaster handle on it`,
+    memberRead.includes('@elena'),
+  );
+  await guest.waitForFunction(
+    () => !document.querySelector('[data-testid="unread-badge"]'),
+    null,
+    { timeout: BOOT },
+  );
+  expect(`${width.label}: opening the card cleared the member's marker`, true);
+  await guest.screenshot({
+    path: path.join(OUT, `together-thread-${width.label}.png`),
+  });
+
+  // Typing presence, measured in the other browser: the member types into the
+  // composer and the OWNER's open card says so; the member stops and it clears.
+  await composer(guest).fill('board is on my screen');
+  await waitForThread(page, 'marcus is typing');
+  expect(
+    `${width.label}: the owner sees "marcus is typing…" while the member types`,
+    true,
+  );
+  await composer(guest).fill('');
+  await waitForThreadToClear(page, 'is typing');
+  expect(
+    `${width.label}: and the indicator clears when the member stops`,
+    true,
+  );
+
+  // Sending: the reply lands on the owner's open card, under the reply's own
+  // author, and the owner's board is not left with a marker for a card they are
+  // looking at.
+  await composer(guest).fill('board is on my screen');
+  await comment(guest);
+  await waitForThread(page, 'board is on my screen');
+  const ownerRead = await threadText(page);
+  expect(
+    `${width.label}: the owner's open card shows the member's reply`,
+    ownerRead.includes('board is on my screen'),
+  );
+  expect(`${width.label}: under @marcus`, ownerRead.includes('@marcus'));
+  await page.waitForFunction(
+    () => !document.querySelector('[data-testid="unread-badge"]'),
+    null,
+    { timeout: BOOT },
+  );
+  expect(
+    `${width.label}: the card in front of the owner is not left marked unread`,
+    (await page.locator('[data-testid="unread-badge"]').count()) === 0,
+  );
+
+  // 10. What a thread refuses ------------------------------------------------
+  // A third identity, in their OWN space, holding their OWN valid session.
+  const challenge = await service('POST', '/spaces/auth', {
+    siwe_uri: `${SERVER}/~/together`,
+    domain: 'localhost',
+  });
+  await approve(challenge.body.request_id, strangerFid, 'stranger');
+  const answered = await service(
+    'GET',
+    '/spaces/auth/' + challenge.body.request_id,
+  );
+  const strangerToken = answered.body.session_token;
+  const strangerSpace = await service(
+    'POST',
+    '/spaces',
+    { name: 'Someone else', channel: 'elsewhere' },
+    strangerToken,
+  );
+  expect(
+    `${width.label}: a second identity has a space of their own`,
+    strangerSpace.status === 200 && Boolean(strangerSpace.body.space_id),
+    `space ${strangerSpace.body?.space_id}`,
+  );
+
+  const outsideRead = await service(
+    'GET',
+    `/spaces/cards/${cardId}/thread`,
+    undefined,
+    strangerSpace.body.session_token,
+  );
+  expect(
+    `${width.label}: a member of another space cannot read this thread`,
+    outsideRead.status === 404,
+    `${outsideRead.status} ${JSON.stringify(outsideRead.body)}`,
+  );
+  const outsideWrite = await service(
+    'POST',
+    `/spaces/cards/${cardId}/messages`,
+    { body: 'intruder' },
+    strangerSpace.body.session_token,
+  );
+  expect(
+    `${width.label}: and cannot comment on this card`,
+    outsideWrite.status === 404,
+    String(outsideWrite.status),
+  );
+  const anonymous = await service('GET', `/spaces/cards/${cardId}/thread`);
+  expect(
+    `${width.label}: an unauthenticated request is rejected`,
+    anonymous.status === 401,
+    String(anonymous.status),
+  );
+
+  // The same route, asked by somebody who is in the space, answers — so the
+  // 404 above is scope, not a broken endpoint.
+  const ownerToken = await writes.session();
+  const insideRead = await service(
+    'GET',
+    `/spaces/cards/${cardId}/thread`,
+    undefined,
+    ownerToken,
+  );
+  expect(
+    `${width.label}: a member of this space still reads it over HTTP`,
+    insideRead.status === 200 &&
+      insideRead.body.messages.some((m) =>
+        m.body.includes('board is on my screen'),
+      ),
+    String(insideRead.status),
+  );
+
+  expect(
+    `${width.label}: no browser errors`,
+    errors.length === 0,
+    [errors.join(' | '), resources(badResponses)].filter(Boolean).join(' — '),
+  );
   expect(
     `${width.label}: no browser errors in the member's context`,
     guestErrors.length === 0,
-    guestErrors.join(' | '),
+    [guestErrors.join(' | '), resources(guestBadResponses)]
+      .filter(Boolean)
+      .join(' — '),
   );
 
   await guestContext.close();
