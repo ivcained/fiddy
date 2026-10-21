@@ -24,21 +24,60 @@ space and a hosted one take the same code path. In production the client and the
 API share an origin (`VITE_TOGETHER_API_URL=''` means "same origin"); the dev
 probe proxies `/spaces` instead.
 
-The board refreshes by asking what changed every 3 seconds (the event stream,
-not a full re-read). Each card carries its own conversation, and that thread
-polls the same way (2 seconds). Typing is a heartbeat that expires by itself;
-unread activity is a per-member, per-card watermark that starts at the join, so
-a board's history is never retroactively unread and your own moves are never
-unread to you. Websockets: the service half is landed — `hermes-multiplayer`
-serves `/spaces/stream` (`ready`/`event`/`gap` frames, authenticated with the
-same member session token the REST calls carry) — and the client half is not:
-**this page asks, it does not listen.** In the service's terms, *the board is
-pushed over a websocket; a card's thread still polls*; in this page's terms both
-still poll (3s for the board, 2s for the thread), because the socket path here
-is card `t_0001449d` and the deployed service predates the stream too. REST
-stays the authority either way — a missed frame would cost one refresh, never a
-wrong board — which is why attaching the socket later changes no assertion on
-this page.
+The **board** stays live over a websocket (`/spaces/stream`), and still
+converges without one: see below. Each card carries its own conversation, and
+that thread polls (2 seconds) — in the service's terms, *the board is pushed over
+a websocket; a card's thread still polls*. Typing is a heartbeat that expires by
+itself; unread activity is a per-member, per-card watermark that starts at the
+join, so a board's history is never retroactively unread and your own moves are
+never unread to you.
+
+## How a board stays live
+
+One socket per open page, per space. It is opened on the service's own origin —
+in production that is the same origin as the app — and authenticated with **the
+same member session token every REST call on the page carries**. A browser cannot
+set a header on a websocket handshake, so the token travels in the query string;
+the service answers one it will not accept with close `1008` and a sentence
+(`Sign in with Farcaster first`, `Join a space first`, `Not a member of this
+space`) and never subscribes it.
+
+What a frame carries is a **hint**, never the board:
+
+```jsonc
+// service → page: subscribed. `cursor` is where REST should start reading.
+{ "type": "ready", "space_id": "…", "fid": 1234, "cursor": 42 }
+// service → page: something changed in this space (a space_events row).
+{ "type": "event", "space_id": "…", "seq": 43, "kind": "card.moved",
+  "actor_fid": 5678, "actor_name": "marcus", "created_at": 1761…,
+  "card_id": "…", "title": "Ship the Together surface", "status": "done" }
+// service → page: this socket fell behind; the backlog was dropped.
+{ "type": "gap", "dropped": 2 }
+```
+
+Every frame (`ready`, `event`, `gap`) sends the page back to `GET /spaces/state`,
+which stays the authority. So a lost frame costs a reading one refresh and never
+a wrong board, a client that missed a hundred of them catches up by asking, and
+the service can drop a backlog instead of replaying it — REST can answer "what
+is true now", the socket cannot.
+
+On the page (`src/lib/together.ts` → `openTogetherStream`), that means:
+
+- **the header says which path the page is on** — `Live`, `Connecting`,
+  `Disconnected — reconnecting`, `Not live` — instead of looking merely idle;
+- **reconnecting is automatic**, backing off 400 ms → 3 s and never giving up, so
+  an open page comes back when the service does;
+- **polling is still there as the fallback**, and only runs while the socket is
+  not carrying the board — a locked-down network or an old browser still
+  converges, just a few seconds slower (this is the 3-second `/spaces/events` ask
+  the surface started with);
+- `?together-poll=off` turns the fallback off entirely. That switch exists for
+  measurement: the probe opens every page with it, so a board that converges can
+  only have done so over the socket.
+
+A production deploy has to forward the websocket upgrade on `/spaces` (any
+reverse proxy in front of fiddy.fun); without that the page sits in
+`Disconnected — reconnecting` while the service is perfectly healthy.
 
 ## What the page does
 
@@ -70,24 +109,41 @@ stubbed; the probe plays the phone for the sign-in handshake (the service's
 dev-only approve endpoint) and reads back what actually rendered.
 
 ```sh
-# 1. the service, with its offline verifier, minting links back at the app
-cd ~/Projects/hermes-multiplayer
-HERMES_MULTIPLAYER_SIWF_MODE=trusting \
-HERMES_MULTIPLAYER_DB_PATH="$PWD/.runtime/together-probe.db" \
-HERMES_MULTIPLAYER_INVITE_BASE_URL="http://localhost:5199" \
-  .venv-verified/bin/python -m uvicorn server.service:app \
-  --host 127.0.0.1 --port 8767 --no-access-log
-
-# 2. the app, with the probe's own vite config (own dep cache + /spaces proxy)
+# 1. the app, with the probe's own vite config (own dep cache + /spaces proxy,
+#    websocket upgrade included)
 cd ~/Projects/fiddy/apps/farcaster-web
-HTTPS=false VITE_TOGETHER_API_URL='' \
+HTTPS=false VITE_TOGETHER_API_URL='' TOGETHER_SERVICE_URL=http://127.0.0.1:8767 \
   npx vite --config scripts/together.vite.config.mjs --port 5199 --strictPort
 
-# 3. the probe
+# 2. the probe. Two levels:
+#
+#    without TOGETHER_SERVICE_CMD it measures somebody else's service (start one
+#    the way the probe header prints) and REPORTS the reconnect checks as
+#    skipped — a check nobody ran is never counted as passed;
+#
+#    with it, the probe runs the service itself, so it can kill it mid-session
+#    and bring it back, which is the only way to measure what a page does when
+#    the service disappears under it.
 TOGETHER_CHROMIUM="$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell" \
 TOGETHER_SERVER=http://localhost:5199 TOGETHER_SERVICE_URL=http://127.0.0.1:8767 \
+TOGETHER_SERVICE_CMD="$HOME/Projects/hermes-multiplayer/.venv-verified/bin/python -m uvicorn server.service:app --host 127.0.0.1 --port 8767 --no-access-log" \
+TOGETHER_SERVICE_CWD="$HOME/Projects/hermes-multiplayer" \
+TOGETHER_SERVICE_DB="$HOME/Projects/hermes-multiplayer/.runtime/together-live.db" \
   node scripts/verify-together-surface.mjs
 ```
+
+A service the probe starts is given one database file and one session secret on
+every start, so a restart is a restart: with a fresh key per start every member
+would be signed out, and "the board came back" would be measuring a sign-in
+instead of a reconnected socket.
+
+Every page the probe opens carries `?together-poll=off` and its requests are
+counted, which is what makes the socket claims measurable rather than
+decorative: a board that converges while its page made **zero**
+`/spaces/events` requests did so over the socket. The two timed convergences
+(the member's join and the member's move) use a five-second window, not the boot
+budget, because the claim is "<1000ms" — a slow box has to report a number and
+fail the claim, not pass by patience.
 
 On a loaded machine the dev server can take a minute to serve its first paint,
 which is not an assertion about the feature: every wait in the probe rides
@@ -100,15 +156,33 @@ need a fresh database: run it twice against the same service and both runs are
 full first runs (sign-in → create → invite → join). `TOGETHER_FID_BASE` pins
 that base when a transcript has to be replayed exactly.
 
-Recorded 2026-10-22 03:32 IST: **80/80 checks**, at 390×844 and 1440×900, on the
-landed tree (this probe merged onto main's boot budget, the service on the 600/min
-default) — load 7–16, ~3 minutes for both widths against a warm dev server. The
-headline and the honest note, no horizontal overflow, the dark brand ground, a real
-QR from the service, the create-space form, three columns laid out per width, every
-visible button ≥40px, a card added by the owner, an invite link that really is a
-URL into this app, a **second identity** in a second browser context joining and
-seeing **both members and the owner's card**, that member moving the card to
-Done, and the owner's never-reloaded page **converging on its own**. Then the
+Recorded 2026-10-22 04:03–04:05 IST: **106/106 checks**, at 390×844 and
+1440×900, on the landed tree (the socket on main's probe, the service started by
+the probe itself on the 600/min default) — zero failures and zero skipped, ~2
+minutes for both widths against a warm dev server. The headline and the honest
+note, no horizontal overflow, the dark brand ground, a real QR from the service,
+the create-space form, three columns laid out per width, every visible button
+≥40px, a card added by the owner, an invite link that really is a URL into this
+app, a **second identity** in a second browser context joining and seeing **both
+members and the owner's card**, that member moving the card to Done, and the
+owner's never-reloaded page **converging on its own**.
+
+What makes the live half of that measurable: every page was opened with
+`?together-poll=off` and its requests counted. Both boards said `Live`, both
+opened a socket, and **both pages made 0 `/spaces/events` requests**, so every
+convergence below arrived over the socket. Timed on the owner's never-reloaded
+page: the new member landed there **138 ms** (390) and **55 ms** (1440) after the
+member's own page said the join had gone through, and the member's move to Done
+**4 ms and 8 ms after the service accepted it** (283 ms and 151 ms from the
+click; the rest is the member's own REST write, which no transport change can
+shorten). Then the service was killed under both pages: both said
+`Disconnected — reconnecting`, both came back `Live` by themselves once it
+returned, the board followed a card moved while they were away in **24 ms and
+52 ms**, the page re-read the whole board (its `Last read` line moved), and the
+only console errors in that window were the dead port's own — judged apart from
+the rest of the run, not forgiven with it.
+
+Then the
 conversation, in those same two browsers: the member moves the card and the
 **owner's** open board grows a marker on that card (`2 new`) with nobody
 reloading; opening it clears the marker; the owner comments and the **member's**
@@ -171,8 +245,11 @@ immediately.
 
 ## Not here yet (say "soon", not "done")
 
-- The socket on this page — the service pushes a board (`/spaces/stream`) and
-  the page still asks; card `t_0001449d` holds the client half.
+- The board socket in front of users: the client half is on main (this page
+  listens, and falls back to asking), but the **deployed** service predates
+  `/spaces/stream`, so until that service is deployed what a visitor gets is the
+  3-second fallback. Nothing in this page has to change for the socket to switch
+  on; the deploy does.
 - Notifications that leave the page: the unread marker is in-app only. No push,
   no email, no Telegram, no webhooks.
 - Switching between several spaces from the board (the space list exists; the

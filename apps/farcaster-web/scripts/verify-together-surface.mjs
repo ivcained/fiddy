@@ -111,10 +111,15 @@
 //   6. the invite link is a real URL into this app, and opening it in a SECOND
 //      browser context shows whose space it is before asking for anything
 //   7. the second identity signs in and joins; the board there shows BOTH
-//      members and the owner's card — the same board, not a copy
-//   8. the member moves the card to Done, and the owner's already-open page
-//      converges to Done on its own (its polling), with no reload
-//   9. TALKING ON THE CARD, in two real browsers:
+//      members and the owner's card — the same board, not a copy — and the
+//      owner's never-reloaded page shows the new member within a second of the
+//      join, which the socket carried
+//   8. the board says it is live on a socket, that socket is counted, and the
+//      page made ZERO `/spaces/events` requests
+//   9. the member moves the card to Done, and the owner's already-open page
+//      converges to Done on its own, in UNDER A SECOND measured from the moment
+//      the service accepted the move, with no reload
+//  10. TALKING ON THE CARD, in two real browsers:
 //        the member moves a card and the OWNER's open board marks that card
 //        unread on its own, no reload; opening it clears the marker;
 //        the owner comments; the member's board grows a marker on that same
@@ -128,22 +133,74 @@
 //      page's text: the board's activity feed quotes a comment a poll before
 //      the card's 2s thread poll has it, so a body-wide check would pass while
 //      the thread element was still empty.
-//  10. what a thread refuses: a member of a DIFFERENT space (their own space,
+//  11. what a thread refuses: a member of a DIFFERENT space (their own space,
 //      their own session) asking for this card's thread is answered 404, and an
 //      unauthenticated request is answered 401
-//  11. no console error and no page error in either context
+//  12. a card that identity puts on ITS OWN space never reaches this board
+//  13. with TOGETHER_SERVICE_CMD set: the service is killed and started again
+//      mid-session — both pages say they lost it, come back live by themselves
+//      once it returns, re-read the whole board, and follow a change that was
+//      made while they were away
+//  14. no console error and no page error in either context (the outage window
+//      is judged on its own, as above)
 //
 // Screenshots land in $TOGETHER_SHOT_DIR (default: the system temp dir).
 //
 // Knobs: TOGETHER_CHROMIUM points at a Chromium build already on the
 // machine so Playwright does not download one; TOGETHER_WIDTHS picks the
-// viewports to run ("390" for one of them, default both).
+// viewports to run ("390" for one of them, default both); TOGETHER_SERVICE_CMD
+// hands this probe a service of its OWN to run and kill (see below).
 //
 // Identities are derived per RUN from one base (FID_BASE below), so this probe
 // is re-runnable against a service whose database has outlived earlier runs: it
 // does not need a fresh DB, and a second run is not read as a broken sign-in.
 // TOGETHER_FID_BASE pins the base when a transcript has to be replayed exactly.
+//
+// HOW THE SOCKET IS PROVEN, NOT ASSUMED
+//
+//   Every page here is opened with `?together-poll=off` — the page's own switch
+//   for ruling the fallback out — and each page's requests are counted as it
+//   runs. So a board that converges while its page made ZERO `/spaces/events`
+//   requests did so over the socket, and nothing else could have carried it.
+//   Two of those convergences are measured against the clock rather than
+//   against a happy-looking board: the member's join, and the member's move of
+//   the card, both read from the owner's never-reloaded page.
+//
+//   The measurement window is five seconds and NOT the boot budget, on purpose:
+//   the claim is "<1000ms", so a slow box has to report a number and fail the
+//   claim rather than hang for five minutes and pass by patience.
+//
+// WHOSE SERVICE THIS IS, AND THE OUTAGE WINDOW
+//
+//   Level 1 — somebody else's service (every check but the reconnect ones,
+//   which are reported as skipped, never as passed):
+//
+//     TOGETHER_SERVER=http://localhost:5199 node scripts/verify-together-surface.mjs
+//
+//   Level 2 — the probe runs the service itself, so it can kill it mid-session
+//   and bring it back, which is the only way to measure what a page does when
+//   the service disappears under it:
+//
+//     TOGETHER_SERVICE_CMD="$HOME/Projects/hermes-multiplayer/.venv-verified/bin/python -m uvicorn server.service:app --host 127.0.0.1 --port 8767 --no-access-log" \
+//     TOGETHER_SERVICE_CWD="$HOME/Projects/hermes-multiplayer" \
+//     TOGETHER_SERVICE_DB="$HOME/Projects/hermes-multiplayer/.runtime/together-live.db" \
+//     TOGETHER_SERVER=http://localhost:5199 \
+//       node scripts/verify-together-surface.mjs
+//
+//   The service the probe starts is given ONE database file and ONE session
+//   secret on every start (TOGETHER_SERVICE_SECRET, default a fixed probe
+//   string), because a restart that mints a fresh key would sign the members
+//   out — and "the board came back" would then be measuring a new sign-in
+//   instead of a reconnected socket.
+//
+//   The outage is the one window in which the pages are EXPECTED to log
+//   connection noise: a failed websocket handshake into a dead port, and the
+//   dev server answering proxied reads with a 500. Those are judged separately
+//   at the end of that window (nothing else may log inside it, and nothing at
+//   all may log outside it), so counting them as page bugs cannot teach this
+//   probe to ignore console errors in general.
 
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -175,7 +232,32 @@ const BOOT = (() => {
   return value;
 })();
 
+/**
+ * Where the probe opens a board.
+ *
+ * `together-poll=off` is the page's own switch for ruling the polling fallback
+ * out: with it off, a board that converges did so because the socket carried
+ * the change. Every page in this probe — owner and member — is opened with it.
+ */
+const BOARD_URL = '/~/together?together-poll=off';
+
+/** The service the probe runs itself, when it was given one to run (level 2). */
+const SERVICE_CMD = process.env.TOGETHER_SERVICE_CMD ?? '';
+const SERVICE_CWD = process.env.TOGETHER_SERVICE_CWD ?? process.cwd();
+const SERVICE_DB =
+  process.env.TOGETHER_SERVICE_DB ??
+  path.join(os.tmpdir(), 'together-live-probe.db');
+/**
+ * The key this probe's own service signs sessions with. A restart has to be a
+ * restart: with a fresh key per start, every member would be signed out and the
+ * reconnect checks would be measuring a sign-in instead.
+ */
+const SERVICE_SECRET =
+  process.env.TOGETHER_SERVICE_SECRET ?? 'together-surface-probe-secret';
+
 const results = [];
+/** What this run could not judge — reported as skipped, never as passed. */
+const skipped = [];
 
 const record = (label, ok, detail = '') => {
   results.push({ label, ok });
@@ -183,6 +265,11 @@ const record = (label, ok, detail = '') => {
 };
 
 const expect = (label, ok, detail = '') => record(label, Boolean(ok), detail);
+
+const skip = (label, detail = '') => {
+  skipped.push(label);
+  console.log(`  skip  ${label}${detail ? ' — ' + detail : ''}`);
+};
 
 /**
  * The 4xx/5xx resources a context saw, deduped. Printed beside a console error
@@ -211,6 +298,60 @@ const service = async (method, url, body, token) => {
   });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : undefined };
+};
+
+/** Is the service answering right now? */
+const serviceIsUp = async () => {
+  const health = await service('GET', '/health').catch(() => null);
+  return Boolean(health && health.status === 200);
+};
+
+/** Wait until the service is up (or, with `up` false, until it is quiet). */
+const waitForService = async (up, timeoutMs = 30000) => {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if ((await serviceIsUp()) === up) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+
+  return false;
+};
+
+let serviceChild = null;
+
+/** Start the service this probe owns, and wait until it answers. */
+const startService = async () => {
+  const [command, ...args] = SERVICE_CMD.split(' ').filter(Boolean);
+  serviceChild = spawn(command, args, {
+    cwd: SERVICE_CWD,
+    env: {
+      ...process.env,
+      HERMES_MULTIPLAYER_SIWF_MODE: 'trusting',
+      HERMES_MULTIPLAYER_DB_PATH: SERVICE_DB,
+      HERMES_MULTIPLAYER_INVITE_BASE_URL: SERVER,
+      HERMES_MULTIPLAYER_SESSION_SECRET: SERVICE_SECRET,
+    },
+    stdio: 'ignore',
+  });
+
+  if (!(await waitForService(true))) {
+    throw new Error(`the service at ${SERVICE} never answered /health`);
+  }
+};
+
+/** Kill it, and wait until the port really is quiet. */
+const stopService = async () => {
+  const dying = serviceChild;
+  serviceChild = null;
+  dying.kill('SIGTERM');
+
+  if (!(await waitForService(false, 20000))) {
+    throw new Error(`the service at ${SERVICE} kept answering after SIGTERM`);
+  }
 };
 
 /**
@@ -370,6 +511,92 @@ const watchWrites = (page) => {
   };
 };
 
+/**
+ * Counts what this page asks the service, and keeps the session token it sent.
+ *
+ * Three checks rest on these numbers: a page opened with polling off must make
+ * ZERO `/spaces/events` requests (so a converged board was the socket's doing),
+ * the board must have actually opened one socket, and the reconnect check moves
+ * a card as the page's own member, using the token this page itself carries —
+ * so the change is one the socket has to deliver to it, not one the probe
+ * arranged as somebody else.
+ */
+const watchTraffic = (page) => {
+  const seen = { events: 0, state: 0, streams: 0, token: '' };
+
+  page.on('request', (request) => {
+    const authorization = request.headers()['authorization'];
+
+    if (authorization?.startsWith('Bearer ')) {
+      seen.token = authorization.slice(7);
+    }
+
+    let url;
+
+    try {
+      url = new URL(request.url());
+    } catch {
+      return;
+    }
+
+    if (url.pathname.endsWith('/spaces/events')) {
+      seen.events += 1;
+    }
+
+    if (url.pathname.endsWith('/spaces/state')) {
+      seen.state += 1;
+    }
+  });
+
+  page.on('websocket', (socket) => {
+    let url;
+
+    try {
+      url = new URL(socket.url());
+    } catch {
+      return;
+    }
+
+    if (url.pathname.endsWith('/spaces/stream')) {
+      seen.streams += 1;
+    }
+  });
+
+  return seen;
+};
+
+/** The board's own status light: what this page says it is doing right now. */
+const liveChip = (page) =>
+  page.evaluate(() => {
+    const chip = document.querySelector('[data-live]');
+
+    return chip
+      ? {
+          status: chip.getAttribute('data-live') ?? '',
+          text: (chip.textContent ?? '').trim(),
+        }
+      : null;
+  });
+
+/** Waits for the chip to say one thing; true when it did. */
+const waitForLiveStatus = (page, status, timeout = 15000) =>
+  page
+    .waitForFunction(
+      (wanted) =>
+        document.querySelector('[data-live]')?.getAttribute('data-live') ===
+        wanted,
+      status,
+      { timeout },
+    )
+    .then(() => true)
+    .catch(() => false);
+
+/** The board's own "Last read" line: proof the page re-read after a reconnect. */
+const lastRead = (page) =>
+  page.evaluate(
+    () => (document.body.innerText.match(/Last read [0-9:]+/) ?? [])[0] ?? null,
+  );
+
 /** The one card's thread, as the browser is rendering it. */
 const threadText = (page) =>
   page.evaluate(
@@ -423,6 +650,20 @@ const run = async (browser, width, index) => {
   const memberFid = ownerFid + 1;
   const strangerFid = ownerFid + 2;
   const errors = [];
+  /**
+   * What the pages log WHILE THIS PROBE HAS KILLED THE SERVICE.
+   *
+   * That window is deliberate: a browser retrying a socket into a dead port logs
+   * a failed handshake, and the dev server answers the reads it proxies with a
+   * 500. Counting that as "the page has a bug" would only teach this probe to
+   * ignore console errors in general, which is worse than the bug it is looking
+   * for — so the two windows are kept apart and BOTH are still asserted on:
+   * nothing but the outage may log outside the window, and only connection noise
+   * may log inside it.
+   */
+  const outageErrors = [];
+  let inOutage = false;
+  const logError = (text) => (inOutage ? outageErrors : errors).push(text);
   const context = await browser.newContext({
     viewport: { width: width.width, height: width.height },
     colorScheme: 'dark',
@@ -445,18 +686,20 @@ const run = async (browser, width, index) => {
   page.setDefaultNavigationTimeout(BOOT);
   page.on('console', (message) => {
     if (message.type() === 'error') {
-      errors.push(`console: ${message.text()}`);
+      logError(`console: ${message.text()}`);
     }
   });
-  page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+  page.on('pageerror', (error) => logError(`pageerror: ${error.message}`));
   const nextRequestId = watchSignIns(page);
   const writes = watchWrites(page);
+  const owner = watchTraffic(page);
 
 
   console.log(`\n${width.label}x${width.height}`);
 
-  // 1. the front door
-  await page.goto(`${SERVER}/~/together`, {
+  // 1. the front door — opened with the fallback switched off, so every
+  //    convergence after this point has to have come over the socket.
+  await page.goto(`${SERVER}${BOARD_URL}`, {
     waitUntil: 'domcontentloaded',
     timeout: BOOT,
   });
@@ -518,6 +761,24 @@ const run = async (browser, width, index) => {
     board.smallestButton >= 40,
     `${board.smallestButton}px`,
   );
+  // The board's own status light, read rather than assumed: this page says it
+  // is on a socket, and the traffic says it never asked the events route.
+  const opened = await waitForLiveStatus(page, 'live', 10000);
+  const chip = await liveChip(page);
+  expect(
+    `${width.label}: the board says it is live on a socket`,
+    opened && chip?.status === 'live',
+    chip ? `"${chip.text}" (data-live=${chip.status})` : 'no chip on the board',
+  );
+  expect(
+    // `>= 1` and not `=== 1`: this page renders inside React.StrictMode, which
+    // in a dev build mounts every effect twice, so a second socket is opened
+    // and closed again on mount. What rules the polling fallback out is the
+    // ZERO, not the count — and the chip above has to say the board is live.
+    `${width.label}: the page opened a socket and made no event polls`,
+    owner.streams >= 1 && owner.events === 0,
+    `${owner.streams} socket(s), ${owner.events} /spaces/events request(s)`,
+  );
 
   // 5. the owner puts work on the board
   await page.fill('input[placeholder="Write the release note"]', 'Ship the Together surface');
@@ -551,15 +812,23 @@ const run = async (browser, width, index) => {
   const guest = await guestContext.newPage();
   guest.setDefaultTimeout(BOOT);
   guest.setDefaultNavigationTimeout(BOOT);
+  const guestLog = (text) =>
+    (inOutage ? outageErrors : guestErrors).push(text);
   guest.on('console', (message) => {
     if (message.type() === 'error') {
-      guestErrors.push(`console: ${message.text()}`);
+      guestLog(`console [member]: ${message.text()}`);
     }
   });
-  guest.on('pageerror', (error) => guestErrors.push(`pageerror: ${error.message}`));
+  guest.on('pageerror', (error) =>
+    guestLog(`pageerror [member]: ${error.message}`),
+  );
   const guestRequestId = watchSignIns(guest);
+  const guestTraffic = watchTraffic(guest);
 
-  await guest.goto(link, { waitUntil: 'domcontentloaded', timeout: BOOT });
+  await guest.goto(`${link}?together-poll=off`, {
+    waitUntil: 'domcontentloaded',
+    timeout: BOOT,
+  });
   await guest.waitForSelector('text=#fiddy', { timeout: BOOT });
   expect(
     `${width.label}: the invite says whose space it is`,
@@ -573,7 +842,29 @@ const run = async (browser, width, index) => {
   await guest.waitForSelector('canvas', { timeout: BOOT });
   await approve(await guestRequestId(), memberFid, 'marcus');
   await guest.waitForSelector('text=You joined the space.', { timeout: BOOT });
+  const joinedAt = Date.now();
   await guest.screenshot({ path: path.join(OUT, `together-join-${width.label}.png`) });
+
+  // The join is a push too: the owner's page has never been reloaded and its
+  // polling is off, so the new member arriving there is the socket's doing. Like
+  // the move below, this is a measurement and not a boot wait — five seconds,
+  // so a slow box reports a number instead of passing by patience.
+  let sawMemberAt = 0;
+  try {
+    await page.waitForSelector('text=@marcus', { timeout: 5000 });
+    sawMemberAt = Date.now();
+  } catch {
+    sawMemberAt = 0;
+  }
+  expect(
+    `${width.label}: the new member reached the owner's open page in ${
+      sawMemberAt ? `${sawMemberAt - joinedAt}ms` : '>5000ms'
+    } (<1000)`,
+    sawMemberAt > 0 && sawMemberAt - joinedAt < 1000,
+    sawMemberAt
+      ? `${sawMemberAt - joinedAt}ms after the member's own page said so, no reload`
+      : 'never appeared within 5s — polling was off, so nothing else could carry it',
+  );
 
   await guest.getByRole('link', { name: 'Open the board' }).click();
   await mustSee(guest, 'text=Ship the Together surface', 'the member opening the board');
@@ -586,18 +877,61 @@ const run = async (browser, width, index) => {
     `${width.label}: the member sees the owner's card`,
     await guest.getByText('Ship the Together surface').isVisible(),
   );
+  expect(
+    `${width.label}: the member's board is live on its own socket too`,
+    (await liveChip(guest))?.status === 'live',
+    JSON.stringify(await liveChip(guest)),
+  );
 
   await guest.getByRole('button', { name: 'Start' }).click();
   await guest.waitForTimeout(500);
+  const moveAt = Date.now();
   await guest.getByRole('button', { name: 'Done' }).click();
   await guest.waitForSelector('text=Cast it to the channel', { timeout: BOOT });
+  const confirmedAt = Date.now();
   expect(`${width.label}: the member completed the card`, true);
 
-  // The owner's page was never reloaded: polling has to bring it over.
-  await page.waitForSelector('text=Cast it to the channel', { timeout: BOOT });
+  // The owner's page was never reloaded and polling is off on it, so whatever
+  // brings this over is the socket. This wait is a measurement, not a boot wait:
+  // the claim is "<1000ms", so a slow box has to report a number and fail the
+  // claim rather than hang for five minutes and pass by patience.
+  let renderedAt = 0;
+  try {
+    await page.waitForSelector('text=Cast it to the channel', { timeout: 5000 });
+    renderedAt = Date.now();
+  } catch {
+    renderedAt = 0;
+  }
+  // Two numbers, because they measure two different things.
+  //
+  //   the push leg — from the moment the SERVICE accepted the move (which the
+  //   member's own page reports, because its own PATCH returned) to the moment
+  //   the owner's never-reloaded page renders it. That is what this page
+  //   changed: it used to be up to one 3-second poll away, and is now a frame.
+  //
+  //   the end-to-end number — from the click. The writer's own REST write has
+  //   measured seconds on a box running sibling workers, which no live-transport
+  //   change can influence, so the assertion rests on the push leg and the
+  //   end-to-end number is printed beside it rather than hidden.
+  const pushMs = renderedAt && confirmedAt ? renderedAt - confirmedAt : 0;
+  const endToEndMs = renderedAt ? renderedAt - moveAt : 0;
   expect(
-    `${width.label}: the owner's open board converged to Done on its own`,
-    true,
+    `${width.label}: the member's move reached the owner's open page ${
+      pushMs ? `in ${pushMs}ms` : 'never'
+    } after the service accepted it (<1000ms;${
+      endToEndMs ? ` ${endToEndMs}ms from the click` : ' nothing within 5s'
+    })`,
+    pushMs > 0 && pushMs < 1000,
+    renderedAt
+      ? `${pushMs}ms of push after the service accepted it; ${
+          confirmedAt - moveAt
+        }ms of the end-to-end number was the member's own write`
+      : 'never appeared within 5s — polling was off, so nothing else could carry it',
+  );
+  expect(
+    `${width.label}: neither page asked the events route (polling was off for this probe)`,
+    owner.events === 0 && guestTraffic.events === 0,
+    `${owner.events} on the owner's page, ${guestTraffic.events} on the member's`,
   );
   await page.screenshot({ path: path.join(OUT, `together-done-${width.label}.png`) });
 
@@ -800,6 +1134,136 @@ const run = async (browser, width, index) => {
     String(insideRead.status),
   );
 
+  // 11. A card in ANOTHER space must never reach this board ------------------
+  // The third identity, on its own space, with its own session: the same thing a
+  // member of the space does, only somewhere else.
+  const strangerCard = await service(
+    'POST',
+    '/spaces/cards',
+    { title: 'Somebody else\u2019s work' },
+    strangerSpace.body.session_token,
+  );
+  expect(
+    `${width.label}: the other space has a card of its own`,
+    strangerCard.status === 200 && Boolean(strangerCard.body.id),
+    `${strangerCard.status} ${strangerCard.body?.id ?? ''}`,
+  );
+  // The owner's page has a live socket and no polling, and it is given every
+  // chance to be wrong: three seconds of a pushed board with a new event in
+  // another space. Absence is the assertion.
+  await page.waitForTimeout(3000);
+  expect(
+    `${width.label}: the other space's card never arrives on this board`,
+    (await page.getByText('Somebody else\u2019s work').count()) === 0,
+  );
+
+  // 12. The service is killed mid-session, and started again ----------------
+  if (!SERVICE_CMD) {
+    skip(
+      `${width.label}: the page says it lost the service, then recovers`,
+      'no TOGETHER_SERVICE_CMD — the probe did not start this service, so it will not kill it',
+    );
+  } else {
+    const beforeOutage = await liveChip(page);
+    const readBeforeOutage = await lastRead(page);
+    // Everything the pages log from here until the service is back is the
+    // outage talking, and is judged on its own at the end of this block.
+    inOutage = true;
+    await stopService();
+
+    const lostIt = await waitForLiveStatus(page, 'reconnecting', 10000);
+    const down = await liveChip(page);
+    expect(
+      `${width.label}: the page shows it lost the service`,
+      lostIt && down?.status === 'reconnecting',
+      down ? `"${down.text}" (data-live=${down.status})` : 'no chip on the board',
+    );
+    const memberLostIt = await waitForLiveStatus(guest, 'reconnecting', 10000);
+    expect(
+      `${width.label}: the member's page says so too`,
+      memberLostIt,
+      JSON.stringify(await liveChip(guest)),
+    );
+    await page.screenshot({
+      path: path.join(OUT, `together-offline-${width.label}.png`),
+    });
+
+    await startService();
+    const cameBack = await waitForLiveStatus(page, 'live', 30000);
+    const back = await liveChip(page);
+    inOutage = false;
+    // The outage window is closed, and what it produced is judged here: a retry
+    // into a dead port and a proxied read the dev server answered with a 500 are
+    // the outage, not a bug. Anything else the page logged in that window is a
+    // bug, and is not forgiven for having happened then.
+    const strays = outageErrors.filter(
+      (text) =>
+        !/WebSocket connection to|Failed to load resource|net::ERR_/.test(text),
+    );
+    expect(
+      `${width.label}: everything the pages logged during the outage was the outage itself`,
+      strays.length === 0,
+      strays.length
+        ? strays.join(' | ')
+        : `${outageErrors.length} connection error(s), all of them the dead port`,
+    );
+    expect(
+      `${width.label}: the page is live again by itself once the service returns`,
+      cameBack,
+      `was "${beforeOutage?.text}", then "${down?.text}", now "${back?.text}"`,
+    );
+
+    // ...and the socket it came back on really carries changes: the card is
+    // moved back BY ITS OWN MEMBER over HTTP, and this page — still opened with
+    // polling off — has to follow a change nobody told it about.
+    const boardNow = await service('GET', '/spaces/state', undefined, ownerToken);
+    const cardNow = (boardNow.body?.cards ?? []).find(
+      (card) => card.id === cardId,
+    );
+    const movedBack = cardNow
+      ? await service(
+          'PATCH',
+          `/spaces/cards/${cardId}`,
+          { status: 'todo', version: cardNow.version },
+          ownerToken,
+        )
+      : { status: 0 };
+
+    if (movedBack.status !== 200) {
+      expect(
+        `${width.label}: the reconnected board follows a change made while it was away`,
+        false,
+        `the card could not be moved back (${movedBack.status})`,
+      );
+    } else {
+      const backAt = Date.now();
+      const followed = await page
+        .waitForFunction(
+          () => !document.body.innerText.includes('Cast it to the channel'),
+          null,
+          { timeout: 5000 },
+        )
+        .then(() => Date.now() - backAt)
+        .catch(() => 0);
+      expect(
+        `${width.label}: the reconnected board follows a change made while it was away (${
+          followed || '>5000'
+        }ms)`,
+        followed > 0,
+        followed
+          ? `${followed}ms after the service returned`
+          : 'the change never arrived',
+      );
+    }
+
+    const readAfterOutage = await lastRead(page);
+    expect(
+      `${width.label}: the page re-read the whole board after coming back`,
+      Boolean(readAfterOutage) && readAfterOutage !== readBeforeOutage,
+      `${readBeforeOutage} → ${readAfterOutage}`,
+    );
+  }
+
   expect(
     `${width.label}: no browser errors`,
     errors.length === 0,
@@ -818,8 +1282,10 @@ const run = async (browser, width, index) => {
 };
 
 const main = async () => {
-  const health = await service('GET', '/health').catch(() => null);
-  if (!health || health.status !== 200) {
+  if (SERVICE_CMD) {
+    // This probe owns the service, so it can kill it later and start it again.
+    await startService();
+  } else if (!(await serviceIsUp())) {
     throw new Error(
       `no collaboration service at ${SERVICE} — see the header of this file for the command`,
     );
@@ -841,6 +1307,10 @@ const main = async () => {
     }
   } finally {
     await browser.close();
+    // A service this probe started does not outlive the probe.
+    if (serviceChild) {
+      await stopService();
+    }
   }
 
   const failed = results.filter((result) => !result.ok);
@@ -848,6 +1318,10 @@ const main = async () => {
     `\n${results.length - failed.length}/${results.length} checks passed` +
       (failed.length ? ` — failing: ${failed.map((f) => f.label).join('; ')}` : ''),
   );
+  if (skipped.length) {
+    // Reported, never counted as passed: a check nobody ran is not evidence.
+    console.log(`${skipped.length} skipped — ${skipped.join('; ')}`);
+  }
   console.log(`screenshots in ${OUT}`);
   process.exit(failed.length ? 1 : 0);
 };
