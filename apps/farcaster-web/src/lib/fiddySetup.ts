@@ -21,6 +21,7 @@ import type { WalletChoiceId } from '~/lib/surp/walletChoice';
 
 export type BrainId =
   | 'fiddy'
+  | 'surp'
   | 'openai'
   | 'anthropic'
   | 'google'
@@ -28,8 +29,15 @@ export type BrainId =
   | 'nous'
   | 'custom';
 
+/**
+ * Every id a stored setup may hold. 'surp' is a service like the others — its
+ * address lives with the provider presets on the agent service, not here — so
+ * it belongs in this list rather than in LEGACY_BRAINS: a build that offered it
+ * under its own name is a build that offered the same choice.
+ */
 export const BRAIN_IDS: BrainId[] = [
   'fiddy',
+  'surp',
   'openai',
   'anthropic',
   'google',

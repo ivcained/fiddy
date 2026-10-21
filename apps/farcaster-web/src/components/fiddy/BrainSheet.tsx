@@ -9,6 +9,10 @@
  *   ChatGPT, Claude, Gemini, OpenRouter, Nous Portal
  *                  a service they already pay for: one key, one model name. The
  *                  address is ours, so they are never asked for it.
+ *   Surp           pay as you go — the same preset shape, with the one thing
+ *                  the others cannot say: what a month would actually cost,
+ *                  computed from Surp's live prices against the plan it
+ *                  replaces, and a key made here in one press (SurpBrainPanel).
  *   Your own AI service
  *                  anything OpenAI-compatible they run or bought: an address, a
  *                  key and a model name.
@@ -21,8 +25,12 @@
  * exists to remove.
  *
  * The key is handled in one place and never leaves it: it is component state,
- * passed to the agent service for the check and for the apply, and never written
- * into the setup file, the browser's storage or any copy on this screen.
+ * passed to the agent service for the check and for the apply, never written
+ * into the setup file, and never shown in full on this screen. There is one
+ * honest exception, and the screen says so where it happens: a key Surp's own
+ * panel makes did not exist anywhere before it was made there, so that panel
+ * keeps it in the browser (its own storage entry — `lib/surp/keys.ts`) and this
+ * sheet only ever shows a mask of it.
  */
 
 import React, { memo, useCallback, useEffect, useState } from 'react';
@@ -43,6 +51,8 @@ import {
   saveFiddySetup,
   useFiddySetup,
 } from '~/lib/fiddySetup';
+
+import { SurpBrainPanel } from './SurpBrainPanel';
 
 interface BrainCard {
   id: BrainId;
@@ -67,6 +77,16 @@ export const BRAIN_CARDS: BrainCard[] = [
     line: "Works out of the box — Fiddy's built-in brain. Nothing to plug in, nothing to paste, and it keeps working when this tab is closed.",
     needs: 'nothing',
     kind: 'default',
+  },
+  {
+    id: 'surp',
+    title: 'Surp',
+    tag: 'pay as you go',
+    tagKind: 'live',
+    line: 'Pay only for the requests you actually make, and see what a month would cost before you spend anything. The key is made here, in one press.',
+    needs: 'account',
+    where: 'surp.ivc.lol',
+    kind: 'preset',
   },
   {
     id: 'openai',
@@ -144,6 +164,11 @@ export const brainSummary = (setup: FiddySetup): string => {
       ? `Your own service (${setup.brainServiceUrl.replace('https://', '')})${model}`
       : 'Your own service — not set up yet';
   }
+  // Surp is not "your account": there is no account, and the whole point is
+  // that it is billed per request against a key you made here.
+  if (setup.brain === 'surp') {
+    return `${card.title} — pay as you go${model}`;
+  }
   return `${card.title} — your account${model}`;
 };
 
@@ -211,6 +236,22 @@ const probeSentence = (probe: BrainProbe): string => {
   return PLAIN_WORDS[probe.code] ?? 'That check did not work. Try again.';
 };
 
+/**
+ * Surp's own sentences. Every other card can promise "Fiddy keeps no copy of
+ * your key", because that key already exists on the owner's own dashboard and
+ * only passes through. Surp's key does not exist anywhere until this screen
+ * makes it, so the honest version says where it does live — in this browser,
+ * readable by this page, and nowhere else.
+ */
+const SURP_LINES = {
+  heading: 'Pay as you go — here is what it would cost.',
+  sub: 'It connects to surp.ivc.lol. This key is made here and kept in this browser; Fiddy keeps no other copy of it.',
+  keptWhenApplied:
+    'Your key is set on your own agent. The copy in this browser stays here, and nothing else keeps one.',
+  keptHere:
+    'Saved in this browser, so you will not have to paste it again. Nothing else keeps a copy.',
+};
+
 export const BrainSheet = memo(() => {
   const setup = useFiddySetup();
   const { status, session } = useAgentSession();
@@ -233,6 +274,14 @@ export const BrainSheet = memo(() => {
 
   const paired = status === 'paired' && session !== null;
   const card = openId ? brainCard(openId) : null;
+
+  /**
+   * A key made in Surp's panel is usable here and now: it goes into the field
+   * below, so "test connection" and "use this brain" work without the owner
+   * copying a string from one box into another on the same screen. It stays
+   * component state — the setup file still holds no credential.
+   */
+  const keepKey = useCallback((value: string) => setKey(value), []);
 
   // Which agent would be changed. Listed only when there is a service to ask;
   // a failure here is not an error on this screen — the sheet still works, it
@@ -434,12 +483,16 @@ export const BrainSheet = memo(() => {
       {card ? (
         <div className="fiddy-connect" data-fiddy="brain-connect">
           <h3 className="fiddy-connect-title">
-            {card.needs === 'address'
-              ? 'Tell Fiddy about your service.'
-              : `Use your own ${card.title}.`}
+            {card.id === 'surp'
+              ? SURP_LINES.heading
+              : card.needs === 'address'
+                ? 'Tell Fiddy about your service.'
+                : `Use your own ${card.title}.`}
           </h3>
 
-          {card.where ? (
+          {card.id === 'surp' ? (
+            <p className="fiddy-connect-sub">{SURP_LINES.sub}</p>
+          ) : card.where ? (
             <p className="fiddy-connect-sub">
               It connects to {card.where}. Your key goes straight to your own
               agent — Fiddy keeps no copy of it.
@@ -450,6 +503,8 @@ export const BrainSheet = memo(() => {
               it.
             </p>
           )}
+
+          {card.id === 'surp' ? <SurpBrainPanel onKey={keepKey} /> : null}
 
           {card.needs === 'address' ? (
             <label className="fiddy-field">
@@ -579,9 +634,13 @@ export const BrainSheet = memo(() => {
 
           <p className="fiddy-honest-note">
             <span>
-              {paired && agentId
-                ? 'Your key is used to set this up on your own agent and is not kept anywhere else.'
-                : 'Saved on this device. Fiddy keeps no copy of your key, so you will paste it once more when your agent is set up.'}
+              {card.id === 'surp'
+                ? paired && agentId
+                  ? SURP_LINES.keptWhenApplied
+                  : SURP_LINES.keptHere
+                : paired && agentId
+                  ? 'Your key is used to set this up on your own agent and is not kept anywhere else.'
+                  : 'Saved on this device. Fiddy keeps no copy of your key, so you will paste it once more when your agent is set up.'}
             </span>
           </p>
 
