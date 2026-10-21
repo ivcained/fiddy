@@ -158,7 +158,8 @@ what Solana currently supports.
 
 ## Requirements
 
-- Node.js 20.19.5 (see `.node-version`)
+- Node.js 20.19.5 (see `.node-version`; the gates must run on it — see
+  [Node version for local runs](#node-version-for-local-runs))
 - pnpm 10.8.1 (declared in `package.json`)
 - A Reown project ID for WalletConnect
 - Etherscan and Alchemy API keys for complete multichain EVM activity
@@ -222,6 +223,44 @@ pnpm --filter farcaster-web lint
 pnpm --filter farcaster-web test
 pnpm --filter farcaster-web build
 ```
+
+### Node version for local runs
+
+`.node-version` pins 20.19.5, the runtime CI installs through `actions/setup-node`,
+and the root `.npmrc` pins pnpm to it too (`use-node-version`), so the four
+commands above already run on CI's runtime. Running `vitest`, `tsc` or `eslint`
+by hand with a newer Node on `PATH` does not give CI's result.
+
+MEASURED 2026-10-21, one tree, only the runtime changed:
+
+- v20.19.5 (pinned, what CI installs): `Test Files 91 passed | 1 skipped (92)`,
+  `Tests 959 passed | 2 skipped (961)`, exit 0 — the result the
+  `test (farcaster-web)` CI job reports.
+- v24.22.0: the runtime defines no `localStorage` global, so `vitest` still hands
+  the jsdom test files jsdom's own storage; the wallet files pass.
+- v25.0.0: `localStorage` is now the runtime's own global (a bare object), so the
+  wallet files fail with `TypeError: localStorage.clear is not a function`.
+- v26.10.0 (this workstation's default `node`): same shadowing, but the
+  runtime's `localStorage` is `undefined` unless the process was started with
+  `--localstorage-file`, so the same files fail with `Test Files 6 failed | 85
+  passed | 1 skipped (92)` / `Tests 104 failed | 855 passed | 2 skipped (961)`,
+  every failure `TypeError: Cannot read properties of undefined (reading
+  'clear')` at the first `localStorage.clear()` in `beforeEach`.
+
+Those Node 25+ failures are an environment artifact, not a red gate, and jsdom is
+not the cause: in the same process `globalThis.jsdom.window.localStorage` is a
+working storage object. What differs is which globals the test file is handed.
+`@vitest/utils`'s `getWindowKeys` copies a jsdom window key onto `globalThis`
+only when that key is absent there or is one of its hardcoded `KEYS`, and
+`localStorage`/`sessionStorage` are not in that list (vitest 3.2.4), so the
+`// @vitest-environment jsdom` docblock keeps the runtime's global instead of the
+window's. Node's `sessionStorage` is shadowed the same way on 25+, which means a
+jsdom test that reads `sessionStorage` there reads the runtime's storage.
+
+If pnpm cannot fetch the pinned Node, install 20.19.5 yourself (`fnm use`,
+`nvm use`, `pnpm env use --global 20.19.5`) and put it first on `PATH` before
+running the gates. Do not relax or skip the wallet tests to get a green local
+run: on the pinned runtime they pass unmodified.
 
 The wallet flows have also been exercised manually with EVM and Solana
 WalletConnect, Unified MetaMask Connect on mobile, a browser with no injected
