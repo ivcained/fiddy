@@ -456,8 +456,67 @@ typing text and pressing **Cast**:
 | drafts list / discard | `GET /v2/draft-caststorms`, `POST\|GET\|DELETE /v2/draft-casts` | **local** — the same store; the Drafts tab and resume button read it back. |
 | the submit itself | `POST /v2/casts` | **hosted, refused by name.** The submit *does* reach it (the earlier audit's \"never reaches `/v2/casts`\" was a probe under-measurement, corrected in that probe's comments). It answers 501 with the classification's sentence — sending a cast means signing it with an app key, and this device has none — and the composer renders it: \"The cast didn't post. Sending a cast means signing it with an app key … nothing was signed and nothing was sent.\" No success UI. |
 
-Still open, deliberately: signing the Farcaster message (the app-key flow). That
-is the only thing between this compose → Cast path and a real post.
+Still open at that measurement, and now half-closed: the pass the refusal asks
+for. As of `88cf2ba` the submit is still refused in those words — and the pass
+is now offered from the shell, one press after sign-in, instead of only on
+Advanced. See the next section; signing a cast and reading it back is the write
+layer's work, measured by that work's own probes, not here.
+
+### The one-time "let Fiddy post as you" step (card `t_c9861884`, measured 2026-10-21)
+
+*The sentence that was true and nowhere useful.* The refusal above sends the
+reader to Advanced → their setup → "Issue app key" — two taps away from the
+composer they were standing in, in the middle of writing a post. MEASURED in the
+live client, signed in, before this change: that is the only path to a pass, and
+the reader meets it as a failure rather than as a step.
+
+*What it is now.* `~/components/session/PostForYouStep`, mounted once in the
+shell (`AuthedLayout`), is the offer: "Let Fiddy post as you?" — what Fiddy may
+do with it (post, reply, like and follow, signed on this device, nothing that can
+post as you held by a server), what setting it up costs (the account's seed
+phrase, once, test account only), "Set it up" and "Not now". It renders nothing
+unless all of these hold: the session is a device one, the node adapter is on, a
+server is named, the account is known, and this device holds no pass for it yet.
+"Not now" is remembered per account (`fiddy_post_for_you_<fid>_said_not_now`), so
+the offer is made once.
+
+*The warning stays between the offer and the setup.* "Set it up" opens the SAME
+screen Advanced ships (`SeedPhraseWarningModal`), unchanged and loaded lazily:
+checkbox acknowledgement, test account only, confirm disabled without it, phrase
+cleared on close. Nothing about how the pass is issued changed — the one signing
+path (`issueAppKey` from the node client), the pass stored browser-local per FID,
+the phrase never stored. A second signing path is what the card forbids, so this
+is only a new door onto the existing one.
+
+| Check (probe `scripts/verify-post-for-you.mjs`, **7/7**, exit 0) | Evidence |
+| --- | --- |
+| a completed sign-in lands in the client | `clicked="Go social — sign in with Farcaster"`, path `/`, `main` present, not the device-only landing |
+| the offer is made right after it, in the shell | `[data-fiddy="post-for-you"]` on screen at `/`, without navigating anywhere |
+| plain words, two buttons | "Set it up" and "Not now"; no `gasless\|signer\|scope\|ttl\|KEY_ADD\|app key\|nonce\|EIP-712` anywhere on the card |
+| the blocking warning stands in front | "Security warning" + "Use a TEST account"; confirm disabled with nothing typed **and** with a phrase typed; enabled only after the acknowledgement |
+| nothing is signed or sent by the probe | no `/v1/submitMessage` left the page |
+| the same session still reads a node | 74 cast reads `200` at `https://haatz.quilibrium.com` (not this app) |
+| "Not now" ends it, and the device remembers | gone after the click; still gone after a reload of `/` |
+
+Unit level — `~/components/session/__tests__/postForYou.test.tsx`, 11 tests (part
+of the session directory's 32, all green): the decision's every negative case (a
+session a server can serve, the adapter off, no server named, no account yet, a
+pass already present, already said not now, the storage reads still pending), and
+the setup itself against a fake node — exactly one custody-signed KEY_ADD
+submitted, the stored pass's public half equal to the key in the submitted bytes,
+the account's next nonce recorded, and no phrase written to storage.
+
+*What this does not do.* It does not make a cast post on its own: signing the
+cast and reading the state back is the write layer, which this card did not
+touch. It does not delete the composer's refusal copy, which still names
+Advanced; the offer makes that sentence rare rather than wrong.
+
+*Measurement hygiene for the two live numbers above.* The acceptance run
+(12/12, `scripts/verify-node-backed-client.mjs`) was taken on the shared tree at
+`d00b7a7` **while the write layer's card had its edits in flight**; the offer run
+(7/7) was taken at `88cf2ba`, after those landed, with this change in the tree.
+Both are recorded with their logs and screenshots on card `t_c9861884` rather
+than restated as one number.
 
 ## Fix order for Phase 2 (posting loop first)
 
