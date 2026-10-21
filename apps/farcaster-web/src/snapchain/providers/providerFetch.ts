@@ -36,7 +36,12 @@
  * would otherwise turn "post a photo" into a 501. Cast drafts are the second:
  * they are this device's own state (`localDrafts.ts`), so the draft write the
  * composer makes before every Cast is answered here too, for the same reason
- * (`local`, see `answerLocalDraftRequest`).
+ * (`local`, see `answerLocalDraftRequest`). The home feed is the third, and any
+ * other route the table classifies `node` with it: a read a node assembles out
+ * of protocol messages is answered from a node whatever HTTP method the fork
+ * spells it with and whichever server is live — see the `node`-route block in
+ * `providerBackedFetch`, where `POST /v2/feed-items` and its own measured
+ * failure live.
  */
 
 import { loadAppKey } from '~/snapchain/appKeyStorage';
@@ -240,6 +245,43 @@ export const createProviderBackedFetch = ({
     });
     adapters.set(baseUrl, created);
     return created;
+  };
+
+  /**
+   * The node this build was configured with, as a provider — the last honest
+   * answer for a read a node assembles when the reader's list holds no node.
+   */
+  const buildConfiguredNode = (): NodeProvider => ({
+    id: 'build-configured',
+    kind: 'snapchain',
+    source: 'public',
+    label: 'The node this build was configured with',
+    detail: '',
+    baseUrl: nodeBaseUrl,
+    readOnly: false,
+  });
+
+  /**
+   * The node a read that only a node can answer is handed to, when the live
+   * provider is not a node.
+   *
+   * The reader's list first — a node the health check has just measured as
+   * answering, else the first node on it (their own node, or the public relay
+   * this build reads from today) — and this build's configured address when the
+   * list holds no node at all. Never a provider that is not a node: that is the
+   * whole point of asking this question.
+   */
+  const nodeForNodeOnlyRead = (): NodeProvider => {
+    const order = getProviderOrder
+      ? getProviderOrder()
+      : getProviderSnapshot().order;
+    const health = getProviderSnapshot().health;
+    const nodes = order.filter((provider) => provider.kind === 'snapchain');
+    return (
+      nodes.find((provider) => health[provider.id]?.status === 'live') ??
+      nodes[0] ??
+      buildConfiguredNode()
+    );
   };
 
   /**
@@ -501,6 +543,64 @@ export const createProviderBackedFetch = ({
       }
     }
 
+    // A route the classification calls `node` is read from a node — whatever
+    // HTTP method the fork spells it with, and whichever server is live.
+    //
+    // `POST /v2/feed-items` is the one that spells a read as a write (a read
+    // with a body), and it is assembled from the follow graph (`linksByFid` →
+    // `castsByFid`) and from nothing else. No non-node server in this catalog
+    // can serve it: Neynar's index keeps no follow graph, and Farcaster's own
+    // public server refuses a non-GET by name. So it is not a provider's read to
+    // answer, and a provider's refusal must not be able to stand in for it.
+    //
+    // MEASURED (2026-10-21, live public node, `farcaster-public` live): a cold
+    // load or a reload of `/` replaced the whole home column with `POST
+    // /v2/feed-items is a write, and Farcaster's own public server does not take
+    // writes from this client.` and it stayed there for the whole 60s budget and
+    // 20s beyond it, while the node answered every read it was handed (770 reads
+    // in one measured run, all 200). Reaching that state needs no fault: the
+    // checks measure every server at once and land on `farcaster-public`
+    // whenever the node's first probe is slow or fails, then hold that choice
+    // through a 60s cooldown. Measured again at this seam on the landed tree
+    // (2026-10-21, `providers/__tests__/providerFetch.test.ts`): the same 501,
+    // with the routing log attributing the feed to `farcaster-public`.
+    //
+    // The other node-only reads the same sentence used to cover — a cast's
+    // thread, a profile, a channel, the notifications tally, the unseen counts —
+    // are this same rule one route over, and they are answered from a node here
+    // too: a surface that can be served must not fail because the server the
+    // failover engine happens to be holding cannot assemble it. The surfaces
+    // that genuinely have no node source (ranked feeds, search, the direct-cast
+    // inbox, the channel directory) are `hosted` and are still refused in one
+    // set of words below.
+    if (
+      provider !== null &&
+      provider.kind !== 'snapchain' &&
+      route.kind === 'node'
+    ) {
+      const capable = firstCapableProvider({
+        kind: route.kind,
+        path,
+        preferred: provider,
+      });
+      // A server that really can assemble this read answers it (Neynar's index
+      // for the paths it keeps — `capabilities.ts`); otherwise it is a node's.
+      if (capable === null || capable.kind === 'snapchain') {
+        const node = capable ?? nodeForNodeOnlyRead();
+        log.push({ path, providerId: node.id, kind: 'snapchain' });
+        const response = await nodeAdapter(node).fetch(parsed.url.toString(), {
+          method: parsed.method,
+          ...(parsed.body !== undefined
+            ? { body: JSON.stringify(parsed.body) }
+            : {}),
+        });
+        // The node answered this read (or did not), and the failover engine is
+        // told exactly that — the same signal every other answered read gives.
+        onRead?.(node.id, response.status < 500);
+        return response;
+      }
+    }
+
     // Farcaster's own public server cannot be read from a web page at all —
     // measured on the live site: eleven distinct reads, every one of them
     // refused by CORS (see `publicServerOffTheWeb`). So it is refused here
@@ -514,6 +614,11 @@ export const createProviderBackedFetch = ({
     // fixed the other half of this: `probeFarcasterPublic` now asks a read this
     // client actually makes, so in a page this server is measured as not
     // answering and is never made live in the first place.)
+    //
+    // It fires only for the requests this server would really have been the one
+    // to answer: a route the table calls `node` is answered a few lines above,
+    // from a node, so the sentence below is about the reads and writes that
+    // genuinely have no other source.
     //
     // This sits before the classification's own hosted refusal and before the
     // routing decision below, and for the same reason: when this server is the
@@ -561,16 +666,9 @@ export const createProviderBackedFetch = ({
       // Nothing has been measured yet (or the reader's list is empty). The
       // build's own node is the honest answer, exactly as before this file —
       // writes included, which is why the label is the neutral one.
-      log.push({ path, providerId: 'build-configured', kind: 'snapchain' });
-      return nodeAdapter({
-        id: 'build-configured',
-        kind: 'snapchain',
-        source: 'public',
-        label: 'The node this build was configured with',
-        detail: '',
-        baseUrl: nodeBaseUrl,
-        readOnly: false,
-      }).fetch(parsed.url.toString(), {
+      const node = buildConfiguredNode();
+      log.push({ path, providerId: node.id, kind: 'snapchain' });
+      return nodeAdapter(node).fetch(parsed.url.toString(), {
         method: parsed.method,
         ...(parsed.body !== undefined
           ? { body: JSON.stringify(parsed.body) }

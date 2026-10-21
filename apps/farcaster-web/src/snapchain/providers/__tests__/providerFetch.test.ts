@@ -125,21 +125,43 @@ describe('createProviderBackedFetch: Farcaster’s own public server', () => {
       ...(onRead ? { onRead } : {}),
     });
 
-  it('does not ask it for a read a node assembles — and says what the read needs', async () => {
-    const calls: string[] = [];
-    const handle = handleWith((async (url: string) => {
-      calls.push(String(url));
-      return jsonResponse({ result: {} });
-    }) as unknown as typeof fetch);
+  // A route the table classifies `node` is a read a node assembles — and it is
+  // read from a node, whichever server happens to be live. It used to be refused
+  // in place while this server was live (with the honest sentence below, which
+  // the reader cannot act on); the reader's own list holds a node behind this
+  // one, so the read answers there instead.
+  it('reads a route only a node can assemble from a node, and never asks this server', async () => {
+    const { calls, factory } = stubNodeAdapter();
+    const node = publicNodeProvider('https://relay.example');
+    const direct: string[] = [];
+    const reads: { providerId: string; ok: boolean }[] = [];
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => farcasterPublicProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async (url: string) => {
+        direct.push(String(url));
+        return jsonResponse({ result: {} });
+      }) as unknown as typeof fetch,
+      createNodeAdapter: factory,
+      getProviderOrder: () => [farcasterPublicProvider(), node],
+      onRead: (providerId, ok) => reads.push({ providerId, ok }),
+    });
 
     const response = await handle.fetch('https://farcaster.xyz/~api/v2/unseen');
 
-    expect(calls).toEqual([]);
-    expect(response.status).toBe(501);
-    const body = (await response.json()) as { errors: { message: string }[] };
-    expect(body.errors[0]!.message).toContain('/v2/unseen is read from a node');
-    expect(body.errors[0]!.message).toContain('cannot be read from a web page');
-    expect(handle.log[0]!.providerId).toBe('farcaster-public');
+    expect(response.status).toBe(200);
+    expect(calls[0]).toContain('/v2/unseen');
+    // Nothing left the page for that server's origin: it cannot be read from a
+    // page at all, which is what this test has always pinned.
+    expect(direct).toEqual([]);
+    expect(handle.log[0]).toEqual({
+      path: '/v2/unseen',
+      providerId: node.id,
+      kind: 'snapchain',
+    });
+    // The engine is told which server really answered this read.
+    expect(reads).toEqual([{ providerId: node.id, ok: true }]);
   });
 
   it('does not ask it for a hosted feature either — the classification already says whose job it is', async () => {
@@ -169,12 +191,80 @@ describe('createProviderBackedFetch: Farcaster’s own public server', () => {
       (providerId, ok) => reads.push({ providerId, ok }),
     );
 
-    await handle.fetch('https://farcaster.xyz/~api/v2/unseen');
+    // A read this server really would have been asked for: a node cannot serve
+    // this one either (it is a hosted feature), so the refusal stands and the
+    // engine is told the read did not answer. A route the table calls `node` is
+    // no longer part of this list — it is answered from a node above.
+    await handle.fetch('https://farcaster.xyz/~api/v1/audio-rooms');
 
     expect(reads).toEqual([{ providerId: 'farcaster-public', ok: false }]);
   });
 
-  it('refuses a write by name, without asking', async () => {
+  // The home feed is the read this server must never be asked to answer.
+  //
+  // MEASURED (2026-10-21, live public node, `farcaster-public` live): a cold load
+  // or a reload of `/` put this server's own refusal — `POST /v2/feed-items is a
+  // write, and Farcaster's own public server does not take writes from this
+  // client` — where the whole home column should be, and it stayed there for the
+  // whole 60s budget and 20s past it. `POST /v2/feed-items` is the feed the
+  // hosted API spells as a write and the table classifies `node`, because it is
+  // assembled from the follow graph (`linksByFid` → `castsByFid`) and from
+  // nothing else. No other server in this catalog can serve it, so a provider's
+  // refusal must not be able to stand in for it — whichever provider is live.
+  it('answers the home feed from a node, not from this server, whichever server is live', async () => {
+    const { calls, factory } = stubNodeAdapter();
+    const node = ownNodeProvider('https://node.example');
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => farcasterPublicProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
+      createNodeAdapter: factory,
+      getProviderOrder: () => [farcasterPublicProvider(), node],
+    });
+
+    const response = await handle.fetch(
+      'https://farcaster.xyz/~api/v2/feed-items',
+      {
+        method: 'POST',
+        body: JSON.stringify({ feedKey: 'home' }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls[0]).toContain('/v2/feed-items');
+    expect(handle.log[0]).toEqual({
+      path: '/v2/feed-items',
+      providerId: node.id,
+      kind: 'snapchain',
+    });
+  });
+
+  it('answers the home feed from the build’s own node when the list holds no node', async () => {
+    const { calls, factory } = stubNodeAdapter();
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => farcasterPublicProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
+      createNodeAdapter: factory,
+      getProviderOrder: () => [farcasterPublicProvider()],
+    });
+
+    const response = await handle.fetch(
+      'https://farcaster.xyz/~api/v2/feed-items',
+      {
+        method: 'POST',
+        body: JSON.stringify({ feedKey: 'home' }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls[0]).toContain('/v2/feed-items');
+    expect(handle.log[0]!.providerId).toBe('build-configured');
+  });
+
+  it('still refuses a write by name, without asking', async () => {
     const calls: string[] = [];
     const handle = handleWith((async (url: string) => {
       calls.push(String(url));
@@ -182,10 +272,10 @@ describe('createProviderBackedFetch: Farcaster’s own public server', () => {
     }) as unknown as typeof fetch);
 
     const response = await handle.fetch(
-      'https://farcaster.xyz/~api/v2/feed-items',
+      'https://farcaster.xyz/~api/v2/cast-likes',
       {
-        method: 'POST',
-        body: JSON.stringify({ feedKey: 'home' }),
+        method: 'PUT',
+        body: JSON.stringify({ castHash: '0x1', liked: true }),
       },
     );
 
@@ -219,7 +309,11 @@ describe('createProviderBackedFetch: Farcaster’s own public server', () => {
       '/v2/channel-streaks?fid=3',
       '/v2/user-following-channels?forComposer=true&limit=50',
       '/v2/user-thread-casts?castHashPrefix=0x2c45b3e3&username=borodutch&limit=15',
-      '/v2/unseen',
+      // `/v2/unseen` was the eleventh of these, and it is not here any more: it
+      // is a route the table classifies `node` (counts derived from mentions,
+      // reactions and follows), so it is read from a node now rather than
+      // refused — see the node-route test above. The ten left are the ones this
+      // client has no other source for.
     ];
 
     for (const path of measured) {
@@ -598,5 +692,51 @@ describe('createProviderBackedFetch: which server can answer', () => {
 
     expect(calls.length).toBe(1);
     expect(handle.log.at(-1)).toMatchObject({ providerId: relay.id });
+  });
+
+  // The other preference the card names: Neynar live as the default, because the
+  // wizard's key exists. The capability rule judges a route by what the table
+  // calls it, not by its HTTP method — `POST /v2/feed-items` is a node *read* the
+  // hosted API spells as a write — so Neynar's index (which keeps no follow
+  // graph, and is never asked for one) is skipped and a node answers.
+  it('answers the home feed from a node when Neynar is the live default, and never asks the index', async () => {
+    const { calls, factory } = stubNodeAdapter();
+    const relay = publicNodeProvider('https://relay.example');
+    const direct: string[] = [];
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => neynarProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: (async (url: string) => {
+        direct.push(String(url));
+        return jsonResponse({});
+      }) as unknown as typeof fetch,
+      neynarApiKey: 'a-key-this-test-provides',
+      createNodeAdapter: factory,
+      getProviderOrder: () => [
+        neynarProvider(),
+        relay,
+        farcasterPublicProvider(),
+      ],
+    });
+
+    const response = await handle.fetch(
+      'https://farcaster.xyz/~api/v2/feed-items',
+      {
+        method: 'POST',
+        body: JSON.stringify({ feedKey: 'home' }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls[0]).toContain('/v2/feed-items');
+    expect(handle.log.at(-1)).toMatchObject({
+      providerId: relay.id,
+      kind: 'snapchain',
+    });
+    // Neither the index nor Farcaster's own server was asked for a read that is
+    // assembled from the follow graph: no request left this page for a
+    // third-party origin at all.
+    expect(direct).toEqual([]);
   });
 });
