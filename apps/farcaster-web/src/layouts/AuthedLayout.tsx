@@ -13,6 +13,7 @@ import { ShellSkeleton } from '~/components/fiddy/ShellSkeleton';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { PreloadAuthedResources } from '~/components/PrefetchAuthedResources';
 import { DeviceOnlySessionLanding } from '~/components/session/DeviceOnlySessionLanding';
+import { PostForYouStep } from '~/components/session/PostForYouStep';
 import { useDeviceOnlySession } from '~/components/session/useDeviceOnlySession';
 import { EnsureCachedCurrentUser } from '~/components/users/EnsureCachedCurrentUser';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
@@ -345,6 +346,15 @@ const AuthedLayout: FC = () => {
                                                 className="h-16 sm:hidden"
                                               />
                                               <FiddyMobileTabBar />
+                                              {/* The one-time "let Fiddy post
+                                                  as you" offer: the pass that
+                                                  makes posting work is issued
+                                                  on this device, and a reader
+                                                  should not have to find
+                                                  Advanced to learn that. It
+                                                  renders nothing unless the
+                                                  offer applies. */}
+                                              <PostForYouStep />
                                             </div>
                                           </CastComposerSessionProvider>
                                         </BespokeTransactionModalProvider>
