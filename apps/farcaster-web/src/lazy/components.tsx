@@ -22,3 +22,18 @@ export const PayUserDialog = lazyWithPreload(() =>
     default: res.PayUserDialog,
   })),
 );
+
+/* A sealed cast in a feed, and a key someone shared in one: both are rare enough
+   that their code (crypto, envelope reading) is imported the moment one appears,
+   not with the bundle. */
+export const SealedCastView = lazyWithPreload(() =>
+  import('~/components/sealed/SealedCastView').then((res) => ({
+    default: res.SealedCastView,
+  })),
+);
+
+export const SealedKeyNotice = lazyWithPreload(() =>
+  import('~/components/sealed/SealedKeyNotice').then((res) => ({
+    default: res.SealedKeyNotice,
+  })),
+);

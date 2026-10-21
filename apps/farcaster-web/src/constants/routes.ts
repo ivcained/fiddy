@@ -106,6 +106,7 @@ import {
   ReferralWithoutUsernamePage,
   ReferralWithUsernamePage,
   SavedPage,
+  SealedCastsPage,
   SettingsAdvancedPage,
   SettingsBlockedUsersPage,
   SettingsCastsAndUsersPage,
@@ -914,6 +915,16 @@ const routes = {
     search: {},
     family: family('default'),
     Component: AgentPage,
+  },
+  /* A cast only the people it names can read: the surface for the key it needs,
+     who it is for, and the sealed text itself. Reachable signed out, because
+     making a key and sealing something need no account. */
+  sealed: {
+    path: `${appPathPrefix}/sealed`,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: SealedCastsPage,
   },
   /* Add a brain / Connect apps: the two sheets the positioning pivot is built
      on. They are reachable signed in (from the agent surface) and signed out,

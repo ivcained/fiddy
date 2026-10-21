@@ -335,6 +335,12 @@ export const SavedPage = lazyWithPreload(() =>
   })),
 );
 
+export const SealedCastsPage = lazyWithPreload(() =>
+  import('~/pages/sealed/SealedCastsPage').then((res) => ({
+    default: res.SealedCastsPage,
+  })),
+);
+
 export const MiniAppsPage = lazyWithPreload(() =>
   import('~/pages/miniApps/MiniAppsPage').then((res) => ({
     default: res.MiniAppsPage,
