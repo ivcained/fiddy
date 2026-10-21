@@ -217,7 +217,7 @@ cp -a "$STAGE/server/." "$STAGE/release/server/"
 rm -rf "$STAGE/preview-assets" "$STAGE/prior-index.html"
 printf 'User-agent: *\nDisallow: /api/\n' > "$WEB/robots.txt"
 printf '{"revision":"%s","mode":"node-backed-client","node":"%s","media":"%s"}\n' \
-  "$SHA" "$NODE_URL" "$MEDIA_URL" > "$WEB/release.json"
+  "$FULL_SHA" "$NODE_URL" "$MEDIA_URL" > "$WEB/release.json"
 
 say "5/8 upload"
 tar -czf "$STAGE/fiddy-client-$SHORT.tar.gz" -C "$STAGE/release" .
