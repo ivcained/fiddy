@@ -238,7 +238,8 @@ export const openGraphFromNeynarEmbed = (
   }
   // The mini app's own art wins over the page's og:image: for an app, the card
   // is the app's picture, and the two are usually the same file anyway.
-  const image = httpsUrlOf(frame?.image) ?? httpsUrlOf(ogImageUrlOf(html?.ogImage));
+  const image =
+    httpsUrlOf(frame?.image) ?? httpsUrlOf(ogImageUrlOf(html?.ogImage));
   if (image !== undefined) {
     card.imageUrl = image;
   }

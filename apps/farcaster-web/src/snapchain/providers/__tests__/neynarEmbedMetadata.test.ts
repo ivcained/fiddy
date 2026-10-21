@@ -51,7 +51,9 @@ describe('openGraphFromNeynarEmbed', () => {
     expect(openGraph.description).toBe(
       'One click to your own read node on Google Cloud — or let Fiddy run it for you.',
     );
-    expect(openGraph.image).toBe('https://fiddy.fun/client/assets/deploy-card.png');
+    expect(openGraph.image).toBe(
+      'https://fiddy.fun/client/assets/deploy-card.png',
+    );
     expect(openGraph.domain).toBe('fiddy.fun');
   });
 
@@ -85,10 +87,10 @@ describe('openGraphFromNeynarEmbed', () => {
       },
     });
     expect(openGraph.image).toBe('https://tortoise.studio/api/og/song?song=1');
-    expect(openGraph.frameEmbedNext?.frameEmbed?.button?.title).toBe('Play Song');
-    expect(
-      openGraph.frameEmbedNext?.frameEmbed?.button?.action,
-    ).toMatchObject({
+    expect(openGraph.frameEmbedNext?.frameEmbed?.button?.title).toBe(
+      'Play Song',
+    );
+    expect(openGraph.frameEmbedNext?.frameEmbed?.button?.action).toMatchObject({
       type: 'launch_miniapp',
       url: 'https://tortoise.studio/song/a-castle-in-the-sky',
     });
@@ -195,9 +197,9 @@ describe('a Neynar cast with a mini app in it', () => {
     expect(openGraph?.frameEmbedNext?.frameEmbed?.imageUrl).toBe(
       'https://fiddy.fun/client/assets/deploy-card.png',
     );
-    expect(
-      openGraph?.frameEmbedNext?.frameEmbed?.button?.action?.type,
-    ).toBe('launch_miniapp');
+    expect(openGraph?.frameEmbedNext?.frameEmbed?.button?.action?.type).toBe(
+      'launch_miniapp',
+    );
   });
 
   it('still sorts a bare link into `urls`, with no invented card', () => {
