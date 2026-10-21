@@ -9,6 +9,19 @@
 //
 // Screenshots land in $AUTOPAIR_SHOT_DIR (default: the system temp dir).
 //
+// THE CLIENT UNDER TEST MUST BE NODE-BACKED. A client started without
+// VITE_SNAPCHAIN_HTTP_URL sends a signed-in session to the device-only landing
+// (`~/components/session/useDeviceOnlySession`), so `/~/agent` never renders the
+// agent surface and every check below reads that landing instead. Measured on
+// 2026-10-22: that is exactly what the first run of this probe measured, and it
+// is a harness gap, not a product bug. Start it the way the release does:
+//
+//   VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com HTTPS=true \
+//     npx vite --port 5266 --strictPort
+//
+// The check named "the client under test is node-backed" fails loudly when a run
+// forgets it.
+//
 // WHAT IT REPRODUCES, AND WHY THESE CHECKS
 // The bug: somebody named their agent, picked the built-in brain, signed in with
 // Farcaster — and `/~/agent` showed "Hatch your Fiddy · soon" plus a form asking
@@ -75,15 +88,29 @@ const where = (page) => new URL(page.url()).pathname;
 
 const bodyText = (page) =>
   page
-    .evaluate(() => (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim())
+    .evaluate(() =>
+      (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+    )
     .catch(() => '');
 
 /** Press the first visible control whose text matches, and answer its label. */
 const pressByText = async (page, re) => {
-  for (const el of await page.$$('button, a, [role=button]')) {
-    const label = ((await el.innerText()) || '').replace(/\s+/g, ' ').trim();
-    if (re.test(label) && (await el.isVisible())) {
-      await el.click();
+  const controls = await page.$$('button, a, [role=button]').catch(() => []);
+  for (const el of controls) {
+    let label = '';
+    try {
+      label = ((await el.innerText()) || '').replace(/\s+/g, ' ').trim();
+    } catch {
+      // The page navigated under us while reading: there is nothing to press
+      // here any more, and a harness must not abort a run for that.
+      return null;
+    }
+    if (re.test(label) && (await el.isVisible().catch(() => false))) {
+      try {
+        await el.click();
+      } catch {
+        return label;
+      }
       return label;
     }
   }
@@ -96,14 +123,28 @@ const readSurface = (page) =>
     const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
     return {
       path: window.location.pathname,
-      text: text.slice(0, 400),
+      // The whole page, because every claim here is "is this sentence on the
+      // surface" — the shell's navigation precedes the agent panel in the
+      // document, so a truncated prefix measures the sidebar and nothing else
+      // (that is how this probe's first green-ish runs mis-read the surface).
+      text,
+      // For a human reading a failing line.
+      textPreview: text.slice(0, 400),
       urlFields: document.querySelectorAll('input[type="url"]').length,
-      tokenFields: Array.from(document.querySelectorAll('label')).filter((label) =>
-        /session token/i.test(label.textContent || ''),
+      tokenFields: Array.from(document.querySelectorAll('label')).filter(
+        (label) => /session token/i.test(label.textContent || ''),
       ).length,
       chatInput: Boolean(
         document.querySelector('textarea[placeholder="Message your agent…"]'),
       ),
+      // A client with no server named sends a signed-in session here instead of
+      // to the agent surface — named so a run can say why it saw no surface.
+      deviceOnlyLanding: /signed in on this device/i.test(text),
+      // The not-awake state replaces the input with a sentence rather than
+      // leaving a field that would swallow a message.
+      awaitingNote: Array.from(document.querySelectorAll('[role="status"]'))
+        .map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim())
+        .filter((value) => /once it is awake/i.test(value)).length,
       headings: Array.from(document.querySelectorAll('h1, h2')).map((h) =>
         (h.textContent || '').trim(),
       ),
@@ -111,11 +152,15 @@ const readSurface = (page) =>
         .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim())
         .filter(Boolean)
         .slice(0, 24),
-      liveRegions: Array.from(document.querySelectorAll('[role="status"],[role="alert"]'))
+      liveRegions: Array.from(
+        document.querySelectorAll('[role="status"],[role="alert"]'),
+      )
         .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim())
         .filter(Boolean)
         .filter((value, index, all) => all.indexOf(value) === index),
-      ownerMessages: document.querySelectorAll('[aria-label="Conversation with your agent"] div').length,
+      ownerMessages: document.querySelectorAll(
+        '[aria-label="Conversation with your agent"] div',
+      ).length,
     };
   });
 
@@ -126,9 +171,12 @@ const runCase = async (browser, { label, ownerSession }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   page.on('console', (m) => {
-    if (m.type() === 'error') events.push(`console.error: ${m.text().slice(0, 160)}`);
+    if (m.type() === 'error')
+      events.push(`console.error: ${m.text().slice(0, 160)}`);
   });
-  page.on('pageerror', (e) => events.push(`pageerror: ${String(e).slice(0, 160)}`));
+  page.on('pageerror', (e) =>
+    events.push(`pageerror: ${String(e).slice(0, 160)}`),
+  );
 
   // The SIWF relay, with a real signed message.
   let statusCalls = 0;
@@ -215,7 +263,10 @@ const runCase = async (browser, { label, ownerSession }) => {
       if (url.pathname === '/api/hermes/catalog')
         return { items: [], counts: { skills: 0, plugins: 0 } };
       if (url.pathname === '/api/agents/instances')
-        return { ok: true, data: [{ id: 'inst-1', name: AGENT_NAME, status: 'running' }] };
+        return {
+          ok: true,
+          data: [{ id: 'inst-1', name: AGENT_NAME, status: 'running' }],
+        };
       if (url.pathname.endsWith('/integrations'))
         return { toolkits: [], connections: [] };
       return { ok: false, code: 'NOT_DEPLOYED' };
@@ -224,7 +275,9 @@ const runCase = async (browser, { label, ownerSession }) => {
     return route.fulfill({
       status,
       headers: CORS,
-      body: JSON.stringify(status === 404 ? { ok: false, code: 'NOT_DEPLOYED' } : body),
+      body: JSON.stringify(
+        status === 404 ? { ok: false, code: 'NOT_DEPLOYED' } : body,
+      ),
     });
   });
 
@@ -238,22 +291,39 @@ const runCase = async (browser, { label, ownerSession }) => {
   await page.waitForSelector('input[placeholder="Fiddy"]', { timeout: 20000 });
   await page.fill('input[placeholder="Fiddy"]', AGENT_NAME);
   await pressByText(page, /^Continue$/);
-  await page.waitForSelector('[data-fiddy-step="ready"]', { timeout: 20000 }).catch(() => undefined);
+  await page
+    .waitForSelector('[data-fiddy-step="ready"]', { timeout: 20000 })
+    .catch(() => undefined);
   await page.waitForTimeout(600);
   const readyText = await bodyText(page);
 
   // 2. One real message before signing in: the exchange the chat must adopt.
-  // The trial field is the one on the ready sheet that is not the name field.
-  const trialField = page.locator('[data-fiddy="trial"] textarea').first();
-  if (await trialField.count()) {
+  // The trial box's own field and its own send action — measured, `TrialChat`
+  // renders `<input data-trial="input">` plus `<button data-trial="send">`, and
+  // looking for a textarea here is how the first runs of this probe silently
+  // skipped the whole step (`trialFieldFound: false`).
+  const trialField = page
+    .locator('[data-fiddy="trial"] [data-trial="input"]')
+    .first();
+  const trialFieldFound = (await trialField.count()) > 0;
+  let trialPressed = null;
+  if (trialFieldFound) {
     await trialField.fill(TRIAL_MESSAGE);
-    await pressByText(page, /^(Ask|Send|Try)/);
-    await page.waitForFunction(
-      (reply) => (document.body?.innerText ?? '').includes(reply),
-      TRIAL_REPLY,
-      { timeout: 20000 },
-    ).catch(() => undefined);
+    trialPressed = await page
+      .locator('[data-fiddy="trial"] [data-trial="send"]')
+      .first()
+      .click({ timeout: 5000 })
+      .then(() => 'Send')
+      .catch(() => null);
+    await page
+      .waitForFunction(
+        (reply) => (document.body?.innerText ?? '').includes(reply),
+        TRIAL_REPLY,
+        { timeout: 20000 },
+      )
+      .catch(() => undefined);
   }
+  const trialAnsweredOnScreen = (await bodyText(page)).includes(TRIAL_REPLY);
   const trialKeptBeforeSignIn = await page.evaluate(() => {
     try {
       return window.localStorage.getItem('fiddy.trial');
@@ -276,11 +346,17 @@ const runCase = async (browser, { label, ownerSession }) => {
   // 4. The surface this card is about.
   await page.goto(`${ORIGIN}/~/agent`, { waitUntil: 'commit', timeout: 60000 });
   await page
-    .waitForSelector('textarea[placeholder="Message your agent…"], [role="alert"]', { timeout: 120000 })
+    .waitForSelector(
+      'textarea[placeholder="Message your agent…"], [role="alert"]',
+      { timeout: 120000 },
+    )
     .catch(() => undefined);
   await page.waitForTimeout(4000);
   const surface = await readSurface(page);
-  await page.screenshot({ path: `${OUT}/autopair-${label}-1-surface.png`, fullPage: true });
+  await page.screenshot({
+    path: `${OUT}/autopair-${label}-1-surface.png`,
+    fullPage: true,
+  });
 
   // 5. The self-hoster's form, one disclosure away — and only there.
   let revealedTokenField = false;
@@ -289,7 +365,10 @@ const runCase = async (browser, { label, ownerSession }) => {
     await page.waitForTimeout(400);
     const after = await readSurface(page);
     revealedTokenField = after.tokenFields > 0;
-    await page.screenshot({ path: `${OUT}/autopair-${label}-2-pair-own.png`, fullPage: true });
+    await page.screenshot({
+      path: `${OUT}/autopair-${label}-2-pair-own.png`,
+      fullPage: true,
+    });
   }
 
   await context.close();
@@ -302,6 +381,9 @@ const runCase = async (browser, { label, ownerSession }) => {
       whereAfterSignIn: where(page),
       signedIn,
       trialEmitted: seen.trial > 0,
+      trialFieldFound,
+      trialPressed,
+      trialAnsweredOnScreen,
       trialKeptBeforeSignIn,
       proofKept,
       revealed,
@@ -337,7 +419,8 @@ const main = async () => {
           provisioning: {
             open: false,
             code: 'HATCH_NOT_ENABLED',
-            message: 'Your agent is not awake on this service yet — starting one is not open here.',
+            message:
+              'Your agent is not awake on this service yet — starting one is not open here.',
           },
         }),
       }),
@@ -347,11 +430,16 @@ const main = async () => {
     'the pre-login exchange was kept for the signed-in chat',
     typeof open.prepared.trialKeptBeforeSignIn === 'string' &&
       open.prepared.trialKeptBeforeSignIn.includes(TRIAL_REPLY),
-    String(open.prepared.trialKeptBeforeSignIn).slice(0, 80),
+    `trial box: ${open.prepared.trialFieldFound ? 'found' : 'NOT FOUND'}, pressed: ${
+      open.prepared.trialPressed ?? 'nothing'
+    }, reply on screen: ${open.prepared.trialAnsweredOnScreen}, kept: ${String(
+      open.prepared.trialKeptBeforeSignIn,
+    ).slice(0, 80)}`,
   );
   check(
     'the sign-in left a proof for the exchange',
-    typeof open.prepared.proofKept === 'string' && open.prepared.proofKept.includes('4242'),
+    typeof open.prepared.proofKept === 'string' &&
+      open.prepared.proofKept.includes('4242'),
     String(open.prepared.proofKept).slice(0, 80),
   );
   const openAsk = open.seen.ownerSession[0]?.body;
@@ -363,12 +451,16 @@ const main = async () => {
       typeof openAsk.proof?.signature === 'string' &&
       openAsk.agent?.name === AGENT_NAME &&
       openAsk.agent?.brain?.kind === 'default',
-    openAsk ? JSON.stringify(openAsk).slice(0, 160) : 'the route was never called',
+    openAsk
+      ? JSON.stringify(openAsk).slice(0, 160)
+      : 'the route was never called',
   );
   check(
     'the session that came back is what the agent API is called with',
     open.seen.agentApi.some(
-      (call) => call.path === '/api/agents/instances' && call.authorization === `Bearer ${SESSION_TOKEN}`,
+      (call) =>
+        call.path === '/api/agents/instances' &&
+        call.authorization === `Bearer ${SESSION_TOKEN}`,
     ),
     JSON.stringify(open.seen.agentApi.slice(0, 6)),
   );
@@ -386,9 +478,16 @@ const main = async () => {
     `${open.surface.urlFields} url field(s), ${open.surface.tokenFields} token field(s)`,
   );
   check(
-    'the pairing form is one disclosure away, and only there',
-    open.prepared.revealed !== null && open.prepared.revealedTokenField,
-    String(open.prepared.revealed),
+    'the client under test is node-backed (a signed-in session reaches this surface)',
+    !open.surface.deviceOnlyLanding,
+    open.surface.deviceOnlyLanding
+      ? 'the browser landed on the device-only session page — start the client with VITE_SNAPCHAIN_HTTP_URL set (see the header of this file)'
+      : 'node-backed',
+  );
+  check(
+    'a paired owner is not offered the pairing form at all',
+    open.prepared.revealed === null,
+    open.prepared.revealed ?? 'no pairing action on the paired surface',
   );
 
   // B. The service refuses: one sentence, still a chat, still no form.
@@ -417,11 +516,17 @@ const main = async () => {
     closed.surface.headings.join(' | '),
   );
   check(
-    'a refusal still shows the chat and hides both fields',
-    closed.surface.chatInput &&
+    'a refusal still shows the conversation they already had, and hides both fields',
+    closed.surface.text.includes(TRIAL_MESSAGE) &&
+      closed.surface.text.includes(TRIAL_REPLY) &&
       closed.surface.urlFields === 0 &&
       closed.surface.tokenFields === 0,
-    `${closed.surface.chatInput ? 'chat' : 'no chat'}, ${closed.surface.urlFields} url, ${closed.surface.tokenFields} token`,
+    `${closed.surface.urlFields} url, ${closed.surface.tokenFields} token`,
+  );
+  check(
+    'and the input is a sentence, not a field that would swallow a message',
+    closed.surface.chatInput === false && closed.surface.awaitingNote === 1,
+    `chat input: ${closed.surface.chatInput}, awaiting sentence: ${closed.surface.awaitingNote}`,
   );
   check(
     'and the hatch CTA is gone — "soon" is not what this surface says',
@@ -443,6 +548,7 @@ const main = async () => {
   check(
     'an unreachable service is answered with a sentence and no form',
     unreachable.surface.text.includes('did not answer') &&
+      unreachable.surface.text.includes(TRIAL_REPLY) &&
       unreachable.surface.urlFields === 0 &&
       unreachable.surface.tokenFields === 0,
     unreachable.surface.text.slice(0, 200),
@@ -452,13 +558,17 @@ const main = async () => {
 
   const failed = checks.filter((c) => !c.ok);
   for (const { name, ok, detail } of checks) {
-    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${detail ? `\n        ${detail}` : ''}`);
+    console.log(
+      `${ok ? 'ok  ' : 'FAIL'}  ${name}${detail ? `\n        ${detail}` : ''}`,
+    );
   }
   console.log(
     `\n${checks.length - failed.length}/${checks.length} checks passed — screenshots in ${OUT}`,
   );
   if (failed.length) {
-    console.log(`console/page errors seen: ${[...open.events, ...closed.events, ...unreachable.events].slice(0, 8).join(' | ')}`);
+    console.log(
+      `console/page errors seen: ${[...open.events, ...closed.events, ...unreachable.events].slice(0, 8).join(' | ')}`,
+    );
     process.exitCode = 1;
   }
 };
