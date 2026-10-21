@@ -64,3 +64,8 @@ profiling/
 .claude/settings.json
 .vercel
 Claude outputs/
+
+# probes: their own vite dep cache (scripts/together.vite.config.mjs)
+.together-vite-cache
+.probe-vite-cache
+.media-probe-vite-cache
