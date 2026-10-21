@@ -113,7 +113,11 @@ What it does, and why each step is not optional:
    needs one does not ship
    (`apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs`, taken from
    the frozen tree). Step 6 repeats the Together assertions on the extracted
-   tree on the VPS, and step 8 checks the served chunk.
+   tree on the VPS. Step 3 also has to resolve the entry chunk the release
+   ships (`/assets/index-<hash>.js`, grepped out of the built `index.html`) and
+   refuse to ship when that file is not in the build — step 8 fetches *that*
+   path, so a path derived from a served shell (which can belong to another
+   release) is not allowed to name it.
 4. **Assemble** `web/` + `server/` + `web/preview/` as described above.
    Sourcemaps are left out: they are 44 MB of source for a public host.
 5. **Upload and extract** into a new immutable `releases/<sha>/`; the running
@@ -122,11 +126,26 @@ What it does, and why each step is not optional:
    carries the client's locations. Not the deploy command's exit code.
 7. **Cut over by symlink only** (`ln -sfn … && mv -Tf …`) plus one nginx reload
    in the same command; the previous release stays where it is.
-8. **Served gate on fiddy.fun** — fetch the build's two strings through the
-   public host, check the **served** `index.html` for inline script (the file the
-   browser actually runs, not the one the build wrote), and compare the served
-   asset byte-for-byte (`cmp`) with the build. Any mismatch rolls the symlink
-   back.
+8. **Served gate against the origin.** Fetch the built shell and the entry chunk
+   this build produced from the host **by IP** (`--resolve fiddy.fun:443:<origin
+   IP>`; HTTPS with SNI, so it is the same vhost a browser reaches, with the CDN
+   out of the path), check the served `index.html` for inline script, and compare
+   both files byte-for-byte (`cmp`) with the build. Then one **cache-busted**
+   fetch through the edge (`?cb=<sha>` — a key no earlier release can have
+   populated) as a second gate, and the **plain** edge fetch as a *report* only.
+   A CDN in front of the host holds copies of URLs whose names do not change
+   between releases (`index.html`) and caches chunk 404s for hours — measured
+   2026-10-21, when a release cut over seconds after a sibling's cutover was
+   judged against the edge's cached shell, which named the previous release's
+   chunk, and the ritual rolled a good release back by itself. A stale edge copy
+   is now waited out (up to the host's `max-age`, `FIDDY_EDGE_SETTLE_WAIT`) and
+   reported; only a real byte difference rolls the symlink back. When the origin
+   is serving a *different release* entirely (a concurrent cutover),
+   step 8 prints `OVERTAKEN` and leaves that release alone rather than rolling
+   back on top of it.
+   `FIDDY_GATE_ASSET=<path>` and `FIDDY_EDGE_PROBE_ASSET=<path>` are fault
+   injection for this step (point the chunk fetch / the informational probe at
+   another path), never set in a real release.
 
 nginx is **not** touched by the script. The client needs four locations that
 exist now and are checked in step 6:
@@ -251,6 +270,18 @@ Each allowance was measured, not guessed:
 curl -fsS https://fiddy.fun/ -o /tmp/served-index.html
 node apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs /tmp/served-index.html
 node apps/farcaster-web/scripts/verify-csp-script-src.mjs      # https://fiddy.fun by default
+```
+
+To ask the question step 8 asks — what the **origin** serves, with no CDN copy
+able to answer — use the origin's IP and compare the entry chunk with the
+release tree:
+
+```bash
+ORIGIN=187.127.148.194
+curl -sk --resolve fiddy.fun:443:$ORIGIN https://fiddy.fun/ -o /tmp/origin-index.html
+ASSET=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' /tmp/origin-index.html | head -1)
+curl -sk --resolve fiddy.fun:443:$ORIGIN "https://fiddy.fun$ASSET" -o /tmp/origin-entry.js
+ssh root@<box> "cat /var/www/fiddy.fun/current/web$ASSET" | cmp - /tmp/origin-entry.js
 ```
 
 The first two are seconds; the third is the measurement behind every claim in

@@ -38,7 +38,11 @@
 #      command's exit code);
 #   7. cut over by symlink ONLY (ln -sfn … && mv -T), with the previous
 #      release left in place; any failure after the swap rolls back by itself;
-#   8. a SERVED gate: fetch the bundle through https://fiddy.fun and grep THAT.
+#   8. a SERVED gate that asks the ORIGIN: the built shell and the entry chunk
+#      this build produced, compared byte-for-byte against what the host
+#      answers when no cache can stand in for it; then one cache-busted fetch
+#      through the edge as a gate, and a plain edge fetch that is REPORTED and
+#      never judged (a stale edge copy is a TTL, not a broken release).
 #
 # It does not touch nginx. The vhost must already carry the client's locations
 # (`/snapchain-api/`, the SPA fallback, `/preview/`); step 6 refuses to cut over
@@ -79,6 +83,20 @@ GATE_MEDIA='api/fiddy/media'
 # The Together surface's route literal, and the fallback that must never ship.
 GATE_TOGETHER='/together'
 GATE_TOGETHER_FALLBACK='127.0.0.1:8766'
+# The public origin behind the host name — the box this script deploys to. Step
+# 8 asks the ORIGIN what it serves, because that is the only answer a gate can
+# trust: a CDN in front of it holds a copy of any URL whose name does not change
+# between releases (index.html), and that copy may belong to another release.
+ORIGIN_HOST=${FIDDY_ORIGIN_HOST:-fiddy.fun}
+ORIGIN_IP=${FIDDY_ORIGIN_IP:-187.127.148.194}
+# Fault injection for the gate itself: point the entry-chunk fetch at another
+# path on purpose, to prove a release whose served chunk is wrong still fails
+# and still rolls back. Used by the card that fixed step 8. Never set it in a
+# real release.
+GATE_ASSET_OVERRIDE=${FIDDY_GATE_ASSET:-}
+# How long to keep re-checking a stale edge copy before calling it what it is (a
+# CDN's TTL) instead of a broken release. Defaults to the max-age the host sets.
+EDGE_SETTLE_WAIT=${FIDDY_EDGE_SETTLE_WAIT:-}
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 say() { printf '\n== %s\n' "$*"; }
@@ -97,6 +115,10 @@ SHA=${1:-$(git -C "$REPO" rev-parse origin/main)}
 NO_CUTOVER=${2:-}
 SHORT=${SHA:0:9}
 git -C "$REPO" cat-file -e "$SHA^{commit}" || { echo "no such commit: $SHA" >&2; exit 1; }
+# The full commit, for anything that has to MATCH a sha rather than name a
+# directory (`--rollback`-style callers may pass a short sha, and /release.json
+# always carries the 40-character one).
+FULL_SHA=$(git -C "$REPO" rev-parse "$SHA^{commit}")
 
 # The stage is created HERE, after the sha is known, so a default run gets a
 # directory of its own and can never be the run that deletes another run's tree.
@@ -161,6 +183,17 @@ echo "  together ok (route literal; no laptop fallback in the chunks, api = '${T
 CHECK_SHELL="$STAGE/base/apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs"
 node "$CHECK_SHELL" "$APP/index.html" \
   || { echo "REFUSING to ship: the built shell needs script-src 'unsafe-inline'" >&2; exit 1; }
+# The entry chunk the release ships, resolved from the shell THIS BUILD wrote.
+# Never from a served shell: a served `index.html` may belong to another release
+# (or to a CDN's copy of one), and a path derived from it names a file this build
+# never produced — measured 2026-10-21, when step 8 derived
+# `dist/assets/index-xFMI6dSv.js` from the edge's cached HTML while the build
+# under release had produced `index-BZPuaWpC.js`, and the comparison died on a
+# local `No such file or directory` instead of naming a real difference (card
+# t_62596c9c). Step 8 fetches THIS path and compares the bytes it gets back.
+BUILT_ASSET=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$APP/index.html" | head -1)
+[ -n "$BUILT_ASSET" ] || { echo "REFUSING to ship: the built shell names no /assets/index-*.js entry chunk" >&2; exit 1; }
+[ -f "$APP$BUILT_ASSET" ] || { echo "REFUSING to ship: the built shell names $BUILT_ASSET and the build has no such file" >&2; exit 1; }
 
 say "4/8 assemble web/ + server/ + the preview it must keep"
 WEB="$STAGE/release/web"
@@ -229,47 +262,205 @@ rollback_on_failure() {
   echo "rolled back: $(ssh_ "readlink -f $CURRENT")" >&2
 }
 
-say "8/8 served gate: the same two strings, fetched through https://fiddy.fun"
+say "8/8 served gate: the ORIGIN's answer is the gate, the edge's copy is a report"
 set +e
-# Download first, grep second: a pipe with `grep -q` closes early, and with
-# `set -o pipefail` that SIGPIPE reads as a failed check even when the string is
-# there.
+
+# What this step is FOR: prove the bytes fiddy.fun serves ARE the bytes this
+# build produced. What it must never do again is judge a release on a CDN's copy
+# of a URL whose name does not change between releases. Measured 2026-10-21 (card
+# t_62596c9c): a release cut over seconds after a sibling's cutover was judged
+# against the edge's cached index.html, which named the PREVIOUS release's entry
+# chunk; the built-side path was derived from that served name, so the
+# comparison aborted on a local `No such file or directory` and the ritual rolled
+# a good release back by itself — while the origin had been serving the new
+# release correctly the whole time, and the edge agreed a few minutes later.
+# Three rules follow, and this block is written to them:
 #
-# `?release=<sha>` on BOTH fetches: a CDN in front of the host caches what it
-# fetched, including a 404 for a chunk URL — measured 2026-10-21 on a release
-# whose verification ran while another release cut over: the origin answered 404
-# for a chunk this release owns, Cloudflare cached that 404 for four hours, and
-# the gate then failed a release that was in fact live and correct. The query
-# string sends both fetches to the origin, which is what this gate is about (does
-# the host serve the bytes we built); what the edge then does with a URL is
-# measured in a browser, not here.
-curl -fsS "https://fiddy.fun/?release=$SHORT" -o "$STAGE/served-index.html"
-# The served shell is what the browser runs, so check THAT file and not the one
-# the build produced: an inline <script> or an inline on*= handler in it is
-# refused by the host's script-src 'self'.
-node "$CHECK_SHELL" "$STAGE/served-index.html" \
-  || { rollback_on_failure; exit 1; }
-ASSET=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$STAGE/served-index.html" | head -1)
-echo "  index.html names $ASSET"
-curl -fsS "https://fiddy.fun$ASSET?release=$SHORT" -o "$STAGE/served-$SHORT.js"
-grep -q "$GATE_ADAPTER" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
-grep -q "$GATE_MEDIA" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
-grep -q "$NODE_URL" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
-# Belt and braces for Together: the route literal and the absent laptop fallback
-# are asserted over EVERY built asset in step 3 and over the extracted tree in
-# step 6, and the `cmp` below ties the served entry chunk to those same bytes.
-# Checking the served chunk too costs one grep and catches a host serving a
-# different index than the one we just published.
-if grep -q "$GATE_TOGETHER_FALLBACK" "$STAGE/served-$SHORT.js"; then
-  echo "REFUSING: the served bundle carries $GATE_TOGETHER_FALLBACK" >&2
-  rollback_on_failure; exit 1
+#   * the entry chunk is resolved from the BUILT shell (step 3, $BUILT_ASSET),
+#     and it is THAT path the gate fetches;
+#   * the shell-and-chunk comparison is made against the ORIGIN — by IP, with
+#     TLS SNI still the host name — so no cache copy can stand in for it;
+#   * the edge gets a cache-busted fetch (`?cb=<sha>`, a fresh key that no older
+#     release can satisfy) as a gate, and the plain edge fetch as a REPORT: when
+#     it is stale the answer is to wait for the TTL, never to roll back.
+GATE_ASSET=${GATE_ASSET_OVERRIDE:-$BUILT_ASSET}
+if [ -n "$GATE_ASSET_OVERRIDE" ]; then
+  echo "  FAULT INJECTION: the chunk fetch is pointed at $GATE_ASSET, not at this release's $BUILT_ASSET" >&2
 fi
-echo "  served bundle: $(wc -c < "$STAGE/served-$SHORT.js") bytes, sha256 $(shasum -a 256 "$STAGE/served-$SHORT.js" | cut -c1-16)…"
-echo "  built bundle:  $(wc -c < "$STAGE/base/apps/farcaster-web/dist$ASSET") bytes, sha256 $(shasum -a 256 "$STAGE/base/apps/farcaster-web/dist$ASSET" | cut -c1-16)…"
-cmp -s "$STAGE/served-$SHORT.js" "$STAGE/base/apps/farcaster-web/dist$ASSET" || { rollback_on_failure; exit 1; }
-curl -fsS https://fiddy.fun/release.json
+
+# The origin, by IP: the same vhost a browser reaches, with no CDN in the path.
+# Sets ORIGIN_CODE to the HTTP status it got. The loopback + `Host:` fallback is
+# for a host this machine cannot reach on its public IP (and it reads exactly
+# what that vhost serves).
+origin_get() {  # origin_get <path> <outfile>
+  ORIGIN_CODE=$(curl -sk --connect-timeout 10 --max-time 60 --resolve "$ORIGIN_HOST:443:$ORIGIN_IP" -o "$2" -w '%{http_code}' "https://$ORIGIN_HOST$1" || true)
+  if [ -z "${ORIGIN_CODE:-}" ] || [ "${ORIGIN_CODE:-000}" = 000 ]; then
+    # Fallback: read it from the box itself — HTTPS with SNI, resolved to the
+    # loopback (the port-80 block on this vhost only 308-redirects to https).
+    # Two calls, deliberately: the status code is fetched to /dev/null and the
+    # body on its own, because an appended `-w` code would leave a stray newline
+    # in the bytes this gate compares.
+    ORIGIN_CODE=000
+    FALLBACK_CODE=$(ssh_ "curl -sk --resolve $ORIGIN_HOST:443:127.0.0.1 -H 'Host: $ORIGIN_HOST' -o /dev/null -w '%{http_code}' https://$ORIGIN_HOST$1" 2>/dev/null || true)
+    if [ -n "$FALLBACK_CODE" ]; then
+      ORIGIN_CODE=$FALLBACK_CODE
+      ssh_ "curl -sk --resolve $ORIGIN_HOST:443:127.0.0.1 -H 'Host: $ORIGIN_HOST' https://$ORIGIN_HOST$1" > "$2" || true
+    fi
+  fi
+  [ "${ORIGIN_CODE:-000}" != 000 ]
+}
+origin_revision() {
+  origin_get /release.json "$STAGE/origin-release.json" || return 1
+  grep -o '"revision":"[0-9a-f]\{7,\}"' "$STAGE/origin-release.json" | head -1 | cut -d'"' -f4
+}
+# Every failure below names WHAT it compared, so the next reader does not have to
+# guess which side was wrong.
+gate_fail() {
+  echo "GATE FAILED: $*" >&2
+  rollback_on_failure
+  exit 1
+}
+sha16() { shasum -a 256 "$1" | cut -c1-16; }
+
+echo "  built entry chunk: $BUILT_ASSET  $(wc -c < "$APP$BUILT_ASSET") bytes  sha256 $(sha16 "$APP$BUILT_ASSET")…"
+
+# 1. The shell, from the origin. index.html is the one URL whose name is the
+#    same in every release, so it is the one a CDN can answer with somebody
+#    else's bytes; only the origin can say what this host serves.
+origin_get / "$STAGE/origin-index.html" \
+  || gate_fail "the origin did not answer at all for GET / (tried $ORIGIN_IP:443 and 127.0.0.1 with Host: $ORIGIN_HOST)"
+[ "$ORIGIN_CODE" = 200 ] || gate_fail "the origin answered HTTP $ORIGIN_CODE for /"
+ORIGIN_ASSET=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$STAGE/origin-index.html" | head -1)
+echo "  origin GET / → ${ORIGIN_ASSET:-nothing}"
+if [ "$ORIGIN_ASSET" != "$BUILT_ASSET" ]; then
+  # Distinguish "another release is live" from "the host is serving something
+  # wrong": the first is a race with a sibling release, and rolling back would
+  # revert THEIR cutover, so this run stops and says so instead.
+  REV=$(origin_revision || true)
+  if [ -n "$REV" ]; then
+    case "$REV" in
+      *"$SHA"*) ;;
+      *) echo "OVERTAKEN: the origin is serving release $REV, not $SHA — another release cut over while this one ran." >&2
+         echo "NOT rolling back: $CURRENT stays on $REV. Re-run this release when the host is free." >&2
+         exit 2 ;;
+    esac
+  fi
+  gate_fail "the origin's shell names $ORIGIN_ASSET; this build produced $BUILT_ASSET"
+fi
+cmp -s "$STAGE/origin-index.html" "$APP/index.html" \
+  || gate_fail "the origin's shell is not this build's shell (origin sha256 $(sha16 "$STAGE/origin-index.html")…, built sha256 $(sha16 "$APP/index.html")…)"
+# The served shell is what the browser runs, so check THAT file and not only the
+# one the build produced: an inline <script> or an inline on*= handler in it is
+# refused by the host's script-src 'self'.
+node "$CHECK_SHELL" "$STAGE/origin-index.html" \
+  || gate_fail "the origin's shell needs script-src 'unsafe-inline'"
+echo "  origin shell: byte-identical to the built shell, no inline script"
+
+# 2. The entry chunk at the path THIS BUILD produced, from the origin, compared
+#    byte-for-byte. This is the heart of the check.
+origin_get "$GATE_ASSET" "$STAGE/origin-entry.js" \
+  || gate_fail "the origin did not answer at all for $GATE_ASSET"
+[ "$ORIGIN_CODE" = 200 ] || gate_fail "the origin answered HTTP $ORIGIN_CODE for $GATE_ASSET (this build's entry chunk path)"
+echo "  origin GET $GATE_ASSET → HTTP 200, $(wc -c < "$STAGE/origin-entry.js") bytes  sha256 $(sha16 "$STAGE/origin-entry.js")…"
+cmp -s "$STAGE/origin-entry.js" "$APP$BUILT_ASSET" \
+  || gate_fail "the bytes the origin serves at $GATE_ASSET are not the entry chunk this build produced ($BUILT_ASSET): origin sha256 $(sha16 "$STAGE/origin-entry.js")…, built sha256 $(sha16 "$APP$BUILT_ASSET")…"
+# The served chunk IS the release's own bytes (cmp above), so the strings are
+# read on the bytes a browser actually downloads.
+for s in "$GATE_ADAPTER" "$GATE_MEDIA" "$NODE_URL"; do
+  grep -q "$s" "$STAGE/origin-entry.js" || gate_fail "the served entry chunk does not carry '$s'"
+done
+if grep -q "$GATE_TOGETHER_FALLBACK" "$STAGE/origin-entry.js"; then
+  gate_fail "the served entry chunk carries $GATE_TOGETHER_FALLBACK"
+fi
+echo "  served entry chunk carries: the adapter sentence, the media path, the configured node; no laptop fallback"
+
+# 3. One cache-busted fetch through the edge. `?cb=<sha>` is a cache key no
+#    earlier release can have populated, so this asks the question a browser on
+#    a cold cache asks — can the edge pass on what the origin is serving?
+curl -fsS "https://fiddy.fun/?cb=$SHORT" -o "$STAGE/edge-cb-index.html" \
+  || gate_fail "the edge did not answer GET /?cb=$SHORT"
+cmp -s "$STAGE/edge-cb-index.html" "$STAGE/origin-index.html" \
+  || gate_fail "the edge's cache-busted shell differs from the origin's (edge sha256 $(sha16 "$STAGE/edge-cb-index.html")…, origin sha256 $(sha16 "$STAGE/origin-index.html")…)"
+node "$CHECK_SHELL" "$STAGE/edge-cb-index.html" \
+  || gate_fail "the edge's shell needs script-src 'unsafe-inline'"
+curl -fsS "https://fiddy.fun$GATE_ASSET?cb=$SHORT" -o "$STAGE/edge-cb-entry.js" \
+  || gate_fail "the edge did not answer GET $GATE_ASSET?cb=$SHORT"
+cmp -s "$STAGE/edge-cb-entry.js" "$STAGE/origin-entry.js" \
+  || gate_fail "the edge's cache-busted copy of $GATE_ASSET differs from the origin's bytes (edge sha256 $(sha16 "$STAGE/edge-cb-entry.js")…, origin sha256 $(sha16 "$STAGE/origin-entry.js")…)"
+echo "  edge /?cb=$SHORT and $GATE_ASSET?cb=$SHORT: this release's bytes"
+
+# 4. What the host says it is serving. release.json is sent `no-store`, so this
+#    is the origin's answer even through the edge.
+curl -fsS https://fiddy.fun/release.json -o "$STAGE/served-release.json" \
+  || gate_fail "the host did not serve /release.json"
+grep -q "\"revision\":\"$FULL_SHA\"" "$STAGE/served-release.json" \
+  || gate_fail "/release.json does not name $FULL_SHA: $(tr -d '\n' < "$STAGE/served-release.json" | head -c 160)"
+echo "  GET /release.json → $(tr -d '\n' < "$STAGE/served-release.json")"
+
+# 5. The PLAIN edge fetch — reported, never judged. This is the fetch that used
+#    to decide the release. It is allowed to hand back a cached copy of an
+#    earlier release (Cloudflare honours the host's `max-age` for index.html,
+#    serves chunk bytes with `max-age=604800`, and caches a chunk 404 for four
+#    hours — all measured), so a mismatch here means "the CDN still has the old
+#    copy", and the answer is to wait for its TTL, never to roll back.
+#    `FIDDY_EDGE_PROBE_ASSET=<path>` points this probe at another URL on purpose
+#    (a test knob: point it at a path the edge has cached from an earlier
+#    release); a real release probes its own entry chunk.
+EDGE_PROBE_ASSET=${FIDDY_EDGE_PROBE_ASSET:-$BUILT_ASSET}
+edge_report() {
+  curl -sS -D "$STAGE/edge-index.hdr" -o "$STAGE/edge-index.html" https://fiddy.fun/ || return 1
+  EDGE_TTL=$(grep -i '^cache-control:' "$STAGE/edge-index.hdr" | grep -o 'max-age=[0-9]*' | head -1 | cut -d= -f2)
+  EDGE_TTL=${EDGE_TTL:-300}
+  EDGE_STATE=$(grep -i '^cf-cache-status:' "$STAGE/edge-index.hdr" | tr -d '\r' | awk '{print $2}')
+  EDGE_AGE=$(grep -i '^age:' "$STAGE/edge-index.hdr" | tr -d '\r' | awk '{print $2}')
+  EDGE_ASSET=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$STAGE/edge-index.html" | head -1)
+  EDGE_CHUNK_CODE=$(curl -sS -D "$STAGE/edge-chunk.hdr" -o "$STAGE/edge-chunk.bin" -w '%{http_code}' "https://fiddy.fun$EDGE_PROBE_ASSET")
+  EDGE_CHUNK_STATE=$(grep -i '^cf-cache-status:' "$STAGE/edge-chunk.hdr" | tr -d '\r' | awk '{print $2}')
+  EDGE_CHUNK_TTL=$(grep -i '^cache-control:' "$STAGE/edge-chunk.hdr" | grep -o 'max-age=[0-9]*' | head -1 | cut -d= -f2)
+  # What the ORIGIN answers for the same URL: "the edge still has an older
+  # release's copy" and "this URL is simply not served" are different things.
+  origin_get "$EDGE_PROBE_ASSET" "$STAGE/origin-probe.bin" || true
+  ORIGIN_PROBE_CODE=${ORIGIN_CODE:-000}
+  EDGE_AGREE=yes
+  [ "$EDGE_ASSET" = "$BUILT_ASSET" ] || EDGE_AGREE=no
+  if [ "$EDGE_CHUNK_CODE" != "$ORIGIN_PROBE_CODE" ]; then
+    EDGE_AGREE=no
+  elif [ "$EDGE_CHUNK_CODE" = 200 ]; then
+    cmp -s "$STAGE/edge-chunk.bin" "$STAGE/origin-probe.bin" || EDGE_AGREE=no
+  fi
+  printf '  edge (informational): GET / → %s [cf-cache-status %s%s]; GET %s → HTTP %s from the edge [cf-cache-status %s%s], HTTP %s from the origin\n' \
+    "${EDGE_ASSET:-nothing}" "${EDGE_STATE:-?}" "${EDGE_AGE:+, age ${EDGE_AGE}s}" \
+    "$EDGE_PROBE_ASSET" "${EDGE_CHUNK_CODE:-?}" "${EDGE_CHUNK_STATE:-?}" \
+    "${EDGE_CHUNK_TTL:+, max-age ${EDGE_CHUNK_TTL}s}" "${ORIGIN_PROBE_CODE:-?}"
+  [ "$EDGE_AGREE" = yes ]
+}
+
+if edge_report; then
+  echo "  the edge agrees: a browser on a cold cache is served this release"
+else
+  echo "  ^ the edge is serving something OTHER than this release at one of those URLs." >&2
+  echo "    That is a CDN TTL, not a broken release — the origin above serves these bytes." >&2
+  WANT=${EDGE_SETTLE_WAIT:-$EDGE_TTL}
+  [ "$WANT" -ge "$EDGE_TTL" ] || echo "    (wait budget ${WANT}s < the host's max-age ${EDGE_TTL}s: shortened on purpose, FIDDY_EDGE_SETTLE_WAIT)" >&2
+  echo "    waiting up to ${WANT}s for the edge to catch up (no rollback in the meantime)…" >&2
+  WAITED=0
+  while [ "$WAITED" -lt "$WANT" ]; do
+    STEP=15
+    [ $((WANT - WAITED)) -lt "$STEP" ] && STEP=$((WANT - WAITED))
+    sleep "$STEP"
+    WAITED=$((WAITED + STEP))
+    if edge_report; then
+      echo "  the edge caught up after ${WAITED}s — no rollback was needed" >&2
+      break
+    fi
+  done
+  if [ "$EDGE_AGREE" != yes ]; then
+    echo "  the edge is still serving the old copy after ${WAITED}s. NOT rolling back: the origin serves this" >&2
+    echo "  release's bytes (proved above), so the release stays cut over and the edge will catch up on its own." >&2
+  fi
+fi
 echo
-echo "  the bytes fiddy.fun serves ARE the bytes this build produced"
+echo "  the bytes fiddy.fun's ORIGIN serves ARE the bytes this build produced"
 set -e
 echo
 echo "release live: https://fiddy.fun  (release $SHA)"
