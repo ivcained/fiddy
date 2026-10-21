@@ -105,6 +105,13 @@ const SettingsMiniAppsPage = memo(() => {
           <SettingsNav />
           <FavoriteFrameProvider>
             <SettingsPageContent>
+              <div className="flex flex-col">
+                <span className="mb-2 px-2 text-sm text-muted">
+                  Mini apps run on their own site, in a sandbox. They cannot use
+                  your camera or microphone, and they cannot see your Fiddy
+                  session.
+                </span>
+              </div>
               {selectedFrame ? (
                 <div className="flex flex-col">
                   <DefaultButton
