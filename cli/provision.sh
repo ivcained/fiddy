@@ -69,8 +69,9 @@ EOF
     ssh) provision_ssh "${FIDDY_SSH_TARGET_ARG:?missing user@host after --ssh}" ;;
     *)
       step "fiddy provision"
-      echo "Pick your compute (cheapest first):"
-      echo "  1. Hetzner (~€120/mo — CHEAPEST):            fiddy provision --hetzner"
+      echo "Pick your compute (free first, then cheapest):"
+      echo "  0. Your own machine (FREE):                fiddy node up --local"
+      echo "  1. Hetzner (~€120/mo — cheapest cloud):    fiddy provision --hetzner"
       echo "  2. OVH Public Cloud (~\$190/mo):              fiddy provision --ovh"
       echo "  3. AWS (~\$285/mo, official-docs path):        fiddy provision --aws"
       echo "  4. Google Cloud (~\$350/mo, TESTED by us):    fiddy provision --gcp"
