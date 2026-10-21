@@ -360,7 +360,9 @@ const cssHoldingChipRules = loadedStylesheets
     name,
     text: readFileSync(join(assetsDir, name), 'utf8'),
   }))
-  .filter((sheet) => sheet.text.includes('.fiddy-cashtag {'));
+  /* Minified CSS writes `.fiddy-cashtag{` with no space, so match the rule
+     rather than literally formatting it the way the source file reads. */
+  .filter((sheet) => /\.fiddy-cashtag\s*\{/.test(sheet.text));
 
 if (cssHoldingChipRules.length === 0) {
   fail(
