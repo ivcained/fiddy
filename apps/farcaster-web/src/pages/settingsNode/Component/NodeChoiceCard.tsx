@@ -31,6 +31,24 @@ import {
 
 const OWN_NODE_TUTORIAL = 'https://fiddy.fun/client';
 
+/** The guided page that creates the machine for you, cloud by cloud. */
+const OWN_NODE_DEPLOY = 'https://fiddy.fun/client/deploy/';
+
+/**
+ * What launching a node actually costs, in the words the deploy page uses.
+ *
+ * Every figure here is the number in `cli/provision.sh`'s own output and in
+ * `site/deploy/` — not an estimate made up for this card. The order is the
+ * owner's ask (AWS first, because that is the path with official docs) with the
+ * measured cheapest named as such.
+ */
+const NODE_PATHS: { name: string; price: string; note?: string }[] = [
+  { name: 'AWS', price: '~$285/mo', note: 'official docs path' },
+  { name: 'Google Cloud', price: '~$350/mo', note: 'the one we tested' },
+  { name: 'OVHcloud', price: '~$190/mo' },
+  { name: 'Hetzner', price: '~€120/mo', note: 'cheapest' },
+];
+
 const CUSTOM = '__another__';
 
 type Outcome = { ok: boolean; text: string };
@@ -273,6 +291,69 @@ const NodeChoiceCard = memo<NodeChoiceCardProps>(
                 </span>
               </div>
             )}
+          </div>
+
+          {/* (c) launch one, if you have none yet */}
+          <div className={optionShell(false)} data-fiddy="launch-own-node">
+            <div className="font-medium text-primary">Launch your own node</div>
+            <div className="mt-1 text-xs text-muted">
+              No node to point at yet? Fiddy does not rent machines, and it does
+              not pretend to: the deploy page walks you through creating one in
+              your own cloud account, then hands you the address to paste above.
+              Any Ubuntu box with 4 vCPU, 16 GB of memory and a 2 TB disk will
+              do — the node syncs the whole network on first start, which takes
+              hours, not minutes.
+            </div>
+
+            <div className="mt-3 flex flex-col gap-1">
+              {NODE_PATHS.map((path) => (
+                <div
+                  key={path.name}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <span className="w-28 text-primary">{path.name}</span>
+                  <span className="text-muted">{path.price}</span>
+                  {path.note ? (
+                    <span className="text-xs text-muted">· {path.note}</span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-2 text-xs text-muted">
+              Those are the numbers in the deploy page and in the CLI’s own
+              output, not estimates. Hetzner is the cheapest measured; AWS is
+              the path with official documentation. You pay your cloud, not us.
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <a
+                href={OWN_NODE_DEPLOY}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded px-3 py-1 text-xs text-[#1a1c10] bg-action-primary hover:opacity-90"
+              >
+                Open the deploy page
+              </a>
+              <a
+                href={OWN_NODE_TUTORIAL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-action-primary text-xs hover:underline"
+              >
+                Read the walkthrough
+              </a>
+            </div>
+
+            <div className="mt-2 text-xs text-muted">
+              Prefer the terminal? The same thing is one command:{' '}
+              <code className="text-primary">fiddy provision --aws</code> (or{' '}
+              <code className="text-primary">--gcp</code>,{' '}
+              <code className="text-primary">--ovh</code>,{' '}
+              <code className="text-primary">--hetzner</code>, or{' '}
+              <code className="text-primary">--ssh you@host</code> for a server
+              you already have).
+            </div>
           </div>
         </div>
 

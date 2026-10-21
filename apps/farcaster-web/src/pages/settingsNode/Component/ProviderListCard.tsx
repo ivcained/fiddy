@@ -18,6 +18,7 @@
 import React, { memo, useCallback, useState } from 'react';
 
 import {
+  capabilitiesOf,
   preferProvider,
   type ProviderRuntimeSnapshot,
   useProviderWatch,
@@ -108,6 +109,13 @@ const ProviderListCard = memo<ProviderListCardProps>(
           healthy again.
         </p>
 
+        <p className="mb-3 text-xs text-muted">
+          Every row says what that server can do: <strong>reads + posts</strong>{' '}
+          means it can also carry a like, a follow or a cast you signed, and{' '}
+          <strong>reads only</strong> means it cannot — a write is never quietly
+          sent through a different server than the one you are on.
+        </p>
+
         <div className="mb-3 rounded border p-3 text-xs bg-tertiary border-default">
           <div className="font-medium text-primary">
             {view.activeId ? pill.label : 'Checking your servers…'}
@@ -124,6 +132,7 @@ const ProviderListCard = memo<ProviderListCardProps>(
             const health = view.health[provider.id];
             const isActive = provider.id === view.activeId;
             const errors = view.readErrors[provider.id] ?? 0;
+            const capability = capabilitiesOf(provider);
             return (
               <div
                 key={provider.id}
@@ -132,6 +141,15 @@ const ProviderListCard = memo<ProviderListCardProps>(
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-xs text-muted">{index + 1}.</span>
                   <span className="flex-1 text-primary">{provider.label}</span>
+                  <span
+                    className={`rounded border px-1.5 py-0.5 text-xs ${
+                      capability.writes
+                        ? 'border-[#d4ff3f]/40 text-[#d4ff3f]'
+                        : 'text-muted border-default'
+                    }`}
+                  >
+                    {capability.label}
+                  </span>
                   <span className={`text-xs ${statusClass(health?.status)}`}>
                     {providerStatusWord(health?.status)}
                   </span>
@@ -142,6 +160,9 @@ const ProviderListCard = memo<ProviderListCardProps>(
                   )}
                 </div>
                 <div className="text-xs text-muted">{provider.detail}</div>
+                <div className="text-xs text-muted">
+                  {capability.writeDetail}
+                </div>
                 {health?.detail ? (
                   <div className={`text-xs ${statusClass(health.status)}`}>
                     {health.detail}
@@ -175,10 +196,12 @@ const ProviderListCard = memo<ProviderListCardProps>(
         </div>
 
         <div className="mt-3 text-xs text-muted">
-          Neynar and Farcaster’s own server are extras: Neynar needs the API key
-          you add with scripts/fiddy-setup.command, and Farcaster’s own server
-          is read-only and cannot say how far behind it is — which is why
-          neither is a first choice unless you put it there.
+          With a Neynar key saved, Neynar is where Fiddy starts — it is the one
+          server here that both reads and posts, so a like works without you
+          picking anything. The follow-graph feed, your unseen counts and your
+          notifications still come from a node, because Neynar’s index does not
+          have them. Farcaster’s own server stays last: it is read-only and
+          cannot say how far behind it is.
         </div>
       </div>
     );
