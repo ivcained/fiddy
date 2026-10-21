@@ -227,7 +227,23 @@ const run = async () => {
     `${where(page)} — ${brainCards ? 'cards' : 'no cards'}, ${brainNameField} name field(s)`,
   );
 
-  // 4. No jargon, and nothing broken in the console on the way through.
+  // 4. The same screen at a phone width. This is a phone product and the step
+  //    now carries more than it used to, so "it still works on a phone" is a
+  //    claim worth measuring rather than assuming.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${ORIGIN}/welcome/name`, { waitUntil: 'domcontentloaded' });
+  const phoneRendered = await appears(page, '[data-fiddy-step="setup"]', 30000);
+  const phoneName = await page.locator('input[placeholder="Fiddy"]').count();
+  const phoneCards = await page.locator('[data-fiddy-brain="fiddy"]').isVisible().catch(() => false);
+  const phoneContinue = await page.locator('button:has-text("Continue")').isVisible().catch(() => false);
+  await page.screenshot({ path: `${OUT}/onboarding-5-phone.png`, fullPage: true });
+  check(
+    'at a phone width the step still shows both halves and its one press',
+    phoneRendered && phoneName === 1 && phoneCards && phoneContinue,
+    `${phoneRendered ? 'sheet' : 'no sheet'}, ${phoneName} name field(s), ${phoneCards ? 'cards' : 'no cards'}, ${phoneContinue ? 'Continue' : 'no Continue'}`,
+  );
+
+  // 5. No jargon, and nothing broken in the console on the way through.
   const screens = `${step1Text} ${step2Text}`.toLowerCase();
   const jargon = [
     'snapchain',
