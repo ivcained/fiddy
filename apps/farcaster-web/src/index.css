@@ -145,6 +145,8 @@
 @import './styles/fiddy-device-only.css';
 /* Making an account on this device, and holding more than one. */
 @import './styles/fiddy-accounts.css';
+/* The reminder to back an account up, and the words behind the tap. */
+@import './styles/fiddy-notice.css';
 @config '../tailwind.config.js';
 
 * {
