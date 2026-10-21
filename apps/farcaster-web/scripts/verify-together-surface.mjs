@@ -40,7 +40,18 @@
 //      members and the owner's card — the same board, not a copy
 //   8. the member moves the card to Done, and the owner's already-open page
 //      converges to Done on its own (its polling), with no reload
-//   9. no console error and no page error in either context
+//   9. TALKING ON THE CARD, in two real browsers:
+//        the owner comments; the member's board grows an unread marker on that
+//        card without anybody reloading; the member opens the card, sees the
+//        owner's words under @elena, and the marker is gone;
+//        the member types and the OWNER's open card says "marcus is typing…",
+//        then stops saying it when the member stops (measured, not claimed);
+//        the member sends, and the owner's open card shows the reply with
+//        @marcus
+//  10. what a thread refuses: a member of a DIFFERENT space (their own space,
+//      their own session) asking for this card's thread is answered 404, and an
+//      unauthenticated request is answered 401
+//  11. no console error and no page error in either context
 //
 // Screenshots land in $TOGETHER_SHOT_DIR (default: the system temp dir).
 
@@ -66,10 +77,13 @@ const record = (label, ok, detail = '') => {
 
 const expect = (label, ok, detail = '') => record(label, Boolean(ok), detail);
 
-const service = async (method, url, body) => {
+const service = async (method, url, body, token) => {
   const response = await fetch(SERVICE + url, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: 'Bearer ' + token } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
@@ -145,6 +159,58 @@ const layout = (page) =>
     };
   });
 
+/** Watches the page's own writes, so the probe knows the ids it is looking at. */
+const watchWrites = (page) => {
+  const created = { cards: [], spaces: [], sessions: [] };
+
+  page.on('response', async (response) => {
+    const path = new URL(response.url()).pathname;
+    const method = response.request().method();
+
+    try {
+      if (method === 'POST' && path.endsWith('/spaces/cards')) {
+        created.cards.push((await response.json()).id);
+      } else if (method === 'POST' && path.endsWith('/spaces')) {
+        const body = await response.json();
+        created.spaces.push(body.space_id);
+        created.sessions.push(body.session_token);
+      } else if (method === 'GET' && /\/spaces\/auth\/[\w-]+$/.test(path)) {
+        const body = await response.json();
+
+        if (body.session_token) {
+          created.sessions.push(body.session_token);
+        }
+      }
+    } catch {
+      // Not JSON we care about; ignore.
+    }
+  });
+
+  const wait = (list, what) => async () => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (list.length > 0) {
+        return list[list.length - 1];
+      }
+
+      await page.waitForTimeout(100);
+    }
+
+    throw new Error(`the page never produced ${what}`);
+  };
+
+  return {
+    card: wait(created.cards, 'a card'),
+    space: wait(created.spaces, 'a space'),
+    session: wait(created.sessions, 'a session token'),
+  };
+};
+
+/** The one card's thread, as the browser is rendering it. */
+const threadText = (page) =>
+  page.evaluate(
+    () => document.querySelector('[data-testid^="thread-"]')?.innerText ?? '',
+  );
+
 const run = async (browser, width, index) => {
   const ownerFid = 910000 + index * 10;
   const memberFid = 910001 + index * 10;
@@ -161,6 +227,7 @@ const run = async (browser, width, index) => {
   });
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
   const nextRequestId = watchSignIns(page);
+  const writes = watchWrites(page);
 
   console.log(`\n${width.label}x${width.height}`);
 
@@ -230,6 +297,7 @@ const run = async (browser, width, index) => {
   await page.getByRole('button', { name: 'Add card' }).click();
   await page.waitForSelector('text=Ship the Together surface', { timeout: 15000 });
   expect(`${width.label}: the card is on the board`, true);
+  const cardId = await writes.card();
 
   // 6. the invite link is a real URL into this app
   await page.getByRole('button', { name: 'Invite someone' }).click();
@@ -297,6 +365,208 @@ const run = async (browser, width, index) => {
     true,
   );
   await page.screenshot({ path: path.join(OUT, `together-done-${width.label}.png`) });
+
+  // 9. Talking on the card, in two real browsers ----------------------------
+  const openCard = async (target) =>
+    target.getByRole('button', { name: /Comments/ }).first().click();
+  const composer = (target) =>
+    target.getByPlaceholder('Say something on this card');
+  const comment = (target) =>
+    target.getByRole('button', { name: 'Comment', exact: true }).click();
+
+  // The member's board already carries something unread: the owner created the
+  // card after they joined, so it is one thing they have not looked at.
+  await guest.waitForSelector('[data-testid="unread-badge"]', { timeout: 20000 });
+  expect(
+    `${width.label}: the member's board marks the card that changed`,
+    (await guest.getByTestId('unread-badge').first().textContent())?.includes(
+      'new',
+    ),
+  );
+
+  // The owner opens the card and says something on it.
+  await openCard(page);
+  await composer(page).fill('the invite link is live — try it from your phone');
+  await comment(page);
+  await page.waitForFunction(
+    () => document.body.innerText.includes('the invite link is live'),
+    null,
+    { timeout: 20000 },
+  );
+  const ownerSaid = await threadText(page);
+  expect(
+    `${width.label}: the owner's comment is on the card`,
+    ownerSaid.includes('the invite link is live'),
+  );
+  expect(
+    `${width.label}: and carries the handle they signed in with`,
+    ownerSaid.includes('@elena'),
+  );
+
+  // The member's board learns about it over its own polling — no reload — and
+  // the marker on that card grows from one thing to two.
+  await guest.waitForFunction(
+    () => {
+      const badge = document.querySelector('[data-testid="unread-badge"]');
+
+      return Boolean(badge && badge.textContent.includes('2 new'));
+    },
+    null,
+    { timeout: 25000 },
+  );
+  expect(
+    `${width.label}: the member's marker grew to 2 new while they watched`,
+    true,
+  );
+
+  // Opening the card: the words, the author, and the marker gone.
+  await openCard(guest);
+  await guest.waitForFunction(
+    () =>
+      (document.querySelector('[data-testid^="thread-"]')?.innerText ?? '')
+        .includes('the invite link is live'),
+    null,
+    { timeout: 20000 },
+  );
+  const memberRead = await threadText(guest);
+  expect(
+    `${width.label}: the member reads the SAME comment on the SAME card`,
+    memberRead.includes('the invite link is live'),
+  );
+  expect(
+    `${width.label}: with the owner's Farcaster handle on it`,
+    memberRead.includes('@elena'),
+  );
+  await guest.waitForFunction(
+    () => !document.querySelector('[data-testid="unread-badge"]'),
+    null,
+    { timeout: 25000 },
+  );
+  expect(`${width.label}: opening the card cleared the unread marker`, true);
+  await guest.screenshot({
+    path: path.join(OUT, `together-thread-${width.label}.png`),
+  });
+
+  // Typing presence, measured in the other browser: the member types into the
+  // composer and the OWNER's open card says so; the member stops and it clears.
+  await composer(guest).fill('board is on my screen');
+  await page.waitForFunction(
+    () => document.body.innerText.includes('marcus is typing'),
+    null,
+    { timeout: 25000 },
+  );
+  expect(
+    `${width.label}: the owner sees "marcus is typing…" while the member types`,
+    true,
+  );
+  await composer(guest).fill('');
+  await page.waitForFunction(
+    () => !document.body.innerText.includes('is typing'),
+    null,
+    { timeout: 25000 },
+  );
+  expect(
+    `${width.label}: and the indicator clears when the member stops`,
+    true,
+  );
+
+  // Sending: the reply lands on the owner's open card, under the reply's own
+  // author, and the owner's board is not left with a marker for a card they are
+  // looking at.
+  await composer(guest).fill('board is on my screen');
+  await comment(guest);
+  await page.waitForFunction(
+    () => document.body.innerText.includes('board is on my screen'),
+    null,
+    { timeout: 25000 },
+  );
+  const ownerRead = await threadText(page);
+  expect(
+    `${width.label}: the owner's open card shows the member's reply`,
+    ownerRead.includes('board is on my screen'),
+  );
+  expect(`${width.label}: under @marcus`, ownerRead.includes('@marcus'));
+  await page.waitForFunction(
+    () => !document.querySelector('[data-testid="unread-badge"]'),
+    null,
+    { timeout: 25000 },
+  );
+  expect(
+    `${width.label}: the card in front of the owner is not left marked unread`,
+    (await page.locator('[data-testid="unread-badge"]').count()) === 0,
+  );
+
+  // 10. What a thread refuses ------------------------------------------------
+  // A third identity, in their OWN space, holding their OWN valid session.
+  const strangerFid = 919000 + index * 10;
+  const challenge = await service('POST', '/spaces/auth', {
+    siwe_uri: `${SERVER}/~/together`,
+    domain: 'localhost',
+  });
+  await approve(challenge.body.request_id, strangerFid, 'stranger');
+  const answered = await service(
+    'GET',
+    '/spaces/auth/' + challenge.body.request_id,
+  );
+  const strangerToken = answered.body.session_token;
+  const strangerSpace = await service(
+    'POST',
+    '/spaces',
+    { name: 'Someone else', channel: 'elsewhere' },
+    strangerToken,
+  );
+  expect(
+    `${width.label}: a second identity has a space of their own`,
+    strangerSpace.status === 200 && Boolean(strangerSpace.body.space_id),
+    `space ${strangerSpace.body?.space_id}`,
+  );
+
+  const outsideRead = await service(
+    'GET',
+    `/spaces/cards/${cardId}/thread`,
+    undefined,
+    strangerSpace.body.session_token,
+  );
+  expect(
+    `${width.label}: a member of another space cannot read this thread`,
+    outsideRead.status === 404,
+    `${outsideRead.status} ${JSON.stringify(outsideRead.body)}`,
+  );
+  const outsideWrite = await service(
+    'POST',
+    `/spaces/cards/${cardId}/messages`,
+    { body: 'intruder' },
+    strangerSpace.body.session_token,
+  );
+  expect(
+    `${width.label}: and cannot comment on this card`,
+    outsideWrite.status === 404,
+    String(outsideWrite.status),
+  );
+  const anonymous = await service('GET', `/spaces/cards/${cardId}/thread`);
+  expect(
+    `${width.label}: an unauthenticated request is rejected`,
+    anonymous.status === 401,
+    String(anonymous.status),
+  );
+
+  // The same route, asked by somebody who is in the space, answers — so the
+  // 404 above is scope, not a broken endpoint.
+  const ownerToken = await writes.session();
+  const insideRead = await service(
+    'GET',
+    `/spaces/cards/${cardId}/thread`,
+    undefined,
+    ownerToken,
+  );
+  expect(
+    `${width.label}: a member of this space still reads it over HTTP`,
+    insideRead.status === 200 &&
+      insideRead.body.messages.some((m) =>
+        m.body.includes('board is on my screen'),
+      ),
+    String(insideRead.status),
+  );
 
   expect(`${width.label}: no browser errors`, errors.length === 0, errors.join(' | '));
   expect(

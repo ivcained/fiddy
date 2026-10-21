@@ -20,6 +20,7 @@ import {
   Check,
   Copy,
   Link2,
+  MessageSquare,
   RefreshCw,
   Send,
   UserPlus,
@@ -37,15 +38,21 @@ import {
   createInvite,
   createSpace,
   listSpaces,
+  markCardRead,
   openSpace,
   pollTogetherSignIn,
+  postComment,
   readEvents,
   readState,
+  readThread,
   readTogetherSession,
+  sendTyping,
   startTogetherSignIn,
   storeTogetherSession,
   TOGETHER_POLL_INTERVAL_MS,
   TOGETHER_SIGN_IN_TIMEOUT_MS,
+  TOGETHER_THREAD_POLL_INTERVAL_MS,
+  TOGETHER_TYPING_HEARTBEAT_MS,
   TogetherCard,
   TogetherCardStatus,
   TogetherError,
@@ -54,6 +61,7 @@ import {
   TogetherSignInChallenge,
   TogetherSpace,
   TogetherState,
+  TogetherThread,
   updateCard,
 } from '~/lib/together';
 
@@ -267,86 +275,321 @@ const CreateSpacePanel = ({
   );
 };
 
+/**
+ * One card's conversation.
+ *
+ * Closed, it costs nothing. Open, it does three small things and nothing else:
+ * polls itself every couple of seconds (the board's own cadence, same polling
+ * transport), announces that you are typing while there is unsent text, and
+ * tells the board the card has been seen — which is what clears its unread
+ * marker. Nobody sees their own "typing", because the service never sends it
+ * back to them.
+ */
+const CardThread = ({
+  card,
+  token,
+  onSeen,
+}: {
+  card: TogetherCard;
+  token: string;
+  onSeen: () => void;
+}) => {
+  const [thread, setThread] = React.useState<TogetherThread | null>(null);
+  const [draft, setDraft] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const newest = React.useRef<string | null>(null);
+  // The callback is read through a ref so a parent re-render never restarts the
+  // poll (and never resets the interval the typing heartbeat is riding on).
+  const seen = React.useRef(onSeen);
+  React.useEffect(() => {
+    seen.current = onSeen;
+  }, [onSeen]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const tick = async () => {
+      try {
+        const next = await readThread(token, card.id);
+
+        if (cancelled) {
+          return;
+        }
+
+        const last = next.messages[next.messages.length - 1]?.id ?? null;
+
+        // Something arrived while the card was open: it is read, and the board's
+        // marker should go. The first read only sets the baseline.
+        if (newest.current !== null && last !== newest.current) {
+          seen.current();
+        }
+
+        newest.current = last;
+        setThread(next);
+      } catch {
+        // A failed poll is not a story; the next one usually works.
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(
+      () => void tick(),
+      TOGETHER_THREAD_POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [card.id, token]);
+
+  // Presence: unsent text is the whole state. Sending ends it, closing the card
+  // ends it, and the service's own clock ends it if this tab dies mid-sentence.
+  const typing = draft.trim().length > 0;
+
+  React.useEffect(() => {
+    if (!typing) {
+      return undefined;
+    }
+
+    const heartbeat = () =>
+      void sendTyping(token, card.id, true).catch(() => undefined);
+    heartbeat();
+    const timer = window.setInterval(heartbeat, TOGETHER_TYPING_HEARTBEAT_MS);
+
+    return () => {
+      window.clearInterval(timer);
+      void sendTyping(token, card.id, false).catch(() => undefined);
+    };
+  }, [card.id, token, typing]);
+
+  const send = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!draft.trim() || busy) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      await postComment(token, card.id, draft.trim());
+      setDraft('');
+      const next = await readThread(token, card.id);
+      newest.current = next.messages[next.messages.length - 1]?.id ?? null;
+      setThread(next);
+    } catch (problem) {
+      setError(describeError(problem));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const messages = thread?.messages ?? [];
+  const others = thread?.typing ?? [];
+
+  return (
+    <div
+      className="mt-3 rounded-xl border border-[#2a2c28] bg-[#141414] p-3"
+      data-testid={`thread-${card.id}`}
+    >
+      {messages.length === 0 ? (
+        <p className="fiddy-card-line">
+          Nothing said on this card yet. Anything you write here is on the card,
+          for everyone in the space.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {messages.map((message) => (
+            <li className="text-[12.5px] leading-relaxed" key={message.id}>
+              <span className="font-bold text-[#c8ff4d]">
+                {message.author_name
+                  ? '@' + message.author_name
+                  : 'fid ' + message.author_fid}
+              </span>{' '}
+              <span className="text-[#e6e8e3]">{message.body}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {others.length > 0 && (
+        <p className="mt-2 text-[12px] text-[#a8ada2]" data-testid="typing">
+          {others
+            .map((one) => `${one.username ?? 'someone'} is typing…`)
+            .join(', ')}
+        </p>
+      )}
+
+      <form className="mt-3 flex flex-col gap-2" onSubmit={(event) => void send(event)}>
+        <label className="block">
+          <span className="sr-only">Comment on {card.title}</span>
+          <textarea
+            aria-label={`Comment on ${card.title}`}
+            className="fiddy-input"
+            maxLength={1000}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Say something on this card"
+            rows={2}
+            value={draft}
+          />
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="fiddy-quiet-btn-outline"
+            disabled={busy || !draft.trim()}
+            style={{ width: 'auto', padding: '0 16px' }}
+            type="submit"
+          >
+            {busy ? 'Sending…' : 'Comment'}
+          </button>
+          <span className="text-[11.5px] text-[#8c9187]">
+            Everyone in the space sees this on the card.
+          </span>
+        </div>
+      </form>
+
+      {error && <p className="mt-2 text-[12.5px] text-[#ff9b8a]">{error}</p>}
+    </div>
+  );
+};
+
 const CardColumn = ({
   cards,
   column,
   onMove,
   onAnnounce,
+  onOpenCard,
   busyCardId,
+  token,
+  unread,
 }: {
   cards: TogetherCard[];
   column: (typeof COLUMNS)[number];
   onMove: (card: TogetherCard, status: TogetherCardStatus) => void;
   onAnnounce: (card: TogetherCard) => void;
+  onOpenCard: (card: TogetherCard) => void;
   busyCardId: string | null;
-}) => (
-  <section className="rounded-2xl border border-[#2a2c28] bg-[#1b1d19] p-4">
-    <header className="mb-3 flex items-baseline gap-2">
-      <h3 className="text-[14px] font-extrabold">{column.label}</h3>
-      <span className="text-[11.5px] text-[#8c9187]">{cards.length}</span>
-      <span className="fiddy-soon">{column.hint}</span>
-    </header>
+  token: string;
+  unread: Record<string, number>;
+}) => {
+  const [openId, setOpenId] = React.useState<string | null>(null);
 
-    {cards.length === 0 ? (
-      <p className="text-[12.5px] text-[#8c9187]">Nothing here.</p>
-    ) : (
-      <ul
-        className="fiddy-card-list"
-        style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}
-      >
-        {cards.map((card) => (
-          <li
-            className="rounded-xl border border-[#2a2c28] bg-[#212420] p-3"
-            key={card.id}
-          >
-            <p className="mb-1 text-[14px] font-bold">{card.title}</p>
-            {card.note && <p className="fiddy-card-line">{card.note}</p>}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {column.id !== 'doing' && column.id !== 'done' && (
-                <button
-                  className="fiddy-quiet-btn-outline"
-                  disabled={busyCardId === card.id}
-                  onClick={() => onMove(card, 'doing')}
-                  type="button"
-                >
-                  Start
-                </button>
-              )}
-              {column.id === 'doing' && (
-                <button
-                  className="fiddy-quiet-btn-outline"
-                  disabled={busyCardId === card.id}
-                  onClick={() => onMove(card, 'done')}
-                  type="button"
-                >
-                  <Check
-                    aria-hidden="true"
-                    className="mr-1 inline h-3.5 w-3.5"
+  return (
+    <section className="rounded-2xl border border-[#2a2c28] bg-[#1b1d19] p-4">
+      <header className="mb-3 flex items-baseline gap-2">
+        <h3 className="text-[14px] font-extrabold">{column.label}</h3>
+        <span className="text-[11.5px] text-[#8c9187]">{cards.length}</span>
+        <span className="fiddy-soon">{column.hint}</span>
+      </header>
+
+      {cards.length === 0 ? (
+        <p className="text-[12.5px] text-[#8c9187]">Nothing here.</p>
+      ) : (
+        <ul
+          className="fiddy-card-list"
+          style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}
+        >
+          {cards.map((card) => {
+            const fresh = unread[card.id] ?? 0;
+            const open = openId === card.id;
+
+            return (
+              <li
+                className="rounded-xl border border-[#2a2c28] bg-[#212420] p-3"
+                key={card.id}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="mb-1 text-[14px] font-bold">{card.title}</p>
+                  {fresh > 0 && (
+                    <span
+                      className="fiddy-tag fiddy-tag-live"
+                      data-testid="unread-badge"
+                      style={{ marginLeft: 0 }}
+                      title="Something changed on this card since you last opened it"
+                    >
+                      {fresh} new
+                    </span>
+                  )}
+                </div>
+                {card.note && <p className="fiddy-card-line">{card.note}</p>}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {column.id !== 'doing' && column.id !== 'done' && (
+                    <button
+                      className="fiddy-quiet-btn-outline"
+                      disabled={busyCardId === card.id}
+                      onClick={() => onMove(card, 'doing')}
+                      type="button"
+                    >
+                      Start
+                    </button>
+                  )}
+                  {column.id === 'doing' && (
+                    <button
+                      className="fiddy-quiet-btn-outline"
+                      disabled={busyCardId === card.id}
+                      onClick={() => onMove(card, 'done')}
+                      type="button"
+                    >
+                      <Check
+                        aria-hidden="true"
+                        className="mr-1 inline h-3.5 w-3.5"
+                      />
+                      Done
+                    </button>
+                  )}
+                  {column.id === 'done' && (
+                    <button
+                      className="fiddy-quiet-btn-outline"
+                      disabled={busyCardId === card.id}
+                      onClick={() => onAnnounce(card)}
+                      type="button"
+                    >
+                      <Send
+                        aria-hidden="true"
+                        className="mr-1 inline h-3.5 w-3.5"
+                      />
+                      Cast it to the channel
+                    </button>
+                  )}
+                  <button
+                    aria-expanded={open}
+                    className="fiddy-quiet-btn-outline"
+                    onClick={() => {
+                      // Opening a card is what says you have seen what is on it.
+                      setOpenId(open ? null : card.id);
+
+                      if (!open) {
+                        onOpenCard(card);
+                      }
+                    }}
+                    type="button"
+                  >
+                    <MessageSquare
+                      aria-hidden="true"
+                      className="mr-1 inline h-3.5 w-3.5"
+                    />
+                    Comments{fresh > 0 ? ` (${fresh} new)` : ''}
+                  </button>
+                </div>
+
+                {open && (
+                  <CardThread
+                    card={card}
+                    onSeen={() => onOpenCard(card)}
+                    token={token}
                   />
-                  Done
-                </button>
-              )}
-              {column.id === 'done' && (
-                <button
-                  className="fiddy-quiet-btn-outline"
-                  disabled={busyCardId === card.id}
-                  onClick={() => onAnnounce(card)}
-                  type="button"
-                >
-                  <Send
-                    aria-hidden="true"
-                    className="mr-1 inline h-3.5 w-3.5"
-                  />
-                  Cast it to the channel
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-    )}
-  </section>
-);
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+};
 
 const BoardPanel = ({
   state,
@@ -463,6 +706,22 @@ const BoardPanel = ({
       setBusyCardId(null);
     }
   };
+
+  // Opening a card is the one act that says "I have seen this": it moves the
+  // member's watermark for that card and the board's marker clears.
+  const openCard = React.useCallback(
+    async (card: TogetherCard) => {
+      try {
+        await markCardRead(token, card.id);
+        await refresh();
+      } catch (problem) {
+        setError(describeError(problem));
+      }
+    },
+    [refresh, token],
+  );
+
+  const unread = state.unread?.cards ?? {};
 
   const mine = state.members.find((member) => member.fid === state.me.fid);
 
@@ -605,6 +864,9 @@ const BoardPanel = ({
             key={column.id}
             onAnnounce={(card) => void cast(card)}
             onMove={(card, status) => void move(card, status)}
+            onOpenCard={(card) => void openCard(card)}
+            token={token}
+            unread={unread}
           />
         ))}
       </div>
@@ -621,9 +883,17 @@ const BoardPanel = ({
             {activity.map((event) => (
               <li className="fiddy-card-line" key={event.seq}>
                 {event.actor_name ? '@' + event.actor_name : 'someone'}{' '}
-                {event.kind === 'card.created' ? 'added' : 'moved'}{' '}
+                {event.kind === 'comment.added'
+                  ? 'commented on'
+                  : event.kind === 'card.created'
+                    ? 'added'
+                    : 'moved'}{' '}
                 <strong>{event.title ?? 'a card'}</strong>
-                {event.status ? ` → ${event.status}` : ''}
+                {event.kind === 'comment.added'
+                  ? `: “${event.body ?? ''}”`
+                  : event.status
+                    ? ` → ${event.status}`
+                    : ''}
               </li>
             ))}
           </ul>
@@ -783,10 +1053,11 @@ export const TogetherPage = () => {
         <p className="fiddy-honest-note">
           <Zap aria-hidden="true" />
           <span>
-            Boards refresh by asking the space service what changed every few
-            seconds. Live typing and websockets are <strong>soon</strong>.
-            Spaces are an alpha: they hold FIDs, handles, boards and cast
-            intents — never keys, never seed phrases.
+            Comments, typing indicators and unread markers all arrive the same
+            way the board does: this page asks the space service what changed
+            every few seconds. Websockets are still <strong>soon</strong>.
+            Spaces are an alpha: they hold FIDs, handles, boards, comments and
+            cast intents — never keys, never seed phrases.
             {spaceCount > 1 ? ` You are in ${spaceCount} spaces.` : ''}
           </span>
         </p>

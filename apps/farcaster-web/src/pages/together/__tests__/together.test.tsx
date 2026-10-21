@@ -434,3 +434,234 @@ describe('Together — the other end of an invite link', () => {
     expect(screen.getByRole('link', { name: 'Open the board' })).toBeTruthy();
   });
 });
+
+describe('Together — talking on a card', () => {
+  const MEMBER_FROM_ELSEWHERE = {
+    space_id: 'space-1',
+    fid: 43,
+    username: 'marcus',
+    pfp_url: null,
+    role: 'member',
+    joined_at: 2,
+  };
+
+  const SAID = {
+    id: 'm-1',
+    space_id: 'space-1',
+    card_id: 'card-1',
+    author_fid: 43,
+    author_name: 'marcus',
+    body: 'the invite link is live',
+    created_at: 2,
+  };
+
+  /**
+   * The board as the OTHER member's actions leave it: one unread thing on the
+   * card, one comment in its thread, and somebody typing.
+   */
+  const renderCardWith = ({
+    unread = { 'card-1': 1 },
+    messages = [SAID],
+    typing = [] as { fid: number; username: string | null; expires: number }[],
+  } = {}) => {
+    let cardRead = false;
+
+    stored.set('together-space-session', SESSION);
+    respond((url, call) => {
+      if (url.includes('/spaces/mine')) {
+        return json(200, { fid: 42, space_id: 'space-1', spaces: [SPACE] });
+      }
+
+      if (url.includes('/spaces/state')) {
+        const counts = cardRead ? {} : unread;
+        return json(200, {
+          ...statePayload(),
+          members: [MEMBER, MEMBER_FROM_ELSEWHERE],
+          unread: {
+            cards: counts,
+            total: Object.values(counts).reduce((a, b) => a + b, 0),
+          },
+        });
+      }
+
+      if (url.includes('/spaces/events')) {
+        return json(200, { cursor: 5, latest: 5, events: [] });
+      }
+
+      // Opening a card: the marker is cleared on the service, so the next state
+      // read comes back without it.
+      if (url.includes('/read')) {
+        cardRead = true;
+        return json(200, { card_id: 'card-1', seen_seq: 5, unread: 0 });
+      }
+
+      if (url.includes('/typing')) {
+        return json(200, {
+          card_id: 'card-1',
+          typing: JSON.parse(call.body ?? '{}').active ? [] : [],
+        });
+      }
+
+      if (url.includes('/messages')) {
+        return json(200, SAID);
+      }
+
+      if (url.includes('/thread')) {
+        return json(200, {
+          card: { id: 'card-1', title: CARD.title, status: 'todo', version: 1 },
+          messages,
+          typing,
+          unread: 0,
+          cursor: 5,
+        });
+      }
+
+      if (url.includes('/spaces/cards/')) {
+        return json(200, { ...CARD, status: 'doing', version: 2 });
+      }
+
+      return json(200, {});
+    });
+
+    render(
+      <Shell entries={['/~/together']}>
+        <TogetherPage />
+      </Shell>,
+    );
+  };
+
+  it('marks the card that changed, shows the comment with its author, and clears on open', async () => {
+    renderCardWith();
+    await screen.findByText('Ship the Together surface');
+
+    // The board says something happened here, without opening anything.
+    const badge = await screen.findByText('1 new');
+    expect(badge).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Comments/ }));
+
+    // The comment is on the card, under the handle its author signed in with.
+    const thread = await screen.findByTestId('thread-card-1');
+    expect(thread.textContent).toContain('the invite link is live');
+    expect(thread.textContent).toContain('@marcus');
+
+    // Opening it is what cleared the marker — and the request that did it went
+    // out as this member's own session.
+    await waitFor(() =>
+      expect(screen.queryByText('1 new')).toBeNull(),
+    );
+    const read = calls.find((call) => call.url.includes('/read'));
+    expect(read?.method).toBe('POST');
+    expect(read?.headers.authorization).toBe('Bearer session-token');
+  });
+
+  it('shows that the other member is typing, and stops showing it when they do', async () => {
+    const typer = [{ fid: 43, username: 'marcus', expires: 9 }];
+    let typingNow = false;
+
+    // The thread's own poll is what carries presence, so the assertions wait for
+    // a later tick instead of trusting the first paint.
+    stored.set('together-space-session', SESSION);
+    respond((url) => {
+      if (url.includes('/spaces/mine')) {
+        return json(200, { fid: 42, space_id: 'space-1', spaces: [SPACE] });
+      }
+
+      if (url.includes('/spaces/state')) {
+        return json(200, {
+          ...statePayload(),
+          members: [MEMBER, MEMBER_FROM_ELSEWHERE],
+          unread: { cards: {}, total: 0 },
+        });
+      }
+
+      if (url.includes('/spaces/events')) {
+        return json(200, { cursor: 5, latest: 5, events: [] });
+      }
+
+      if (url.includes('/read')) {
+        return json(200, { card_id: 'card-1', seen_seq: 5, unread: 0 });
+      }
+
+      if (url.includes('/thread')) {
+        return json(200, {
+          card: { id: 'card-1', title: CARD.title, status: 'todo', version: 1 },
+          messages: [SAID],
+          typing: typingNow ? typer : [],
+          unread: 0,
+          cursor: 5,
+        });
+      }
+
+      if (url.includes('/spaces/cards/')) {
+        return json(200, { ...CARD, status: 'doing', version: 2 });
+      }
+
+      return json(200, {});
+    });
+
+    render(
+      <Shell entries={['/~/together']}>
+        <TogetherPage />
+      </Shell>,
+    );
+    await screen.findByText('Ship the Together surface');
+    fireEvent.click(screen.getByRole('button', { name: /Comments/ }));
+    await screen.findByText(/the invite link is live/);
+    expect(screen.queryByTestId('typing')).toBeNull();
+
+    // They start typing: the next poll brings the indicator over.
+    typingNow = true;
+    expect(
+      await screen.findByText(/marcus is typing/, undefined, { timeout: 6000 }),
+    ).toBeTruthy();
+
+    // They stop, or their heartbeat lapses: it clears on its own.
+    typingNow = false;
+    await waitFor(() => expect(screen.queryByTestId('typing')).toBeNull(), {
+      timeout: 6000,
+    });
+  });
+
+  it('announces that you are typing while there is unsent text, and stops after sending', async () => {
+    renderCardWith({ messages: [] });
+    await screen.findByText('Ship the Together surface');
+    fireEvent.click(screen.getByRole('button', { name: /Comments/ }));
+
+    const composer = await screen.findByPlaceholderText(
+      'Say something on this card',
+    );
+    fireEvent.change(composer, { target: { value: 'on it' } });
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.url.includes('/typing') &&
+            call.body === JSON.stringify({ active: true }),
+        ),
+      ).toBe(true),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.url.includes('/messages') &&
+            call.body === JSON.stringify({ body: 'on it' }),
+        ),
+      ).toBe(true),
+    );
+    // The heartbeat stops the moment the text becomes the message.
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.url.includes('/typing') &&
+            call.body === JSON.stringify({ active: false }),
+        ),
+      ).toBe(true),
+    );
+  });
+});
