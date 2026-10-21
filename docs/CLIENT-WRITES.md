@@ -43,6 +43,12 @@ bytes and reject the signer at merge: an unregistered key passes
 `bad_request.validation_failure/invalid signer`. That is why the read-back
 exists.)
 
+A write that arrives with **no key at all** is no longer refused at the reader:
+the pending write itself is handed to an asker, which puts one friendly approval
+screen in front of them where they are and answers the *same* request once they
+approve it — so a like pressed before the key exists still lands, without a second
+press and without a recovery phrase. See `docs/CLIENT-INLINE-APPROVAL.md`.
+
 Everything the fork's write surface does that has *no* builder here — deleting a
 cast, editing a profile, mutes, blocks, bookmarks — stays unclassified and is
 refused in words that name the gap:

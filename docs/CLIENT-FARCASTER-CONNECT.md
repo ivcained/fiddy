@@ -156,5 +156,8 @@ write is handed to the service that holds it instead of being signed here.
    purpose-built app account (its own FID, its own key, its own name on the
    approval screen) is a nicer long-term answer and costs only two env values.
 4. **The other write verbs for a granted key** are implemented (cast, reaction,
-   follow/unfollow) but only the client's own screens exercise them; a live
-   end-to-end write needs an approved signer, which is (1).
+   follow/unfollow). The client now reaches them from the ordinary surfaces: a
+   first cast, like, recast or follow with no key on the device is *held* while
+   the approval sheet asks, and the granted key carries it once the person
+   approves (`docs/CLIENT-INLINE-APPROVAL.md`). A live end-to-end write still
+   needs an approved signer, which is (1).

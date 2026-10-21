@@ -63,7 +63,10 @@ import {
   REQUEST_BODY_PREVIEW_LIMIT,
   type RequestLogEntry,
 } from '~/snapchain/nodeApi/nodeBackedFetch';
-import { NodeBackedWrites } from '~/snapchain/nodeApi/nodeWrites';
+import {
+  NodeBackedWrites,
+  type WriteApproval,
+} from '~/snapchain/nodeApi/nodeWrites';
 import { castAuthorOf, channelParentUrlFor } from '~/snapchain/nodeApi/reads';
 
 import {
@@ -127,6 +130,14 @@ export interface ProviderBackedFetchOptions {
    * storage; injectable so a test can use a storage of its own.
    */
   drafts?: LocalDraftStore;
+  /**
+   * Asked when a write arrives with no key to sign it, so the reader can approve
+   * a posting key where they are instead of being sent to Advanced. Handed to
+   * every writer this seam builds — the node adapters below and Neynar's own
+   * node — so a write is asked about the same way whichever server carries it.
+   * Leave it out (or pass `null`) for the bare refusal.
+   */
+  askForPostingKey?: WriteApproval | null;
 }
 
 export interface ProviderBackedFetchHandle {
@@ -216,6 +227,7 @@ export const createProviderBackedFetch = ({
   requestLog: requestLogOption,
   getProviderOrder,
   drafts: draftsOption,
+  askForPostingKey,
 }: ProviderBackedFetchOptions): ProviderBackedFetchHandle => {
   const drafts = draftsOption ?? new LocalDraftStore();
   const nodeFetch = fetchImpl ?? fetch;
@@ -288,6 +300,9 @@ export const createProviderBackedFetch = ({
       // One sink for the whole client: a request the node adapter answers and a
       // request this seam answers land in the same list, in order.
       log: requestLog,
+      ...(askForPostingKey === null || askForPostingKey === undefined
+        ? {}
+        : { askForPostingKey }),
     });
     adapters.set(baseUrl, created);
     return created;
@@ -365,6 +380,9 @@ export const createProviderBackedFetch = ({
           baseUrl: NEYNAR_BASE_URL,
         }),
       channelParentUrl: channelParentUrlFor,
+      ...(askForPostingKey === null || askForPostingKey === undefined
+        ? {}
+        : { askForPostingKey }),
       onEvidence: (evidence) => {
         entry.write = evidence;
       },
