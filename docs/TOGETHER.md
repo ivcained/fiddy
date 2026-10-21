@@ -182,6 +182,13 @@ returned, the board followed a card moved while they were away in **24 ms and
 only console errors in that window were the dead port's own — judged apart from
 the rest of the run, not forgiven with it.
 
+It ran twice on this tree and both runs were **106/106 with zero failures and
+zero skipped** — the second at 04:12–04:14 IST, where the same assertions read
+the join at 69 ms and 84 ms, the move at 3 ms and 5 ms after the service
+accepted it, and the post-outage change at 95 ms and 98 ms. The milliseconds
+move between runs because they are a real push on a real box, which is the point
+of asserting on them: the claim is under a second, not a number.
+
 Then the
 conversation, in those same two browsers: the member moves the card and the
 **owner's** open board grows a marker on that card (`2 new`) with nobody
