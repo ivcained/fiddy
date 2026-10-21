@@ -81,6 +81,48 @@ charge), and that is what `lib/surp/x402.ts` prepares. Adding CORS to the create
 endpoint before the balance grant is gated would hand every website on the
 internet a way to mint funded keys from visitors' browsers.
 
+## Where Surp is wired, on both sides (reworked against `main`, 2026-10-21)
+
+Surp is a **provider preset**, not an id the client invents. The card in the
+picker is the same shape as ChatGPT/Claude/Gemini/OpenRouter/Nous Portal — a
+`BrainId` in `lib/fiddySetup.ts`'s `BRAIN_IDS`, `kind: 'preset'`,
+`needs: 'account'`, no address field — and the descriptor the sheet sends to the
+agent service is exactly:
+
+    { kind: 'preset', presetId: 'surp', model: 'surp/<combo>', key: 'sk-surp-…' }
+
+which is the descriptor `t_8c879418`'s provider table already understands. That
+required the missing half: a `surp` entry in the control plane's
+`BRAIN_PRESETS` (`legitmate-farcaster`, commit `5cd53ae`), because a preset id
+that side does not know is refused with `BRAIN_PRESET_NOT_APPROVED` — a card you
+can pick and never apply is not a brain.
+
+The address stays ours (`https://surp.ivc.lol/v1`, transport
+`chat_completions`), and two things are measured rather than assumed:
+
+- `surp.ivc.lol` resolves to `187.127.148.194`, a public address, so the DNS
+  check the probe path applies passes.
+- Surp's `/v1/models` is **not** the OpenAI shape. It names each route a *combo*:
+  `{combos: [{combo: "surp/value", resolved_model, usd_per_1m_tokens}]}`, with no
+  `data` array at all. Read through the generic reader a perfectly good key came
+  back as "listed no models", so the preset declares `listShape: 'surp_combos'`
+  and one live probe through `probeBrainProvider` with a real key answered
+  `BRAIN_OK` with Surp's 19 real route ids.
+
+On the client side, one thing is worth stating plainly because the sheet's copy
+used to say the opposite. For every other card the key already exists on the
+owner's own dashboard and only passes through, so "Fiddy keeps no copy" is true.
+Surp's key does not exist anywhere until this screen makes it, so
+`lib/surp/keys.ts` keeps it in one storage entry of its own and the sheet says
+where it lives — in this browser — instead of borrowing that sentence. The key
+is still never in the preference file (`fiddy.setup`), never in a URL, and only
+ever shown as a mask.
+
+`walletChoice` is a field `saveFiddySetup` writes explicitly (its whitelist is
+deliberate: the file holds a preference and an address, never a credential), so
+the wallet home's choice survives a reload — asserted in `fiddySetup.test.ts`
+alongside the 'surp' round-trip through `BRAIN_IDS`.
+
 ## What was built here (fiddy client)
 
     src/lib/surp/transport.ts      one seam: addresses, deadline, and the honest refusal
