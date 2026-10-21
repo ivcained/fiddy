@@ -41,9 +41,11 @@
 //   8. the member moves the card to Done, and the owner's already-open page
 //      converges to Done on its own (its polling), with no reload
 //   9. TALKING ON THE CARD, in two real browsers:
-//        the owner comments; the member's board grows an unread marker on that
-//        card without anybody reloading; the member opens the card, sees the
-//        owner's words under @elena, and the marker is gone;
+//        the member moves a card and the OWNER's open board marks that card
+//        unread on its own, no reload; opening it clears the marker;
+//        the owner comments; the member's board grows a marker on that same
+//        card, the member opens it, sees the owner's words under @elena, and
+//        their marker is gone;
 //        the member types and the OWNER's open card says "marcus is typing…",
 //        then stops saying it when the member stops (measured, not claimed);
 //        the member sends, and the owner's open card shows the reply with
@@ -54,6 +56,11 @@
 //  11. no console error and no page error in either context
 //
 // Screenshots land in $TOGETHER_SHOT_DIR (default: the system temp dir).
+//
+// Knobs: TOGETHER_LOAD_TIMEOUT_MS is how long any single wait may take
+// (default 120s); TOGETHER_CHROMIUM points at a Chromium build already on the
+// machine so Playwright does not download one; TOGETHER_WIDTHS picks the
+// viewports to run ("390" for one of them, default both).
 
 import os from 'node:os';
 import path from 'node:path';
@@ -66,9 +73,20 @@ const OUT = process.env.TOGETHER_SHOT_DIR ?? os.tmpdir();
 const WIDTHS = [
   { label: '390', width: 390, height: 844 },
   { label: '1440', width: 1440, height: 900 },
-];
+].filter(
+  (width) =>
+    !process.env.TOGETHER_WIDTHS ||
+    process.env.TOGETHER_WIDTHS.split(',').map((w) => w.trim()).includes(width.label),
+);
 
 const results = [];
+
+// A dev server's first paint on a loaded machine is not an assertion: every
+// wait in this file — the page loads, the default timeout behind the locators,
+// and the polling loops that watch the page's own requests — rides this one
+// number, so a slow machine is not read as a broken feature.
+const LOAD_TIMEOUT = Number(process.env.TOGETHER_LOAD_TIMEOUT_MS ?? 120000);
+const POLL_ATTEMPTS = Math.ceil(LOAD_TIMEOUT / 100);
 
 const record = (label, ok, detail = '') => {
   results.push({ label, ok });
@@ -122,7 +140,7 @@ const watchSignIns = (page) => {
   });
 
   return async () => {
-    for (let attempt = 0; attempt < 150; attempt += 1) {
+    for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
       if (pending.length > 0) {
         return pending.shift();
       }
@@ -187,7 +205,7 @@ const watchWrites = (page) => {
   });
 
   const wait = (list, what) => async () => {
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
       if (list.length > 0) {
         return list[list.length - 1];
       }
@@ -229,10 +247,6 @@ const run = async (browser, width, index) => {
   const nextRequestId = watchSignIns(page);
   const writes = watchWrites(page);
 
-  // A dev server's first paint on a loaded machine is not an assertion: give the
-  // load and the waits room (TOGETHER_LOAD_TIMEOUT_MS), and leave every check
-  // itself exactly as it was.
-  const LOAD_TIMEOUT = Number(process.env.TOGETHER_LOAD_TIMEOUT_MS ?? 120000);
   page.setDefaultTimeout(LOAD_TIMEOUT);
 
   console.log(`\n${width.label}x${width.height}`);
@@ -384,18 +398,32 @@ const run = async (browser, width, index) => {
   const comment = (target) =>
     target.getByRole('button', { name: 'Comment', exact: true }).click();
 
-  // The member's board already carries something unread: the owner created the
-  // card after they joined, so it is one thing they have not looked at.
-  await guest.waitForSelector('[data-testid="unread-badge"]', { timeout: LOAD_TIMEOUT });
+  // What "changed" means here, and whose board it marks: the member's OWN move
+  // is never unread to them, and a board's history from before they joined is
+  // not retroactively unread either (the watermark starts at the join). So the
+  // first marker belongs to the OWNER's already-open board, which has just
+  // watched the member move the card — over its own polling, no reload.
+  await page.waitForSelector('[data-testid="unread-badge"]', {
+    timeout: LOAD_TIMEOUT,
+  });
+  const ownerBadge =
+    (await page.getByTestId('unread-badge').first().textContent())?.trim() ?? '';
   expect(
-    `${width.label}: the member's board marks the card that changed`,
-    (await guest.getByTestId('unread-badge').first().textContent())?.includes(
-      'new',
-    ),
+    `${width.label}: the owner's board marks the card the member changed`,
+    ownerBadge === '2 new',
+    ownerBadge,
   );
 
-  // The owner opens the card and says something on it.
+  // Opening that card is what clears its marker.
   await openCard(page);
+  await page.waitForFunction(
+    () => !document.querySelector('[data-testid="unread-badge"]'),
+    null,
+    { timeout: LOAD_TIMEOUT },
+  );
+  expect(`${width.label}: opening the card cleared the owner's marker`, true);
+
+  // The owner says something on that card.
   await composer(page).fill('the invite link is live — try it from your phone');
   await comment(page);
   await page.waitForFunction(
@@ -414,18 +442,18 @@ const run = async (browser, width, index) => {
   );
 
   // The member's board learns about it over its own polling — no reload — and
-  // the marker on that card grows from one thing to two.
+  // the marker lands on the card that changed, for the one member who has not
+  // read it.
   await guest.waitForFunction(
-    () => {
-      const badge = document.querySelector('[data-testid="unread-badge"]');
-
-      return Boolean(badge && badge.textContent.includes('2 new'));
-    },
+    () =>
+      document
+        .querySelector('[data-testid="unread-badge"]')
+        ?.textContent?.includes('1 new') ?? false,
     null,
     { timeout: LOAD_TIMEOUT },
   );
   expect(
-    `${width.label}: the member's marker grew to 2 new while they watched`,
+    `${width.label}: the member's board marks that card while they watch`,
     true,
   );
 
@@ -452,7 +480,7 @@ const run = async (browser, width, index) => {
     null,
     { timeout: LOAD_TIMEOUT },
   );
-  expect(`${width.label}: opening the card cleared the unread marker`, true);
+  expect(`${width.label}: opening the card cleared the member's marker`, true);
   await guest.screenshot({
     path: path.join(OUT, `together-thread-${width.label}.png`),
   });
