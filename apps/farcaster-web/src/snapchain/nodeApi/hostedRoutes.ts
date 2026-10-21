@@ -33,6 +33,14 @@
  *                   own. The request fails with a message that says so, rather
  *                   than an empty success that would read as "there is nothing
  *                   there".
+ *   - `catalog`   — it is the mini-app / frame catalog: the list of apps, the
+ *                   apps relevant to you, and app search. A Snapchain node
+ *                   keeps no app list at all (an app is a *web page* with an
+ *                   `fc:miniapp` meta tag, not a protocol message), so this is
+ *                   not a `node` read however much it looks like one. It is
+ *                   answered from Neynar's public app catalog instead, which is
+ *                   a real index of real apps — never from a list this client
+ *                   invented. See `capabilities.ts` for who may answer it.
  *
  * The classification is by path, because that is all a `fetch` sees: the
  * hosted client builds `${baseUrl}${relativeUrl}` itself, so the path is the
@@ -46,6 +54,7 @@ export type HostedRoutePolicy =
   | { kind: 'local'; why: string }
   | { kind: 'media'; why: string }
   | { kind: 'write'; why: string }
+  | { kind: 'catalog'; why: string }
   | { kind: 'hosted'; why: string };
 
 export type HostedRouteMatch = HostedRoutePolicy & {
@@ -197,6 +206,45 @@ const MEDIA_ROUTES: { method: string; path: string; why: string }[] = [
 ];
 
 /**
+ * The app catalog: the four reads the mini-app surfaces make.
+ *
+ * An app on Farcaster is not a protocol object — it is a web page that carries
+ * an `fc:miniapp` meta tag, and a Snapchain node stores no list of them. So a
+ * node cannot answer these however many of them there are, and the honest
+ * answer is not "no reader has been written": it is Neynar's own app catalog,
+ * which this client asks for in the reader's name (`neynarMap.ts`). The `why`
+ * text is what a human is shown when nothing can answer them, so it names the
+ * real source and the real limitation.
+ *
+ * What is deliberately NOT here: the writes around favorites (adding or
+ * removing an app from your list) and the per-app admin/notification calls.
+ * Those are account state on a server this client has no session for, and they
+ * stay `hosted` — refused in words, never faked.
+ */
+const CATALOG_ROUTES: { method: string; path: string; why: string }[] = [
+  {
+    method: 'GET',
+    path: '/v1/top-mini-apps',
+    why: 'the list of mini apps comes from Neynar’s public app catalog — a node keeps no list of apps',
+  },
+  {
+    method: 'GET',
+    path: '/v1/new-frameapps',
+    why: 'the list of mini apps comes from Neynar’s public app catalog — a node keeps no list of apps',
+  },
+  {
+    method: 'GET',
+    path: '/v1/favorite-frames',
+    why: 'the mini apps relevant to you come from Neynar’s index — a node keeps neither an app list nor favourites',
+  },
+  {
+    method: 'GET',
+    path: '/v1/search-miniapps',
+    why: 'searching mini apps goes through Neynar’s index — a node keeps no search index',
+  },
+];
+
+/**
  * The writes this client can really make, one row per request the fork's data
  * layer sends when somebody presses something.
  *
@@ -326,11 +374,6 @@ const HOSTED_ROUTES: { method: string; path: string; why: string }[] = [
     path: '/v2/search-casts',
     why: 'a read node keeps no search index',
   },
-  {
-    method: 'GET',
-    path: '/v1/search-miniapps',
-    why: 'a read node keeps no search index',
-  },
 ];
 
 /** The hosted API's error envelope, so the client turns this into a HandledFetchError. */
@@ -403,6 +446,16 @@ export const classifyHostedRequest = ({
     };
   }
 
+  const catalog = find(CATALOG_ROUTES, normalizedMethod, endpoint);
+  if (catalog) {
+    return {
+      kind: 'catalog',
+      path: endpoint,
+      method: normalizedMethod,
+      why: catalog.why,
+    };
+  }
+
   const write = find(WRITE_ROUTES, normalizedMethod, endpoint);
   if (write) {
     return {
@@ -452,6 +505,9 @@ export const localRoutes = LOCAL_ROUTES.map(
   (entry) => `${entry.method} ${entry.path}`,
 );
 export const mediaRoutes = MEDIA_ROUTES.map(
+  (entry) => `${entry.method} ${entry.path}`,
+);
+export const catalogRoutes = CATALOG_ROUTES.map(
   (entry) => `${entry.method} ${entry.path}`,
 );
 export const writeRoutes = WRITE_ROUTES.map(

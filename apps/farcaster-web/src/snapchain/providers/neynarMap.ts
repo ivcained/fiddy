@@ -25,7 +25,7 @@
  * like a fact.
  */
 
-import type { ApiCast, ApiUser } from 'farcaster-client-data';
+import type { ApiCast, ApiFrame, ApiUser } from 'farcaster-client-data';
 
 import { NEYNAR_BASE_URL } from './catalog';
 
@@ -33,7 +33,19 @@ import { NEYNAR_BASE_URL } from './catalog';
 export interface NeynarCall {
   url: string;
   /** Which hosted shape to build out of the answer. */
-  kind: 'user' | 'user-list' | 'casts' | 'thread' | 'verifications';
+  kind: 'user' | 'user-list' | 'casts' | 'thread' | 'verifications' | 'frames';
+  /**
+   * Which hosted envelope a `frames` answer becomes. The app catalog has four
+   * endpoints with four different envelopes (`ApiGetTopMiniApps200Response`,
+   * `ApiGetNewFrames200Response`, `ApiGetFavoriteFrames200Response`, the search
+   * one), and Neynar's own pagination differs between them, so the shape is
+   * carried rather than guessed from the path at answer time.
+   */
+  shape?:
+    | 'top-mini-apps'
+    | 'new-frames'
+    | 'favorite-frames'
+    | 'search-miniapps';
 }
 
 /** The hosted API's error envelope, same as the node-backed adapter's. */
@@ -231,6 +243,356 @@ const asNeynarArray = (value: unknown): NeynarCast[] =>
   Array.isArray(value) ? (value as NeynarCast[]) : [];
 
 /**
+ * One mini app as Neynar publishes it.
+ *
+ * A frame / mini app is a *web page*, not a protocol message: its own
+ * `/.well-known/farcaster.json` (the "manifest") describes it, and Neynar's
+ * index is what has read that file. `manifest.frame` is the older spelling of
+ * `manifest.miniapp` and carries the same fields, so both are read and the
+ * miniapp one wins when they disagree.
+ */
+interface NeynarFrameManifestFile {
+  name?: unknown;
+  home_url?: unknown;
+  icon_url?: unknown;
+  splash_image_url?: unknown;
+  splash_background_color?: unknown;
+  webhook_url?: unknown;
+  subtitle?: unknown;
+  description?: unknown;
+  tagline?: unknown;
+  primary_category?: unknown;
+  tags?: unknown;
+  screenshot_urls?: unknown;
+  hero_image_url?: unknown;
+  og_title?: unknown;
+  og_description?: unknown;
+  og_image_url?: unknown;
+}
+
+interface NeynarFrame {
+  version?: unknown;
+  frames_url?: unknown;
+  image?: unknown;
+  author?: NeynarUser;
+  manifest?: {
+    frame?: NeynarFrameManifestFile;
+    miniapp?: NeynarFrameManifestFile;
+  } | null;
+  manifest_url?: unknown;
+}
+
+/** The categories the fork's `ApiFrame` names, so a category is never invented. */
+const APP_PRIMARY_CATEGORIES = [
+  'games',
+  'social',
+  'finance',
+  'utility',
+  'productivity',
+  'health-fitness',
+  'news-media',
+  'music',
+  'shopping',
+  'education',
+  'developer-tools',
+  'entertainment',
+  'art-creativity',
+] as const;
+
+type AppPrimaryCategory = (typeof APP_PRIMARY_CATEGORIES)[number];
+
+/**
+ * A URL carried into the fork's shapes only when it is one the page can load.
+ *
+ * The hosted shapes spell these fields `ApiHttpsUrl` — the fork's own renderer
+ * puts them straight into `src=` and `href=`. A manifest that names something
+ * else (`http:`, `data:`, a relative path, a string that is not a URL at all)
+ * leaves the field absent rather than handing the renderer a broken promise.
+ */
+const httpsUrlOf = (value: unknown): string | undefined => {
+  const raw = asString(value);
+  if (raw === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === 'https:' ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const hexColorOf = (value: unknown): string | undefined => {
+  const raw = asString(value);
+  return raw !== undefined &&
+    /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(raw)
+    ? raw
+    : undefined;
+};
+
+const categoryOf = (value: unknown): AppPrimaryCategory | undefined => {
+  const raw = asString(value)?.toLowerCase();
+  return APP_PRIMARY_CATEGORIES.find((category) => category === raw);
+};
+
+/** The manifest file behind a frame, with the newer spelling preferred. */
+const manifestOf = (frame: NeynarFrame): NeynarFrameManifestFile =>
+  frame.manifest?.miniapp ?? frame.manifest?.frame ?? {};
+
+/** This app's home page, as an address a page may load. */
+const homeUrlOf = (frame: NeynarFrame): string | undefined =>
+  httpsUrlOf(manifestOf(frame).home_url) ??
+  httpsUrlOf(frame.frames_url) ??
+  undefined;
+
+/**
+ * One Neynar frame as the fork's `ApiFrame`.
+ *
+ * Absent means absent: a field Neynar does not state is left off rather than
+ * filled with a zero, a placeholder or this client's own guess. `domain` is the
+ * app's own host, which is what the fork keys a frame by.
+ *
+ * `supportsNotifications` is the one derived field, and it is derived from the
+ * protocol's own rule rather than from taste: an app takes notifications when it
+ * registered a webhook in its manifest, and the manifest's `webhook_url` is
+ * exactly that registration.
+ */
+export const apiFrameFromNeynarFrame = (
+  frame: NeynarFrame,
+): ApiFrame | null => {
+  const homeUrl = homeUrlOf(frame);
+  const manifest = manifestOf(frame);
+  const iconUrl =
+    httpsUrlOf(manifest.icon_url) ?? httpsUrlOf(frame.image) ?? undefined;
+
+  if (homeUrl === undefined || iconUrl === undefined) {
+    // Without a home page and a picture there is no card to draw, and drawing a
+    // blank one would read as "this app has no art".
+    return null;
+  }
+
+  let domain: string;
+  try {
+    domain = new URL(homeUrl).hostname;
+  } catch {
+    return null;
+  }
+
+  const apiFrame: ApiFrame = {
+    domain,
+    name: asString(manifest.name) ?? domain,
+    iconUrl,
+    homeUrl,
+    supportsNotifications: typeof asString(manifest.webhook_url) === 'string',
+  };
+
+  const imageUrl = httpsUrlOf(frame.image) ?? httpsUrlOf(manifest.og_image_url);
+  if (imageUrl !== undefined) {
+    apiFrame.imageUrl = imageUrl;
+  }
+  const splashImageUrl = httpsUrlOf(manifest.splash_image_url);
+  if (splashImageUrl !== undefined) {
+    apiFrame.splashImageUrl = splashImageUrl;
+  }
+  const splashBackgroundColor = hexColorOf(manifest.splash_background_color);
+  if (splashBackgroundColor !== undefined) {
+    apiFrame.splashBackgroundColor = splashBackgroundColor;
+  }
+  const subtitle = asString(manifest.subtitle);
+  if (subtitle !== undefined) {
+    apiFrame.subtitle = subtitle;
+  }
+  const description = asString(manifest.description);
+  if (description !== undefined) {
+    apiFrame.description = description;
+  }
+  const tagline = asString(manifest.tagline);
+  if (tagline !== undefined) {
+    apiFrame.tagline = tagline;
+  }
+  const primaryCategory = categoryOf(manifest.primary_category);
+  if (primaryCategory !== undefined) {
+    apiFrame.primaryCategory = primaryCategory;
+  }
+  if (Array.isArray(manifest.tags)) {
+    const tags = manifest.tags.filter(
+      (tag): tag is string => typeof tag === 'string' && tag.length > 0,
+    );
+    if (tags.length > 0) {
+      apiFrame.tags = tags;
+    }
+  }
+  if (Array.isArray(manifest.screenshot_urls)) {
+    const screenshots = manifest.screenshot_urls
+      .map(httpsUrlOf)
+      .filter((url): url is string => url !== undefined);
+    if (screenshots.length > 0) {
+      apiFrame.screenshotUrls = screenshots;
+    }
+  }
+  const heroImageUrl = httpsUrlOf(manifest.hero_image_url);
+  if (heroImageUrl !== undefined) {
+    apiFrame.heroImageUrl = heroImageUrl;
+  }
+  const ogTitle = asString(manifest.og_title);
+  if (ogTitle !== undefined) {
+    apiFrame.ogTitle = ogTitle;
+  }
+  const ogDescription = asString(manifest.og_description);
+  if (ogDescription !== undefined) {
+    apiFrame.ogDescription = ogDescription;
+  }
+  const ogImageUrl = httpsUrlOf(manifest.og_image_url);
+  if (ogImageUrl !== undefined) {
+    apiFrame.ogImageUrl = ogImageUrl;
+  }
+  if (frame.author) {
+    apiFrame.author = apiUserFromNeynar(frame.author);
+  }
+
+  return apiFrame;
+};
+
+/** The bodies of Neynar's frame answers, whichever endpoint they came from. */
+const frameListOf = (payload: unknown): NeynarFrame[] => {
+  const body = payload as {
+    frames?: unknown;
+    relevant_frames?: unknown;
+  } | null;
+  if (Array.isArray(body?.frames)) {
+    return body.frames as NeynarFrame[];
+  }
+  if (Array.isArray(body?.relevant_frames)) {
+    return (body.relevant_frames as { frame?: NeynarFrame }[])
+      .map((entry) => entry.frame)
+      .filter((frame): frame is NeynarFrame => frame !== undefined);
+  }
+  return [];
+};
+
+/** Neynar's own paging cursor for a frame list, when it states one. */
+const frameCursorOf = (payload: unknown): string | undefined => {
+  const next = (payload as { next?: { cursor?: unknown } } | null)?.next;
+  return asString(next?.cursor);
+};
+
+const framesFromNeynar = (payload: unknown): ApiFrame[] =>
+  frameListOf(payload)
+    .map(apiFrameFromNeynarFrame)
+    .filter((frame): frame is ApiFrame => frame !== null);
+
+/**
+ * The frame embed a mini app declares — the card art and the button a feed
+ * draws for one.
+ *
+ * Built only out of what the index actually holds: the picture the app
+ * published, its name, its splash and the address to launch. The button's own
+ * title is the app's (`Open` is what the protocol's default button is called
+ * when an app does not name one), never a sentence this client made up.
+ */
+export const frameEmbedCardFromNeynarFrame = (
+  frame: NeynarFrame,
+): { imageUrl: string; title: string; actionUrl: string } | null => {
+  const apiFrame = apiFrameFromNeynarFrame(frame);
+  if (apiFrame === null) {
+    return null;
+  }
+  const imageUrl = apiFrame.imageUrl ?? apiFrame.iconUrl;
+  if (imageUrl === undefined) {
+    return null;
+  }
+  return {
+    imageUrl,
+    title: `Open ${apiFrame.name}`,
+    actionUrl: apiFrame.homeUrl,
+  };
+};
+
+/** The host of a URL, or undefined when it is not one. */
+const hostOf = (value: string): string | undefined => {
+  try {
+    return new URL(value).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * A feed embed's mini-app card, looked up in Neynar's index by the URL itself.
+ *
+ * WHY THIS EXISTS AT ALL: a cast carries a bare URL, and the way to know that a
+ * URL is an app is to read the `fc:miniapp` meta tag on its page — which a web
+ * page may only do for a page that allows it (measured: most app pages do not
+ * send `Access-Control-Allow-Origin`, so the read is refused by the browser, not
+ * by this client). Neynar has already read those pages, so for the apps it
+ * knows, its index can answer the same question without the page's permission.
+ *
+ * WHAT IT REFUSES: a fuzzy match. The search is asked for this URL's host, and
+ * only an entry whose own home page is on *that* host is accepted — otherwise a
+ * near-miss would put a different app's art on someone else's link. No exact
+ * match means no answer, and the embed stays the link it was.
+ */
+export const fetchFrameCardFromNeynar = async ({
+  url,
+  apiKey,
+  fetchImpl = fetch,
+  baseUrl = NEYNAR_BASE_URL,
+  timeoutMs = 6_000,
+}: {
+  url: string;
+  apiKey: string;
+  fetchImpl?: typeof fetch;
+  baseUrl?: string;
+  timeoutMs?: number;
+}): Promise<{ imageUrl: string; title: string; actionUrl: string } | null> => {
+  const host = hostOf(url);
+  if (host === undefined) {
+    return null;
+  }
+
+  // The host, then its own label: Neynar's search matches names as well as
+  // hosts, so `fiddy.fun` finds the app whose home page is `fiddy.fun` only
+  // when the label is asked for. Two bounded questions at most, never a loop.
+  const queries = [host, host.split('.')[0] ?? host].filter(
+    (query, index, all) => query.length > 0 && all.indexOf(query) === index,
+  );
+
+  for (const query of queries) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let payload: unknown = null;
+    try {
+      const response = await fetchImpl(
+        `${baseUrl}/v2/farcaster/frame/search/?q=${encodeURIComponent(query)}&limit=20`,
+        {
+          method: 'GET',
+          headers: { 'x-api-key': apiKey },
+          signal: controller.signal,
+          credentials: 'omit',
+        },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      payload = await readJson(response);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const exact = frameListOf(payload).find(
+      (frame) => hostOf(String(homeUrlOf(frame) ?? '')) === host,
+    );
+    if (exact) {
+      return frameEmbedCardFromNeynarFrame(exact);
+    }
+  }
+
+  return null;
+};
+
+/**
  * Which Neynar URL a client request becomes — or null when Neynar cannot serve
  * it at all.
  *
@@ -239,15 +601,67 @@ const asNeynarArray = (value: unknown): NeynarCast[] =>
 export const neynarCallFor = ({
   path,
   searchParams,
+  signedInFid,
   baseUrl = NEYNAR_BASE_URL,
 }: {
   path: string;
   searchParams: URLSearchParams;
+  /** Needed by the one catalog read that is about *this* reader. */
+  signedInFid?: number;
   baseUrl?: string;
 }): NeynarCall | null => {
   const base = `${baseUrl}/v2/farcaster`;
+  const limit = (fallback: string): string =>
+    searchParams.get('limit') ?? fallback;
+  const cursorParam = searchParams.get('cursor');
+  const cursor =
+    cursorParam === null || cursorParam.length === 0
+      ? ''
+      : `&cursor=${encodeURIComponent(cursorParam)}`;
 
   switch (path) {
+    // ── the app catalog ────────────────────────────────────────────────────
+    //
+    // Today's list and "new" apps are the same public catalog: the index that
+    // has read the apps' own manifest files, newest first. The hosted app it
+    // replaces had an editorial list of its own, which no third party can have,
+    // so this is the honest stand-in rather than a copy of a ranking nobody
+    // outside Warpcast can see.
+    case '/v1/top-mini-apps':
+    case '/v1/new-frameapps': {
+      return {
+        url: `${base}/frame/catalog/?limit=${encodeURIComponent(limit('50'))}${cursor}`,
+        kind: 'frames',
+        shape: path === '/v1/top-mini-apps' ? 'top-mini-apps' : 'new-frames',
+      };
+    }
+
+    // "Your apps" — the apps relevant to this reader, from the index's own
+    // relevance for their FID. What it is NOT: Warpcast's saved-favourites list,
+    // which is account state on a server this client has no session for.
+    case '/v1/favorite-frames': {
+      if (signedInFid === undefined) {
+        return null;
+      }
+      return {
+        url: `${base}/frame/relevant/?viewer_fid=${signedInFid}&limit=${encodeURIComponent(limit('20'))}`,
+        kind: 'frames',
+        shape: 'favorite-frames',
+      };
+    }
+
+    case '/v1/search-miniapps': {
+      const query = searchParams.get('query') ?? searchParams.get('q');
+      if (!query) {
+        return null;
+      }
+      return {
+        url: `${base}/frame/search/?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(limit('20'))}${cursor}`,
+        kind: 'frames',
+        shape: 'search-miniapps',
+      };
+    }
+
     case '/v2/user':
     case '/v2/user-by-fid':
     case '/v2/verifications': {
@@ -323,6 +737,60 @@ const userProfileEnvelope = (user: ApiUser, fid: number) => ({
     extras: { fid, custodyAddress: '' },
   },
 });
+
+/**
+ * The four app-catalog envelopes, each built from the same frame list.
+ *
+ * They differ only in what the surface reads: the top list is ranked (by the
+ * order the index gave, which is the only ranking this client can honestly
+ * state), "your apps" and search are plain lists, and the "new apps" surface
+ * also wants a title and a description to print above the grid.
+ *
+ * The cursor is passed through only when Neynar states one — a list that ends
+ * says so by having no `next`, rather than by carrying a cursor that loads
+ * nothing. Ranks are positions in the list the index returned, and
+ * `rank72hChange` is left off: this client has not measured any change, and a
+ * zero there would read as "no change" when the truth is "not known".
+ */
+const appCatalogEnvelope = (
+  shape: NonNullable<NeynarCall['shape']>,
+  payload: unknown,
+): unknown => {
+  const frames = framesFromNeynar(payload);
+  const cursor = frameCursorOf(payload);
+  const paging = cursor === undefined ? {} : { next: { cursor } };
+
+  switch (shape) {
+    case 'top-mini-apps':
+      return {
+        result: {
+          miniApps: frames.map((miniApp, index) => ({
+            rank: index + 1,
+            miniApp,
+          })),
+        },
+        ...paging,
+      };
+
+    case 'new-frames':
+      return {
+        result: {
+          frames,
+          title: 'Mini apps',
+          description:
+            'Apps from Neynar’s public app catalog — the list new apps land in.',
+        },
+        ...paging,
+      };
+
+    case 'favorite-frames':
+      return { result: { frames }, ...paging };
+
+    case 'search-miniapps':
+    default:
+      return { result: { apps: frames }, ...paging };
+  }
+};
 
 /** One thread as `{ casts }`, in reading order: parents, root, then replies. */
 export const threadCastsFromNeynar = (conversation: unknown): ApiCast[] => {
@@ -430,12 +898,24 @@ export const answerFromNeynar = async ({
       ? signedInFid !== undefined
         ? neynarMeCall({ fid: signedInFid, baseUrl })
         : null
-      : neynarCallFor({ path, searchParams, baseUrl });
+      : neynarCallFor({ path, searchParams, signedInFid, baseUrl });
 
   if (call === null) {
+    if (path === '/v1/favorite-frames') {
+      return errorResponse(
+        501,
+        'The apps relevant to you come from Neynar’s index, which needs a signed-in account to work out what is relevant. Sign in, and this list loads.',
+      );
+    }
+    if (path === '/v1/search-miniapps' && !searchParams.get('query')) {
+      return errorResponse(
+        400,
+        'Searching apps needs something to search for.',
+      );
+    }
     return errorResponse(
       501,
-      `Neynar cannot serve ${path} for this client. Reads through Neynar cover profiles, one account's casts, threads and verified addresses; the feed, your notifications and search need a node (or Farcaster's own server) instead.`,
+      `Neynar cannot serve ${path} for this client. Reads through Neynar cover profiles, one account's casts, threads, verified addresses and the app catalog; the feed, your notifications and cast search need a node (or Farcaster's own server) instead.`,
     );
   }
 
@@ -518,6 +998,14 @@ export const answerFromNeynar = async ({
         apiCastFromNeynar,
       );
       return jsonResponse({ result: { casts } });
+    }
+
+    case 'frames': {
+      // The app catalog: the same list, in whichever envelope the surface that
+      // asked reads (`appCatalogEnvelope`).
+      return jsonResponse(
+        appCatalogEnvelope(call.shape ?? 'search-miniapps', body),
+      );
     }
 
     case 'thread':

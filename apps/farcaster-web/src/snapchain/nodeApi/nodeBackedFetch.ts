@@ -42,6 +42,7 @@
 
 import { type FetchLike, SnapchainNodeClient } from 'farcaster-node-client';
 
+import { type EmbedCardResolver } from './embedCards';
 import { type EmbedKindResolver } from './embedKinds';
 import { classifyHostedRequest, type HostedRouteMatch } from './hostedRoutes';
 import { answerLocalDraftRequest, LocalDraftStore } from './localDrafts';
@@ -72,6 +73,13 @@ export interface NodeBackedFetchOptions {
    * Injectable so a test can answer without a network.
    */
   embedKinds?: EmbedKindResolver;
+  /**
+   * How each link embed's own page is read, for its title, its picture and its
+   * mini-app card (see `embedCards.ts`). Defaults to the real thing: one
+   * bounded, cached read per URL. The provider seam hands in a resolver that
+   * can also ask the reader's index when a page refuses to be read.
+   */
+  embedCards?: EmbedCardResolver;
   /** How long one read to the node may take. Defaults to NODE_READ_TIMEOUT_MS. */
   readTimeoutMs?: number;
   /**
@@ -179,6 +187,19 @@ const errorResponse = (status: number, message: string): Response =>
  */
 export const hostedRefusal = (route: HostedRouteMatch): Response =>
   errorResponse(501, route.why);
+
+/**
+ * What a node says when the app catalog is asked of it.
+ *
+ * A mini app is a web page that carries an `fc:miniapp` tag — it is not a
+ * message, so a Snapchain node stores no list of apps, no favourites and no
+ * app search. The honest answer names the source that does have one and the one
+ * thing the reader can do about it, instead of the old "no reader has been
+ * written for this endpoint yet", which told them nothing and read like a bug
+ * in Fiddy rather than a fact about nodes.
+ */
+export const NODE_CANNOT_LIST_APPS =
+  'A node keeps no list of mini apps — a mini app is a web page, not a message. The list comes from Neynar’s public app catalog: add your own Neynar key under Advanced, or pick Neynar there, and it will load.';
 
 const jsonResponse = (payload: unknown, status = 200): Response =>
   new Response(JSON.stringify(payload), {
@@ -370,6 +391,7 @@ export const createNodeBackedFetch = ({
   reads,
   countCap,
   embedKinds,
+  embedCards,
   readTimeoutMs = NODE_READ_TIMEOUT_MS,
   mediaUploadUrl: mediaUploadUrlOption,
   drafts: draftsOption,
@@ -433,6 +455,7 @@ export const createNodeBackedFetch = ({
       getSignedInFid,
       ...(countCap ? { countCap } : {}),
       ...(embedKinds ? { embedKinds } : {}),
+      ...(embedCards ? { embedCards } : {}),
     });
 
   const log: RequestLogEntry[] = logOption ?? [];
@@ -490,6 +513,13 @@ export const createNodeBackedFetch = ({
 
       case 'media':
         return mediaAnswer();
+
+      case 'catalog':
+        // The app catalog is an indexer's job and a node keeps none of it:
+        // saying so here (rather than falling through to the node's own
+        // readers) is what keeps the mini-app surfaces honest when there is no
+        // index to read from. See `hostedRoutes.ts` and `capabilities.ts`.
+        return errorResponse(501, NODE_CANNOT_LIST_APPS);
 
       case 'write':
         // The write half of this seam: this device signs it and the node

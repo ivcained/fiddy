@@ -140,6 +140,7 @@ export type ServeableRouteKind =
   | 'node'
   | 'local'
   | 'media'
+  | 'catalog'
   | 'hosted';
 
 /**
@@ -147,8 +148,14 @@ export type ServeableRouteKind =
  *
  * The honest answer for a read: a node answers everything this client asks of a
  * data source; Neynar answers the handful of reads its index really has (a
- * profile, one account's casts, a thread, verifications) and nothing else;
+ * profile, one account's casts, a thread, verifications — and its app catalog);
  * Farcaster's own public server answers the reads it documents.
+ *
+ * The app catalog (`catalog`) is the one read where a node is the wrong machine
+ * to ask and honesty means saying so: an app is a web page with an `fc:miniapp`
+ * meta tag, and a Snapchain node keeps no list of apps, no favourites and no
+ * search index. Only an index answers it, and the one index this build can
+ * reach with the reader's own key is Neynar.
  *
  * The honest answer for a write: only a server that can carry a signed message.
  * And a write is never *rerouted* — see the seam: if the server the reader is on
@@ -200,6 +207,19 @@ export const providerCanServe = ({
     return { can: true };
   }
 
+  if (kind === 'catalog') {
+    if (provider.kind === 'neynar') {
+      return { can: true };
+    }
+    return {
+      can: false,
+      why:
+        provider.kind === 'snapchain'
+          ? 'A node keeps no app catalog: mini apps are web pages with an fc:miniapp tag, not messages, so this list comes from an index instead.'
+          : `Mini app discovery needs an index of apps, and ${provider.label} keeps none.`,
+    };
+  }
+
   if (provider.kind === 'neynar' && !NEYNAR_READ_PATHS.includes(path)) {
     return {
       can: false,
@@ -226,6 +246,12 @@ export const NEYNAR_READ_PATHS: readonly string[] = [
   '/v2/profile-casts',
   '/v2/thread-casts',
   '/v2/verifications',
+  // The app catalog: Neynar publishes an index of the apps registered with it,
+  // which is where the mini-app surfaces read from.
+  '/v1/top-mini-apps',
+  '/v1/new-frameapps',
+  '/v1/favorite-frames',
+  '/v1/search-miniapps',
 ];
 
 export interface ServeDecision {
