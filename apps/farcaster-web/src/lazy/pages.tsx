@@ -272,6 +272,14 @@ export const FiddyAppsPage = lazyWithPreload(() =>
   })),
 );
 
+/* Connect your Farcaster account: the connect-existing-account path. Its own
+   page because it is entered signed out and left by approving on a phone. */
+export const FiddyConnectPage = lazyWithPreload(() =>
+  import('~/pages/fiddyConnect/FiddyConnectPage').then((res) => ({
+    default: res.FiddyConnectPage,
+  })),
+);
+
 /* Together — shared spaces: "work with your people". The list/create surface
    and the invite landing are separate pages because the landing has to work for
    somebody who has never been here and has no session at all. */

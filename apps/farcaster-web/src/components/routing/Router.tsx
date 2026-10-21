@@ -403,13 +403,19 @@ const Router: React.FC = () => {
                 path={routes.fiddyApps.path}
                 element={<routes.fiddyApps.Component />}
               />
-              {/* Sealed casts: making the key and sealing something need no
+{/* Sealed casts: making the key and sealing something need no
                   account, so this sits with the other ungated pivot surfaces.
                   Posting the sealed cast does need one, and the surface says so
                   rather than hiding the button at random. */}
               <Route
                 path={routes.sealed.path}
                 element={<routes.sealed.Component />}
+              />
+              {/* Connecting an account that already exists. Signed out on
+                  purpose: the approval happens in Farcaster, not here. */}
+              <Route
+                path={routes.fiddyConnect.path}
+                element={<routes.fiddyConnect.Component />}
               />
               {/* Unauthed Routes */}
               <Route

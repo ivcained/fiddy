@@ -50,6 +50,7 @@ import {
   FarcasterConnectPage,
   FiddyAppsPage,
   FiddyBrainsPage,
+  FiddyConnectPage,
   FiddyOnboardingPage,
   FollowersWithoutUsernamePage,
   FollowersWithUsernamePage,
@@ -942,6 +943,17 @@ const routes = {
     search: {},
     family: family('default'),
     Component: FiddyAppsPage,
+  },
+  /* Connect an account you already have: one tap, no fee, no passphrase. The
+     other half of the account surface is making a *new* Farcaster account;
+     this one never asks for a phrase, and it is reachable signed out because
+     approving happens in the person's own Farcaster app. */
+  fiddyConnect: {
+    path: `${appPathPrefix}/connect-farcaster`,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyConnectPage,
   },
   /* The way in: a greeting, one screen that does the naming and the brain, and
      "ready" — two numbered steps. Each is still a route, so a step can be

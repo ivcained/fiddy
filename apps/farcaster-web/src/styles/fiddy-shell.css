@@ -1378,3 +1378,32 @@ html.fiddy-dark-shell body {
   line-height: 1.5;
   color: var(--fiddy-ink-dim);
 }
+
+/* Connect your Farcaster account — the code the phone scans, and the link that
+   does the same thing on the phone that is already in the person's hand. */
+.fiddy-connect-qr {
+  display: flex;
+  justify-content: center;
+  padding: 14px 0 6px;
+}
+
+.fiddy-connect-qr canvas {
+  border-radius: 12px;
+}
+
+.fiddy-connect-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fiddy-accent-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.fiddy-connect-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fiddy-ink-dim);
+}
