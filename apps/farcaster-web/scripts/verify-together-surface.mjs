@@ -85,7 +85,7 @@
 //     TOGETHER_BOOT_TIMEOUT=1800000 node scripts/verify-together-surface.mjs
 //
 //   The budget only lengthens waits for content that must appear; it never
-//   turns a failing observation into a pass. Without it the 44/44 recorded in
+//   turns a failing observation into a pass. Without it the 80/80 recorded in
 //   plugins/fiddy/docs/MULTIPLAYER.md is luck — reproducible on an idle box,
 //   dead before check 1 on a busy one. Give it a quiet box and the default to
 //   reproduce that number; give it a busy box and a bigger number to get a
