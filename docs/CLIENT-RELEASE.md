@@ -1,10 +1,14 @@
 # Releasing the client to fiddy.fun
 
 Status 2026-10-21. The node-backed client (`apps/farcaster-web`) is live at
-**https://fiddy.fun**, release `a0e53d5eda61f76b16c50e56a2179f71b7922fff`. The
-release before it (`89cdd01…`) is still on disk, so a rollback is one command.
+**https://fiddy.fun**, release `692377dac34664232a11ffd36715c394dc2d0f62`. The
+release before it (`88cf2ba…`) is still on disk, so a rollback is one command.
 Everything below was run, not reasoned about — and every table row says which
-release it was run against.
+release it was run against. The tables below were measured on `a0e53d5…`, the
+release that introduced the surfaces they describe; the release after it
+(`88cf2ba…`) and this one (`692377d…`, see the last section) changed what a cast's
+embed renders as and the provider the client reads through, neither of which the
+`a0e53d5` rows measure.
 
 ## What fiddy.fun serves now
 
@@ -310,3 +314,54 @@ and each says why:
   stay unavailable; the node picker and the public relay work without it.
 - The miniapp's launch URL still opens the read-only preview at `/farcaster`.
   Pointing it at the client is a product decision, not a deploy detail.
+
+## Release `692377d…` — a photo in a cast renders as a photo
+
+Released 2026-10-21, CI `39599584948` (lint / typecheck / test, all success on
+the sha). What it carries, all of it in `apps/farcaster-web`:
+
+- a cast's embed is a bare URL on the protocol, and the node adapter used to
+  classify one by file extension — which `https://imagedelivery.net/<account>/
+  <id>/original` does not have, so a user's photo landed in the link bucket and
+  drew as a chain-link icon over a blank meta box. `snapchain/nodeApi/
+  embedKinds.ts` now asks each URL's own media type (one bounded `HEAD`, then one
+  ranged `GET`, then a browser `Image()` load), cached per session and in
+  `localStorage`, capped at four probes in flight with a 1.5s wait per page so a
+  slow host cannot hold the feed open. A URL nothing can answer for stays a link
+  card; a video container the renderer plays goes to `embeds.videos`.
+- the classification happens per page, before any cast is built, so a photo is a
+  photo on the first paint rather than after a reload.
+
+Measured on the live site, after the cut-over — `scripts/verify-embed-images.mjs`
+against **`https://fiddy.fun`**, signed in as the account from the report (SIWF
+relay stubbed with a real SIWE message): **9/9**.
+
+| What it measures | Result, on `692377d…` live at fiddy.fun |
+| --- | --- |
+| the reported cast's photo, from the node's own bytes | 523 casts read; the cast among them; one `<img>`, `…/a62d038c…/rectcontain3` |
+| that it really drew | `1284x335` (a loaded box, not a broken image) |
+| it did not call every URL a photo | 201 embed URLs, 109 of them pages, **0** drawn as images |
+| avatars | the node's own pfp URL rendered, `48x48`, loaded |
+| the mechanism | 9 `HEAD` to `imagedelivery.net` before the photo was drawn |
+| the read itself | 12 node routes, all `200` |
+
+Same probe against the local probe server on the same commit: 9/9. The style pass
+over the new files (`692377d`'s parent) is what the CI lint gate needed; the
+branch as first written had 20 errors in it, all mechanical.
+
+Run it yourself:
+
+```bash
+cd apps/farcaster-web
+SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
+VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
+npx vite --config scripts/probe.vite.config.mjs --port 5174
+EMBED_SERVER=https://localhost:5174 node scripts/verify-embed-images.mjs
+```
+
+Both variables, and the trap is silent: with only `SNAPCHAIN_HTTP_URL` the shell
+does not consider a node configured (`isNodeConfigured()` reads
+`VITE_SNAPCHAIN_HTTP_URL`), a completed sign-in lands on the device-only landing,
+and the run measures an empty feed — 0 casts read, 2/9 — which looks exactly like
+the bug you are trying to fix. Point `EMBED_SERVER` at `https://fiddy.fun` to run
+the same nine checks against the release.
