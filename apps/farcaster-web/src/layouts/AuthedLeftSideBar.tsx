@@ -17,6 +17,7 @@ import React from 'react';
 
 import { AgentNavEntry } from '~/components/agent/AgentNavItem';
 import { AvatarImage } from '~/components/avatar/AvatarImage';
+import { AccountSwitcherEntry } from '~/components/fiddy/accounts/AccountSwitcher';
 import { NavLink } from '~/components/links/NavLink';
 import { NavLinkBadge } from '~/components/links/NavLinkBadge';
 import { NavLinkIcon } from '~/components/links/NavLinkIcon';
@@ -261,6 +262,13 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
         <div className="hidden xl:contents">
           <ChannelNavLinks />
         </div>
+        {/*
+          Which account this browser is acting as.
+          A browser can hold more than one account now (they can be made right
+          here), so "who am I?" is a question the rail has to be able to answer
+          — and the answer has to be reachable without hunting through settings.
+        */}
+        <AccountSwitcherEntry className="fiddy-account-entry" />
       </div>
     </LeftSideBar>
   );

@@ -21,6 +21,7 @@ import { FC, memo, ReactNode, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 
 import { AvatarImage } from '~/components/avatar/AvatarImage';
+import { AccountSwitcherEntry } from '~/components/fiddy/accounts/AccountSwitcher';
 import { ComposeCastButton } from '~/components/forms/buttons/ComposeCastButton';
 import { ExternalLink } from '~/components/links/ExternalLink';
 import { NavLinkBadge } from '~/components/links/NavLinkBadge';
@@ -396,6 +397,7 @@ const MobileNavDropdown: FC<MobileNavDropdownProps> = memo(
               </span>
               <span className="grow text-sm">Profile</span>
             </RouterLink>
+            <AccountSwitcherEntry className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-sm text-default hover:bg-overlay-faint active:bg-overlay-faint" />
           </div>
         </div>
       </>
