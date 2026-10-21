@@ -27,12 +27,12 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import type { FiddySetup } from '~/lib/fiddySetup';
 import {
+  askTrialAgent,
+  loadTrialState,
   TRIAL_MESSAGE_MAX,
   TRIAL_STARTERS,
   TrialExchange,
   TrialUnavailableError,
-  askTrialAgent,
-  loadTrialState,
 } from '~/lib/trialChat';
 
 export interface TrialChatProps {
@@ -44,16 +44,22 @@ export interface TrialChatProps {
 
 /** What the server said about the brain, in the visitor's words. */
 const NOTE_LINES: Record<string, string> = {
-  BRAIN_NEEDS_SIGN_IN: 'The trial runs on Fiddy’s own brain — the one you picked takes over after sign-in.',
-  KEY_REFUSED: 'The key from step 1 was not accepted, so Fiddy’s own brain answered. Yours takes over after sign-in.',
-  PAYMENT_REQUIRED: 'That service wanted paying before it answered, so Fiddy’s own brain answered.',
-  BRAIN_UNAVAILABLE: 'That service could not be reached, so Fiddy’s own brain answered.',
+  BRAIN_NEEDS_SIGN_IN:
+    'The trial runs on Fiddy’s own brain — the one you picked takes over after sign-in.',
+  KEY_REFUSED:
+    'The key from step 1 was not accepted, so Fiddy’s own brain answered. Yours takes over after sign-in.',
+  PAYMENT_REQUIRED:
+    'That service wanted paying before it answered, so Fiddy’s own brain answered.',
+  BRAIN_UNAVAILABLE:
+    'That service could not be reached, so Fiddy’s own brain answered.',
 };
 
 type Status = 'idle' | 'sending' | 'answered' | 'blocked';
 
 export const TrialChat = ({ agentName, setup, onAnswered }: TrialChatProps) => {
-  const [turnsLeft, setTurnsLeft] = useState(() => loadTrialState().turns === 0);
+  const [turnsLeft, setTurnsLeft] = useState(
+    () => loadTrialState().turns === 0,
+  );
   const [exchange, setExchange] = useState<TrialExchange | null>(
     () => loadTrialState().exchange,
   );
@@ -115,7 +121,10 @@ export const TrialChat = ({ agentName, setup, onAnswered }: TrialChatProps) => {
 
       {status === 'answered' && exchange ? (
         <div className="fiddy-trial-thread">
-          <p className="fiddy-trial-bubble fiddy-trial-bubble-me" data-trial="message">
+          <p
+            className="fiddy-trial-bubble fiddy-trial-bubble-me"
+            data-trial="message"
+          >
             {exchange.message}
           </p>
           <p
@@ -191,7 +200,11 @@ export const TrialChat = ({ agentName, setup, onAnswered }: TrialChatProps) => {
       ) : null}
 
       {refusal ? (
-        <p className="fiddy-trial-note fiddy-trial-refusal" data-trial="refusal" role="status">
+        <p
+          className="fiddy-trial-note fiddy-trial-refusal"
+          data-trial="refusal"
+          role="status"
+        >
           {refusal}
         </p>
       ) : null}

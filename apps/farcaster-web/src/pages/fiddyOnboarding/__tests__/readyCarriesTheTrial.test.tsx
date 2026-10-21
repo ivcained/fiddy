@@ -9,7 +9,13 @@
  * ordinary sign-in until it has been answered, and that it becomes the named
  * "Save <name> & sign in" — visibly the loud one — the moment a reply lands.
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -45,7 +51,8 @@ vi.mock('~/components/links/Link', () => ({
 }));
 
 vi.mock('~/components/modals/LoginModal', () => ({
-  LoginModal: () => React.createElement('div', { 'data-testid': 'login' }, 'sign in'),
+  LoginModal: () =>
+    React.createElement('div', { 'data-testid': 'login' }, 'sign in'),
 }));
 
 const { FiddyOnboardingPage } =
@@ -56,12 +63,16 @@ const renderReady = () =>
     <MemoryRouter initialEntries={['/welcome/ready']}>
       <Routes>
         <Route path="/welcome" element={<FiddyOnboardingPage step="hi" />} />
-        <Route path="/welcome/ready" element={<FiddyOnboardingPage step="ready" />} />
+        <Route
+          path="/welcome/ready"
+          element={<FiddyOnboardingPage step="ready" />}
+        />
       </Routes>
     </MemoryRouter>,
   );
 
-const primary = () => document.querySelector('.fiddy-primary-btn') as HTMLElement | null;
+const primary = () =>
+  document.querySelector('.fiddy-primary-btn') as HTMLElement | null;
 
 beforeEach(() => {
   state.signedIn = false;
@@ -82,7 +93,9 @@ describe('the ready sheet', () => {
     expect(screen.getByText('Pip is ready.')).toBeTruthy();
     expect(document.querySelector('[data-fiddy="trial"]')).toBeTruthy();
     expect(screen.getByText('Say hi to Pip…')).toBeTruthy();
-    expect(screen.getByText('What can you do for me on Farcaster?')).toBeTruthy();
+    expect(
+      screen.getByText('What can you do for me on Farcaster?'),
+    ).toBeTruthy();
   });
 
   it('offers the ordinary way in until the agent has answered', () => {
@@ -93,20 +106,24 @@ describe('the ready sheet', () => {
   });
 
   it('makes the sign-in the named one, and loud, once a real reply lands', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({ ok: true, reply: 'I can watch your mentions.', note: null }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      );
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          reply: 'I can watch your mentions.',
+          note: null,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
     vi.stubGlobal('fetch', fetchImpl);
     renderReady();
 
     fireEvent.click(screen.getByText('Watch my mentions'));
 
-    await waitFor(() => expect(screen.getByText('I can watch your mentions.')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText('I can watch your mentions.')).toBeTruthy(),
+    );
     expect(primary()?.textContent).toBe('Save Pip & sign in with Farcaster');
     expect(primary()?.getAttribute('data-highlighted')).toBe('true');
   });

@@ -97,7 +97,9 @@ export const trialTurnsUsed = (): number => {
   try {
     const raw = window.sessionStorage.getItem(TURNS_KEY);
     const turns = Number.parseInt(raw ?? '0', 10);
-    return Number.isFinite(turns) && turns > 0 ? Math.min(turns, TRIAL_TURNS_PER_SESSION) : 0;
+    return Number.isFinite(turns) && turns > 0
+      ? Math.min(turns, TRIAL_TURNS_PER_SESSION)
+      : 0;
   } catch {
     return 0;
   }
@@ -117,7 +119,9 @@ const recordTurn = (): void => {
 
 /** Only a string we would show: one line-bounded, printable, non-empty. */
 const shownText = (value: unknown, limit: number): string | null =>
-  typeof value === 'string' && value.trim() ? value.trim().slice(0, limit) : null;
+  typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, limit)
+    : null;
 
 /**
  * The exchange as it is stored. Read never throws: a half-written entry, an
@@ -182,7 +186,9 @@ export const loadTrialState = (): TrialState => ({
  * "you choose" — the route then answers with Fiddy's own brain, which is the
  * default choice and the one most visitors made.
  */
-export const trialBrain = (setup: FiddySetup): Record<string, unknown> | undefined => {
+export const trialBrain = (
+  setup: FiddySetup,
+): Record<string, unknown> | undefined => {
   if (setup.brain !== 'surp') {
     return undefined;
   }
@@ -198,14 +204,22 @@ export const trialBrain = (setup: FiddySetup): Record<string, unknown> | undefin
   };
 };
 
-const refusalFor = (status: number, code: string | null, message: string | null): TrialUnavailableError => {
+const refusalFor = (
+  status: number,
+  code: string | null,
+  message: string | null,
+): TrialUnavailableError => {
   // The server's own sentence wins when it sent one: it knows why, and its copy
   // is written for the visitor.
   if (message) {
     return new TrialUnavailableError('REFUSED', message, status);
   }
   if (status === 429) {
-    return new TrialUnavailableError('BUSY', 'That is a lot of messages at once. Try again in a minute, or sign in — your agent is waiting.', status);
+    return new TrialUnavailableError(
+      'BUSY',
+      'That is a lot of messages at once. Try again in a minute, or sign in — your agent is waiting.',
+      status,
+    );
   }
   if (code === 'TRIAL_NOT_OPEN') {
     return new TrialUnavailableError(
@@ -214,7 +228,11 @@ const refusalFor = (status: number, code: string | null, message: string | null)
       status,
     );
   }
-  return new TrialUnavailableError('REFUSED', 'The trial could not answer just now. Signing in still works.', status);
+  return new TrialUnavailableError(
+    'REFUSED',
+    'The trial could not answer just now. Signing in still works.',
+    status,
+  );
 };
 
 /**
@@ -241,7 +259,10 @@ export const askTrialAgent = async ({
     throw new TrialUnavailableError('REFUSED', 'Write a message first.');
   }
   if (trialTurnsRemaining() <= 0) {
-    throw new TrialUnavailableError('BUSY', 'You have used your one trial message. Sign in to keep talking.');
+    throw new TrialUnavailableError(
+      'BUSY',
+      'You have used your one trial message. Sign in to keep talking.',
+    );
   }
 
   const brain = trialBrain(setup);
@@ -249,8 +270,15 @@ export const askTrialAgent = async ({
   try {
     response = await fetchImpl(TRIAL_CHAT_PATH, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ message: text, agentName, ...(brain ? { brain } : {}) }),
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        message: text,
+        agentName,
+        ...(brain ? { brain } : {}),
+      }),
     });
   } catch {
     throw new TrialUnavailableError(
@@ -283,7 +311,11 @@ export const askTrialAgent = async ({
 
   const reply = shownText(payload.reply, 4000);
   if (!reply) {
-    throw new TrialUnavailableError('MALFORMED', 'The reply arrived empty. Try once more, or sign in — your agent is waiting.', response.status);
+    throw new TrialUnavailableError(
+      'MALFORMED',
+      'The reply arrived empty. Try once more, or sign in — your agent is waiting.',
+      response.status,
+    );
   }
 
   const exchange: TrialExchange = {

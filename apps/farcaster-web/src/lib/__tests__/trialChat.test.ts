@@ -16,12 +16,12 @@ import {
 } from '~/lib/__tests__/fakeStorage';
 import { defaultFiddySetup, saveFiddySetup } from '~/lib/fiddySetup';
 import {
-  TRIAL_CHAT_PATH,
-  TRIAL_STORAGE_KEY,
-  TRIAL_TURNS_PER_SESSION,
   askTrialAgent,
   loadTrialExchange,
   loadTrialState,
+  TRIAL_CHAT_PATH,
+  TRIAL_STORAGE_KEY,
+  TRIAL_TURNS_PER_SESSION,
   trialBrain,
   trialTurnsRemaining,
 } from '~/lib/trialChat';
@@ -31,9 +31,6 @@ const jsonResponse = (body: unknown, status = 200) =>
     status,
     headers: { 'content-type': 'application/json' },
   });
-
-const ask = (message: string, setup = defaultFiddySetup()) =>
-  askTrialAgent({ message, agentName: 'Momo', setup });
 
 beforeEach(() => {
   installFakeStorage();
@@ -47,7 +44,9 @@ describe('the trial message', () => {
   it('sends one message to the route on this origin and keeps the real reply', async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValue(jsonResponse({ ok: true, reply: 'I read your mentions.', note: null }));
+      .mockResolvedValue(
+        jsonResponse({ ok: true, reply: 'I read your mentions.', note: null }),
+      );
 
     const exchange = await askTrialAgent({
       message: '  Watch my mentions  ',
@@ -92,7 +91,9 @@ describe('the trial message', () => {
   });
 
   it('gives a new browser session its one message back', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ ok: true, reply: 'Here.' }));
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ ok: true, reply: 'Here.' }));
     await askTrialAgent({
       message: 'hi',
       agentName: 'Momo',
@@ -109,7 +110,8 @@ describe('the trial message', () => {
         {
           ok: false,
           code: 'TRIAL_NOT_OPEN',
-          message: 'The live trial is not open on this service yet, sign in instead.',
+          message:
+            'The live trial is not open on this service yet, sign in instead.',
         },
         503,
       ),
@@ -124,7 +126,8 @@ describe('the trial message', () => {
       }),
     ).rejects.toMatchObject({
       code: 'REFUSED',
-      ownerLine: 'The live trial is not open on this service yet, sign in instead.',
+      ownerLine:
+        'The live trial is not open on this service yet, sign in instead.',
     });
 
     // Nothing was written: there is no reply to remember.
@@ -181,7 +184,9 @@ describe('the trial message', () => {
   });
 
   it('survives a network refusal with a sentence, not a stack trace', async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValue(new TypeError('Failed to fetch'));
     await expect(
       askTrialAgent({
         message: 'hi',
@@ -210,7 +215,9 @@ describe('the trial message', () => {
       reply: 'Standing by.',
       note: null,
     });
-    expect(JSON.parse(window.localStorage.getItem(TRIAL_STORAGE_KEY) ?? '{}')).toMatchObject({
+    expect(
+      JSON.parse(window.localStorage.getItem(TRIAL_STORAGE_KEY) ?? '{}'),
+    ).toMatchObject({
       reply: 'Standing by.',
     });
   });
@@ -227,7 +234,10 @@ describe('the brain the trial hands over', () => {
 
     window.localStorage.setItem(
       'fiddy.surp.key',
-      JSON.stringify({ key: 'sk-surp-abcdefghijklmnopqrstuvwxyz', createdAt: Date.now() }),
+      JSON.stringify({
+        key: 'sk-surp-abcdefghijklmnopqrstuvwxyz',
+        createdAt: Date.now(),
+      }),
     );
     expect(trialBrain(setup)).toEqual({
       kind: 'preset',

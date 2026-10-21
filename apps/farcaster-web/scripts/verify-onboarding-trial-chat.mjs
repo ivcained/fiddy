@@ -50,14 +50,10 @@ const appears = async (page, selector, timeout = 20000) => {
 
 const bodyText = (page) =>
   page
-    .evaluate(() => (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim())
+    .evaluate(() =>
+      (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+    )
     .catch(() => '');
-
-const trialState = (page) =>
-  page
-    .locator('[data-fiddy="trial"]')
-    .getAttribute('data-trial')
-    .catch(() => null);
 
 const primaryText = (page) =>
   page
@@ -116,7 +112,9 @@ const run = async () => {
       consoleErrors.push(message.text());
     }
   });
-  page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${String(error)}`));
+  page.on('pageerror', (error) =>
+    consoleErrors.push(`pageerror: ${String(error)}`),
+  );
   page.on('request', (request) => {
     if (request.url().includes('/api/fiddy/trial-chat')) {
       requests.push(request.url());
@@ -126,7 +124,10 @@ const run = async () => {
   // 1. The box is on the last screen, and it names the agent the visitor chose.
   await walkToReady(page);
   const readyText = await bodyText(page);
-  await page.screenshot({ path: `${OUT}/trial-1-ready-box.png`, fullPage: true });
+  await page.screenshot({
+    path: `${OUT}/trial-1-ready-box.png`,
+    fullPage: true,
+  });
   check(
     'the ready sheet carries the trial, naming the agent the visitor chose',
     (await appears(page, '[data-fiddy="trial"]', 5000)) &&
@@ -154,7 +155,8 @@ const run = async () => {
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        reply: 'I can read your mentions and draft casts for you — nothing is posted until you say so.',
+        reply:
+          'I can read your mentions and draft casts for you — nothing is posted until you say so.',
         source: 'operator',
         note: null,
         agentName: 'Momo',
@@ -163,12 +165,18 @@ const run = async () => {
   });
   await page.click('[data-trial-starter="Watch my mentions"]');
   await page.waitForFunction(
-    () => document.querySelector('[data-fiddy="trial"]')?.getAttribute('data-trial') === 'answered',
+    () =>
+      document
+        .querySelector('[data-fiddy="trial"]')
+        ?.getAttribute('data-trial') === 'answered',
     null,
     { timeout: 15000 },
   );
   const answeredText = await bodyText(page);
-  await page.screenshot({ path: `${OUT}/trial-2-answered.png`, fullPage: true });
+  await page.screenshot({
+    path: `${OUT}/trial-2-answered.png`,
+    fullPage: true,
+  });
   check(
     'an opener is a press that sends: the message asked for what the chip said',
     requests.length === 1 && /Watch my mentions/.test(answeredText),
@@ -187,7 +195,9 @@ const run = async () => {
     await primaryText(page),
   );
 
-  const stored = await page.evaluate(() => window.localStorage.getItem('fiddy.trial'));
+  const stored = await page.evaluate(() =>
+    window.localStorage.getItem('fiddy.trial'),
+  );
   check(
     'the exchange is kept for the signed-in chat to pick up',
     typeof stored === 'string' && /I can read your mentions/.test(stored),
@@ -205,7 +215,8 @@ const run = async () => {
   );
   check(
     'a reload shows the same exchange and asks the service nothing',
-    /I can read your mentions/.test(await bodyText(page)) && requests.length === before,
+    /I can read your mentions/.test(await bodyText(page)) &&
+      requests.length === before,
     `${requests.length - before} new request(s)`,
   );
 
@@ -222,7 +233,8 @@ const run = async () => {
       body: JSON.stringify({
         ok: false,
         code: 'TRIAL_NOT_OPEN',
-        message: 'The live trial is not open on this service yet. Sign in and your first message goes straight to your agent.',
+        message:
+          'The live trial is not open on this service yet. Sign in and your first message goes straight to your agent.',
       }),
     });
   });
@@ -239,7 +251,10 @@ const run = async () => {
     { timeout: 15000 },
   );
   const refusedText = await bodyText(page);
-  await page.screenshot({ path: `${OUT}/trial-3-not-open.png`, fullPage: true });
+  await page.screenshot({
+    path: `${OUT}/trial-3-not-open.png`,
+    fullPage: true,
+  });
   check(
     'an unreachable trial is stated in words, with no invented reply',
     /not open on this service yet/.test(refusedText) &&
@@ -270,7 +285,11 @@ const run = async () => {
     'nan',
   ];
   const found = jargon.filter((word) => screens.includes(word));
-  check('no infrastructure words on the trial box', found.length === 0, found.join(','));
+  check(
+    'no infrastructure words on the trial box',
+    found.length === 0,
+    found.join(','),
+  );
 
   // 5. What the deployed service actually answers, when asked to look.
   if (LIVE) {
@@ -281,7 +300,11 @@ const run = async () => {
         body: JSON.stringify({ message: 'hi', agentName: 'Momo' }),
       });
       const text = await response.text();
-      return { status: response.status, type: response.headers.get('content-type'), body: text.slice(0, 120) };
+      return {
+        status: response.status,
+        type: response.headers.get('content-type'),
+        body: text.slice(0, 120),
+      };
     });
     check(
       'the live service answers the trial route with JSON',
@@ -290,7 +313,9 @@ const run = async () => {
     );
   }
 
-  const uncaught = consoleErrors.filter((entry) => entry.startsWith('pageerror:'));
+  const uncaught = consoleErrors.filter((entry) =>
+    entry.startsWith('pageerror:'),
+  );
   check(
     'the walk raises no console errors of its own',
     errorsBeforeRefusal === 0 && uncaught.length === 0,
