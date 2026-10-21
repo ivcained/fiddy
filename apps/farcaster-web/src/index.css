@@ -143,6 +143,8 @@
 /* What a device-only session says for itself: the chrome banner and the
    in-place degrade panel for a shell region that cannot load. */
 @import './styles/fiddy-device-only.css';
+/* Making an account on this device, and holding more than one. */
+@import './styles/fiddy-accounts.css';
 @config '../tailwind.config.js';
 
 * {

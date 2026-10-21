@@ -1,5 +1,6 @@
-import { FC, memo } from 'react';
+import { FC, memo, useState } from 'react';
 
+import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
 import { LoginWithMobile } from '~/components/login/LoginWithMobile';
 import { DefaultModalContainer } from '~/components/modals/DefaultModalContainer';
 import { Modal } from '~/components/modals/Modal';
@@ -9,6 +10,20 @@ type LoginModalProps = {
 };
 
 const LoginModal: FC<LoginModalProps> = memo(({ onClose }) => {
+  /**
+   * Making an account, from the same door as signing in to one.
+   *
+   * These are the two halves of "I want to be on Farcaster": one is for people
+   * who already have an account, one for people who do not. Putting the second
+   * behind the first — or behind a different screen nobody finds — is how a
+   * client ends up only usable by people who were already users.
+   */
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+
+  if (isCreatingAccount) {
+    return <CreateAccountSheet onClose={() => setIsCreatingAccount(false)} />;
+  }
+
   return (
     <Modal>
       <DefaultModalContainer onClose={onClose}>
@@ -20,6 +35,14 @@ const LoginModal: FC<LoginModalProps> = memo(({ onClose }) => {
             }}
           >
             <LoginWithMobile onClose={onClose} />
+            <button
+              type="button"
+              className="fiddy-quiet-btn mt-3 self-center"
+              data-fiddy="create-account-entry"
+              onClick={() => setIsCreatingAccount(true)}
+            >
+              New to Farcaster? Make an account
+            </button>
           </div>
         </div>
       </DefaultModalContainer>

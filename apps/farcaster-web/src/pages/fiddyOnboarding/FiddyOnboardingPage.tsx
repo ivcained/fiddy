@@ -33,6 +33,7 @@ import { KeyRound, MessageCircle, Plug, ShieldCheck } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
+import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
 import { BrainSheet, brainSummary } from '~/components/fiddy/BrainSheet';
 import { FiddySheet } from '~/components/fiddy/FiddySheet';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
@@ -93,6 +94,8 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
   const isSignedIn = useIsSignedIn();
 
   const [isSigningIn, setIsSigningIn] = useState(false);
+  /** Making a brand-new account, on this device, instead of signing in to one. */
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [draftName, setDraftName] = useState(setup.agentName);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
@@ -198,7 +201,7 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
               label: 'Do this later',
               onClick: () => go('fiddyWelcome'),
             }}
-            note="Fiddy opens with your Farcaster account — that is the Go social step, and it is the one part we cannot skip yet. Signing in never posts anything by itself."
+            note="Fiddy opens with your Farcaster account. Already have one? Sign in. New here? Make one right here — Fiddy does the whole thing on this device, and the words that own it never leave your browser."
             titleRef={titleRef}
           >
             <ul className="fiddy-summary">
@@ -234,6 +237,14 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
                 </span>
               </li>
             </ul>
+            <button
+              type="button"
+              className="fiddy-quiet-btn"
+              data-fiddy="create-account-entry"
+              onClick={() => setIsCreatingAccount(true)}
+            >
+              New to Farcaster? Make an account
+            </button>
           </FiddySheet>
         );
 
@@ -255,7 +266,7 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
               label: 'Already on Farcaster? Go social',
               onClick: () => setIsSigningIn(true),
             }}
-            note="No account needed for this part. Fiddy only asks for Farcaster when you want to post to it."
+            note="No account needed for this part. Fiddy only asks for Farcaster when you want to post to it, and it can make you one if you don't have it."
             titleRef={titleRef}
           >
             <ul className="fiddy-promise">
@@ -263,6 +274,14 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
               <li>It connects to the apps you already use.</li>
               <li>You stay in control: it asks first, and you can pause it.</li>
             </ul>
+            <button
+              type="button"
+              className="fiddy-quiet-btn"
+              data-fiddy="create-account-entry"
+              onClick={() => setIsCreatingAccount(true)}
+            >
+              New to Farcaster? Make an account
+            </button>
           </FiddySheet>
         );
     }
@@ -303,6 +322,10 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
 
       {isSigningIn ? (
         <LoginModal onClose={() => setIsSigningIn(false)} />
+      ) : null}
+
+      {isCreatingAccount ? (
+        <CreateAccountSheet onClose={() => setIsCreatingAccount(false)} />
       ) : null}
     </Page>
   );
