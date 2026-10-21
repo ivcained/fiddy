@@ -429,3 +429,113 @@ clean-runner CI run is what settles it: the full suite is green on the merge.
 
 ### 7.4 The release, and what the live client shows
 
+The card said to check one fact first. It was checked, and it changed under the card:
+
+| when (IST) | `https://fiddy.fun/release.json` → `revision` | what it is |
+| --- | --- | --- |
+| 00:30 | `256601e` | the state the card described — before the writes, the Together surface and this set |
+| **00:32:41** | **`55a4ddd58`** | `current` swapped (VPS symlink mtime `2026-10-21 19:02:41Z`) by the release run staged the evening before at 22:59:40, which finished while this card was open |
+
+So the "stalled cutover" was **one live run, not the state of the world**: it spent
+~1 h 35 m getting a build through a contended box and then cut over cleanly. Read,
+not assumed:
+
+    $ curl -s https://fiddy.fun/release.json
+    {"revision":"55a4ddd58","mode":"node-backed-client","node":"https://haatz.quilibrium.com","media":"https://fiddy.fun"}
+
+**The live revision contains `824a20c`** — the acceptance's first clause, on the
+served bytes:
+
+| check | how | result |
+| --- | --- | --- |
+| `824a20c` is an ancestor of the live revision | `git merge-base --is-ancestor 824a20c 55a4ddd58` | yes |
+| what the live revision is | `git log -1 --format='%h %cI %s' 55a4ddd58` | `55a4ddd 2026-10-21T22:54:32+05:30 test(client): the miniapps probe presses the card, and reads the centre column` |
+| the served entry chunk | `curl -s https://fiddy.fun/` → `/assets/index-xFMI6dSv.js` | 7,719,292 bytes, `sha256 4929aaf28e78b98e…` |
+| those bytes are *that build's* bytes | `cmp` against the stage tree's `dist/assets/index-xFMI6dSv.js` | identical — `cmp` silent, equal sha256 |
+| the served entry still carries the account copy | `grep -c -F 'New to Farcaster? Make an account' served-live-entry.js` | 1, inside `LoginModal` |
+
+And the copy the acceptance asks for, in the chunks the VPS serves
+(`grep -rl` over `releases/<sha>/web/assets`, 325 chunks of 68 MB):
+
+| string | `256601e` (the release before) | `55a4ddd58` (live) |
+| --- | --- | --- |
+| `New to Farcaster? Make an account` | 0 chunks | **2** — `index-xFMI6dSv.js`, `FiddyOnboardingPage-Dy8zGJn6.js` |
+| `account-switcher-entry` | 0 chunks | **1** — `index-xFMI6dSv.js` |
+| the entry inside `LoginModal` | absent | `…,{"data-fiddy":"create-account-entry",onClick:()=>tu(!0),children:"New to Farcaster? Make an account"}` at offset 7,279,439 of the entry chunk |
+
+**No build of `824a20c` was run, and that is the right call.** `824a20c` is an
+*ancestor* of what is live, so cutting it over would roll the client back 43
+minutes; and the run that would have cut it over (stage
+`fiddy-client-release-824a20c.XRo6YH`, started 23:20) is dead without ever having
+emitted a byte of `dist`: `vite build` ran 1 h 50 m on a box holding five sibling
+`vite build`s at load 100-175 with swap at 31 of 32 GB, and produced **0 assets**,
+no release tree and no served-gate artifact. It would not have been shippable
+anyway — it started before `63bc576` landed, so its step-2 env line never carried
+`VITE_TOGETHER_API_URL`, i.e. exactly the laptop fallback the new step-3 gate
+refuses. The tip release that supersedes it (`63bc576`, card `t_082a2d4d`) died
+inside its own `vite build` the same way (0 assets, no cutover), so live stayed at
+`55a4ddd58`.
+
+**The live client, measured.** `live-measure-fiddy.mjs` (the script attached to
+`t_451ad931`) cannot read green on this Mac, so what follows is every pass of it and
+the cause of every red rather than one number. Two defects in the driver — not in
+the client — account for all of them:
+
+1. it sleeps a fixed 3-6 s after each navigation and then reads the DOM. This box
+   needs 30-60 s for the deployed SPA to boot, so its rows read `""` or its own
+   string `"Loading Fiddy…"`;
+2. its sheet row clicks `document.querySelector('[data-fiddy="create-account-entry"]')`
+   — the **first** match in the document, which on this build is the *onboarding
+   screen's* entry, hidden at 0×0 (measured: box 0×0, `inDialog: false`, and
+   `document.elementFromPoint` at its centre returns the welcome container). The
+   entry inside the sign-in modal is the **second** node (520×40 outside a dialog,
+   259×40 inside it).
+
+| pass | driver | result |
+| --- | --- | --- |
+| 1 | attached, unchanged | 4/7 — account rows red with `"body":""` (defect 1) |
+| 2 | attached, unchanged | 4/7 — **the entry inside the modal green**: `entries: 2, entriesInModal: 1, entryText: "New to Farcaster? Make an account"` |
+| 3 | attached, fixed sleeps → boot wait | 3/7 — the click landed before the app was interactive; body then shows the authed shell |
+| 4 | same checks, Playwright actionability waits | 2/2, then stopped: the modal closed under the click — the attached stub answers the relay's status poll with credentials, so the client signs itself in within ~1 s of the modal opening |
+| 5 | same checks, relay poll **held pending** so the modal stays open | 2/2, then stopped: `waiting for element to be visible, enabled and stable` — an animated sheet is never "stable" |
+| 6 | as 5, click forced | 5/8 — the forced click landed on defect 2's hidden node |
+| 7 | as 5, clicking **the in-modal node**, the attached probe's own DOM `.click()` | **4/4 — green** |
+
+Pass 7 is the measurement that matters — the two account rows on the deployed
+build, in the client's own words:
+
+| the check | `55a4ddd58`, live | evidence |
+| --- | --- | --- |
+| the create-account entry is on the deployed setup screen | **green** | `Go social — sign in with Farcaster` |
+| the create-account entry is **inside the sign-in modal** | **green** | `entries: 2, entriesInModal: 1` — the in-modal node is 259×40 and reads `New to Farcaster? Make an account` |
+| that entry **opens the account-creation sheet** | **green** | after the click, `[data-fiddy="create-account"]` is present and says: `Pick your name — This is the @name people will see. You can change it later. YOUR @NAME Lowercase letters, numbers and dashes. This is the name people will type to find you. YOUR DISPLAY NAME Continue Back …` |
+| the rail carries the switcher | **green** | the entry reads `Your accounts`, width 176 (every pass) |
+| the switcher sheet opens from the rail | **green** | `Your accounts — This browser is not holding an account of its own yet. An account you make here is held on this device. Make one and it shows up in this list. Make another account … The words that own an account stay on this device. Fiddy keeps no copy of them.` |
+| the mobile menu carries the switcher | **present in the DOM; the row is not driven green** | the entry **is** in the mobile document (`found: true`, text `Your accounts`) but at width 0 with the menu closed, and no pass found the button that opens that menu: the attached probe reports `"tried": []` (its header query returns no sized buttons on this box), and a 390×844 diagnostic pointed at the menu (`artifact-live-diagnose-mobile-55a4ddd58.json`) could not get as far as the signed-in mobile shell inside its 180 s budget. The feature is in the shipped bytes — `account-switcher-entry` is in the served entry chunk, and the mobile header at this sha renders the entry inside the menu sheet (`src/layouts/MobileHeader.tsx:400`). What is missing for this row is a driver, not the feature, and it is written here as unmeasured rather than as green |
+| no write to the node or the relay left the machine | **green** | pass 7 aborted nothing at all; the passes that ran longer aborted only third-party beacons (Neynar PostHog `flags/`, `wallet.farcaster.xyz/cdn-cgi/rum`, `privy.farcaster.xyz/api/v1/analytics_events`, a Datadog CSP report). Nothing reached the node, the relay or a write API in any pass |
+
+The attached probe's own `no write left the machine` row needs the caveat stated
+rather than smoothed: it counts *any* cross-origin POST, so it reads red on a page
+that fires analytics — including at `256601e`, where its baseline run listed those
+same beacons **and** counted HEADs as writes (the script was tightened after that
+run, which is why the row is red for a shorter list here). What matters for this
+feature is the row below it.
+
+**Two live findings that outlive this card.** They are recorded here because the
+release is the moment they became visible, and neither is this card's to fix:
+
+1. The live `55a4ddd58` bundle still carries the laptop fallback: `127.0.0.1:8766`
+   is in `together-BTCrPddb.js` (0 occurrences in the entry chunk), because that
+   build ran under the pre-`63bc576` script with no `VITE_TOGETHER_API_URL`. On
+   fiddy.fun, `/~/together` therefore asks the visitor's own laptop for the board.
+   The new step-3 gate refuses exactly this bundle; the release that bakes the
+   empty-string origin is `t_082a2d4d`'s, and it has died once mid-build.
+2. The box, not the code, is what fails here: five concurrent `vite build`s, load
+   100-175, swap at 31 of 32 GB. Two release runs and five of the seven
+   measurement passes above died inside that contention, not inside the client. A
+   release on this machine is a one-at-a-time operation.
+
+Every number above is reproducible from the artifacts attached to `t_c6256597`:
+`artifact-live-measure-55a4ddd58-run1-red.json` … `-run7-modal-entry.json`,
+`artifact-live-diagnose-55a4ddd58.json`, `artifact-live-diagnose-mobile-55a4ddd58.json`,
+and the drivers under `measure/`.
