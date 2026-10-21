@@ -99,27 +99,35 @@ const run = async ({ label, mockApi }) => {
   });
 
   await page.goto('https://localhost:5173/', { waitUntil: 'domcontentloaded', timeout: 45000 });
-  await page.waitForFunction(() => document.body.innerText.trim().length > 60, { timeout: 60000 });
+  await page.waitForFunction(() => (document.body?.innerText ?? '').trim().length > 60, { timeout: 60000 });
 
   for (const el of await page.$$('button, a, [role=button]')) {
     const txt = ((await el.innerText()) || '').replace(/\s+/g, ' ').trim();
     if (/go social/i.test(txt)) { await el.click(); break; }
   }
 
-  await page.waitForFunction(() => /channelToken=/.test(document.body.innerText), { timeout: 30000 }).catch(() => {});
-  const qrText = await page.innerText('body');
+  await page.waitForFunction(() => /channelToken=/.test((document.body?.innerText ?? '')), { timeout: 30000 }).catch(() => {});
+  // `page.innerText('body')` throws outright on a document whose body has not
+  // been created yet — the instant the sign-in's own navigation passes through.
+  // MEASURED shape (2026-10-21, the sibling composer probe): a bare read there
+  // is `Cannot read properties of null (reading 'innerText')` and the whole run
+  // dies with nothing printed. An empty string keeps the report honest: the
+  // verdicts below are made on the text, and no text is no text.
+  const bodyText = () =>
+    page.evaluate(() => document.body?.innerText ?? '').catch(() => '');
+  const qrText = await bodyText();
   const svgCount = await page.$$eval('svg', (els) => els.length).catch(() => 0);
   await page.screenshot({ path: `${OUT}/login-qr-${label}.png` });
 
   const signedIn = await page
-    .waitForFunction(() => /You're signed in/.test(document.body.innerText), { timeout: 30000 })
+    .waitForFunction(() => /You're signed in/.test((document.body?.innerText ?? '')), { timeout: 30000 })
     .then(() => true).catch(() => false);
-  const signedInText = await page.innerText('body');
+  const signedInText = await bodyText();
   await page.screenshot({ path: `${OUT}/login-signed-in-${label}.png` });
 
   await page.waitForTimeout(13000);
   const after = await page.evaluate(() => {
-    const text = document.body.innerText.replace(/\s+/g, ' ').trim();
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
     const shell = new Set();
     document.querySelectorAll('[class]').forEach((el) => {
       String(el.className).split(/\s+/).forEach((c) => { if (/^fiddy-/.test(c)) shell.add(c); });
@@ -140,7 +148,7 @@ const run = async ({ label, mockApi }) => {
       landing: Boolean(
         document.querySelector('[data-fiddy="device-only-session"]'),
       ),
-      text: document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 160),
+      text: (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 160),
     }));
 
   const clickByText = async (re) => {
@@ -172,7 +180,7 @@ const run = async ({ label, mockApi }) => {
       timeout: 45000,
     });
     await page.waitForFunction(
-      () => document.body.innerText.trim().length > 60,
+      () => (document.body?.innerText ?? '').trim().length > 60,
       { timeout: 30000 },
     );
     await page.waitForTimeout(1500);

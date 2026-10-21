@@ -168,7 +168,12 @@ const writeTestPhoto = (file) => {
 
 const readSurface = (page) =>
   page.evaluate(() => {
-    const text = document.body.innerText.replace(/\s+/g, ' ').trim();
+    // A read can land on a document that is mid-navigation, and the document
+    // being replaced has no body yet. Signing in IS a navigation. MEASURED
+    // 2026-10-21: unguarded, the read right after the "Go social" click threw
+    // `Cannot read properties of null (reading 'innerText')` and the probe died
+    // before check 1 was recorded — the client was fine the whole time.
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
     return {
       path: window.location.pathname,
       text,
@@ -190,12 +195,43 @@ const readSurface = (page) =>
 
 const composer_text_of = (surface) => surface.text.slice(0, 160);
 
+/**
+ * `page.evaluate` also throws "Execution context was destroyed" whenever the app
+ * is mid-navigation, which the null-body guard cannot catch — the read never
+ * reaches the page. Every read of the surface goes through here, so a destroyed
+ * context is "read again in a moment" rather than a dead run. Any other error is
+ * let through untouched. MEASURED 2026-10-21: the poll right after the "Go
+ * social" click hit exactly this window.
+ */
+const safeReadSurface = async (page) => {
+  let lastError;
+  for (let i = 0; i < 20; i += 1) {
+    try {
+      return await readSurface(page);
+    } catch (e) {
+      lastError = e;
+      if (
+        !/Execution context was destroyed|Cannot find context|Target closed|navigating/i.test(
+          String(e),
+        )
+      ) {
+        throw e;
+      }
+      await page.waitForTimeout(250);
+    }
+  }
+  throw lastError;
+};
+
+/** The launched browser, kept where the throw path can close it too. */
+let browser;
+
 const run = async () => {
   const photo = writeTestPhoto(path.join(os.tmpdir(), 'fiddy-media-probe.png'));
   const mediaRequests = [];
   const consoleErrors = [];
 
-  const browser = await chromium.launch({
+  browser = await chromium.launch({
     channel: 'chrome',
     ignoreHTTPSErrors: true,
     args: ['--ignore-certificate-errors'],
@@ -288,7 +324,9 @@ const run = async () => {
     }
   }
 
-  let surface = await readSurface(page);
+  // The sign-in IS a navigation: this first read lands inside it, so it goes
+  // through the guarded reader and a torn-down document is simply read again.
+  let surface = await safeReadSurface(page);
   for (let i = 0; i < 60; i += 1) {
     if (
       surface.path === '/' &&
@@ -299,7 +337,7 @@ const run = async () => {
       break;
     }
     await page.waitForTimeout(1000);
-    surface = await readSurface(page);
+    surface = await safeReadSurface(page);
   }
   check(
     'a completed sign-in lands in the client',
@@ -311,6 +349,22 @@ const run = async () => {
   );
 
   // ── 2. the composer ───────────────────────────────────────────────────────
+  // The shell's frame and its Cast control do not arrive in the same instant on
+  // a cold dev build. MEASURED 2026-10-21: the shell was mounted while the
+  // control was still a moment away, which read as "the composer never opened".
+  // Ask for the control itself (bounded, and a no-op when it is already there)
+  // instead of assuming the frame brought it; if it never comes, the checks
+  // below still say so in their own words.
+  await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll('button')].some(
+          (b) => (b.innerText || '').trim() === 'Cast' && b.offsetParent,
+        ),
+      { timeout: 30000 },
+    )
+    .catch(() => {});
+
   // The shell keeps a second Cast control in the DOM for narrow screens; only
   // one of them is on screen, and clicking the hidden one would never open
   // anything, so ask for the visible one.
@@ -362,7 +416,7 @@ const run = async () => {
     editorOpen && picks.scoped > 0,
     `clicked=${opened} editor=${editorOpen} placeholderSeen=${placeholderSeen} fileInputs=${JSON.stringify(
       picks,
-    )} composerText=${JSON.stringify(composer_text_of(await readSurface(page)))}`,
+    )} composerText=${JSON.stringify(composer_text_of(await safeReadSurface(page)))}`,
   );
 
   // ── 3. pick a photo: the mint, then the upload ─────────────────────────────
@@ -390,10 +444,21 @@ const run = async () => {
     let picked = false;
     if ((await mediaButton.count()) > 0) {
       await mediaButton.waitFor({ state: 'visible', timeout: 30000 });
-      const chooser = page.waitForEvent('filechooser', { timeout: 20000 });
+      // Wait for the dialog the click is about to open, but never let that wait
+      // become an unhandled rejection. MEASURED 2026-10-21: the promise was
+      // created bare, the click's own auto-wait outlasted its 20s timeout, and
+      // the rejection killed the process where it stood — no checks printed,
+      // nothing to read, which reads exactly like a broken client. A dialog that
+      // never comes is now the same "not picked" the fallback below already
+      // handles.
+      const chooser = page
+        .waitForEvent('filechooser', { timeout: 20000 })
+        .catch(() => null);
       await mediaButton.click();
       try {
-        await (await chooser).setFiles(photo.file);
+        const dialog = await chooser;
+        if (!dialog) throw new Error('the Media button opened no file dialog');
+        await dialog.setFiles(photo.file);
         picked = true;
       } catch {
         picked = false;
@@ -717,4 +782,10 @@ try {
     );
   }
   process.exitCode = 1;
+} finally {
+  // A probe that throws must still let go of its browser. MEASURED 2026-10-21:
+  // with the close on the success path only, a thrown read left the node
+  // process alive (holding its Chrome) until it was killed by hand, and the
+  // shell that started it waited with it.
+  await browser?.close().catch(() => {});
 }

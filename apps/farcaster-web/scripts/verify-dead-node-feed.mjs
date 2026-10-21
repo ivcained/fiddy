@@ -127,7 +127,12 @@ const readSurface = async (page) => {
 
 const surfaceProbe = () => {
   const norm = (value) => (value || '').replace(/\s+/g, ' ').trim();
-  const text = norm(document.body.innerText);
+  // MEASURED 2026-10-21: a document the sign-in's own navigation is replacing
+  // has no body for an instant, and a bare read there is `Cannot read properties
+  // of null` — a different error from the destroyed execution context the retry
+  // below tolerates, so it used to escape and kill the run. An empty string is
+  // an empty surface, which the polls already handle.
+  const text = norm(document.body?.innerText ?? '');
   const main = document.querySelector('main');
   const inMain = (selector) => {
     const el = main?.querySelector(selector);
@@ -263,9 +268,9 @@ const run = async () => {
   // Warm the onboarding route first, then drive it.
   page.setDefaultTimeout(180000);
   await page.goto(`${SERVER}/welcome`, { waitUntil: 'domcontentloaded', timeout: 120000 });
-  await page.waitForFunction(() => document.body.innerText.trim().length > 40, { timeout: 180000 });
+  await page.waitForFunction(() => (document.body?.innerText ?? '').trim().length > 40, { timeout: 180000 });
   await page.goto(`${SERVER}/welcome/ready`, { waitUntil: 'domcontentloaded', timeout: 120000 });
-  await page.waitForFunction(() => document.body.innerText.trim().length > 40, { timeout: 180000 });
+  await page.waitForFunction(() => (document.body?.innerText ?? '').trim().length > 40, { timeout: 180000 });
 
   let clicked = null;
   for (const el of await page.$$('button, a, [role=button]')) {

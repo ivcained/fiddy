@@ -67,7 +67,12 @@ const CORS = {
 
 const readSurface = (page) =>
   page.evaluate(() => {
-    const text = document.body.innerText.replace(/\s+/g, ' ').trim();
+    // A read can land on a document the sign-in's own navigation is replacing,
+    // and that document has no body yet. Guarded so a read in that instant is an
+    // empty surface the caller polls again, not a dead run. MEASURED 2026-10-21
+    // on the sibling probe: unguarded it threw `Cannot read properties of null
+    // (reading 'innerText')` and the whole run printed nothing.
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
     const accountEl = document.querySelector(
       '[data-fiddy="device-only-account"]',
     );
@@ -101,6 +106,35 @@ const readSurface = (page) =>
       })(),
     };
   });
+
+/**
+ * Read the surface, tolerating a page that is mid-navigation.
+ *
+ * MEASURED 2026-10-21: `page.evaluate` also throws `Execution context was
+ * destroyed, most likely because of a navigation` — the sign-in IS a navigation,
+ * and this probe's first post-click read lands inside it. A destroyed context is
+ * "read again in a moment"; anything else still throws, so a real failure is
+ * never hidden behind a retry.
+ */
+const safeReadSurface = async (page) => {
+  let lastError;
+  for (let i = 0; i < 20; i += 1) {
+    try {
+      return await readSurface(page);
+    } catch (e) {
+      lastError = e;
+      if (
+        !/Execution context was destroyed|Cannot find context|Target closed|navigating/i.test(
+          String(e),
+        )
+      ) {
+        throw e;
+      }
+      await page.waitForTimeout(250);
+    }
+  }
+  throw lastError;
+};
 
 /** Where the browser ended up, in the terms the bug is about. */
 const verdict = (surface) => ({
@@ -188,7 +222,7 @@ const run = async ({ label, mockApi }) => {
 
   await page.goto(READY_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.waitForFunction(
-    () => document.body.innerText.trim().length > 40,
+    () => (document.body?.innerText ?? '').trim().length > 40,
     { timeout: 60000 },
   );
   await page.waitForTimeout(500);
@@ -205,7 +239,7 @@ const run = async ({ label, mockApi }) => {
   }
 
   const signedInNamed = await page
-    .waitForFunction(() => /You're signed in/.test(document.body.innerText), {
+    .waitForFunction(() => /You're signed in/.test((document.body?.innerText ?? '')), {
       timeout: 30000,
     })
     .then(() => true)
@@ -214,7 +248,9 @@ const run = async ({ label, mockApi }) => {
   // A fresh boot takes as long as it takes; wait for a surface, not a stopwatch.
   const waitForSurface = async () => {
     for (let i = 0; i < 45; i += 1) {
-      const surface = await readSurface(page);
+      // The first of these reads lands inside the sign-in's own navigation, so
+      // it goes through the tolerant reader (see safeReadSurface).
+      const surface = await safeReadSurface(page);
       if (
         !surface.onboardingSheet &&
         (surface.feedish || surface.deviceOnlyLanding) &&
@@ -224,7 +260,7 @@ const run = async ({ label, mockApi }) => {
       }
       await page.waitForTimeout(1000);
     }
-    return await readSurface(page);
+    return await safeReadSurface(page);
   };
 
   const afterSignIn = await waitForSurface();

@@ -173,7 +173,12 @@ const readRail = (page) =>
       const s = window.getComputedStyle(el);
       return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
     };
-    const text = document.body.innerText.replace(/\s+/g, ' ').trim();
+    // A document being replaced by a navigation has no body for an instant, and a
+    // bare read there is `Cannot read properties of null` — which killed the
+    // sibling composer probe outright (MEASURED 2026-10-21). An empty rail is the
+    // honest read of that instant; the checks below judge what is missing and say
+    // so, instead of the run dying with nothing printed.
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
     // "Notifications 3" — a badge appends its count to the entry's label.
     const labels = ['Feed', 'Wallet', 'Settings', 'Notifications', 'Direct Casts'];
     const nav = {};
@@ -277,7 +282,7 @@ const run = async (mode) => {
   });
 
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForFunction(() => document.body.innerText.trim().length > 60, {
+  await page.waitForFunction(() => (document.body?.innerText ?? '').trim().length > 60, {
     timeout: 90000,
   });
 
@@ -290,7 +295,7 @@ const run = async (mode) => {
   }
 
   const signedIn = await page
-    .waitForFunction(() => /You're signed in/.test(document.body.innerText), { timeout: 60000 })
+    .waitForFunction(() => /You're signed in/.test((document.body?.innerText ?? '')), { timeout: 60000 })
     .then(() => true)
     .catch(() => false);
 
