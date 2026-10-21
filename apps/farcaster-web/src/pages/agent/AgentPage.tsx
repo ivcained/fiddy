@@ -59,13 +59,13 @@ import {
   listChannels,
   probeAgentService,
 } from '~/lib/agentService';
-import { allowedChannelCount, useFiddySetup } from '~/lib/fiddySetup';
 import {
   AUTOPAIR_SENTENCES,
+  type AutopairProvisioning,
   openOwnerSession,
   shouldAutopair,
-  type AutopairProvisioning,
 } from '~/lib/fiddyAgentAutopair';
+import { allowedChannelCount, useFiddySetup } from '~/lib/fiddySetup';
 import { clearSiwfProof, loadSiwfProof } from '~/lib/siwfSession';
 import { clearTrialExchange, loadTrialExchange } from '~/lib/trialChat';
 import { trackError } from '~/utils/errorUtils';
@@ -175,7 +175,12 @@ const AgentPage: React.FC = () => {
     }
     setTrial({
       messages: [
-        { id: newMessageId(), role: 'owner', text: exchange.message, at: exchange.at },
+        {
+          id: newMessageId(),
+          role: 'owner',
+          text: exchange.message,
+          at: exchange.at,
+        },
         {
           id: newMessageId(),
           role: 'agent',
@@ -622,7 +627,9 @@ const AgentPage: React.FC = () => {
                 aria-live="polite"
                 className="text-sm text-muted"
               >
-                {autopair.state === 'running' ? 'Waking your agent…' : 'Not awake yet'}
+                {autopair.state === 'running'
+                  ? 'Waking your agent…'
+                  : 'Not awake yet'}
               </p>
             </div>
           </header>
@@ -640,7 +647,9 @@ const AgentPage: React.FC = () => {
             messages={thread}
             busy={false}
             onSend={() => undefined}
-            awaiting={{ note: `You can write to ${namedAgent} once it is awake.` }}
+            awaiting={{
+              note: `You can write to ${namedAgent} once it is awake.`,
+            }}
           />
 
           <div className="mt-4 border-t border-[rgba(255,255,255,0.09)] pt-4">

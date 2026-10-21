@@ -105,7 +105,9 @@ export type AutopairOutcome =
 
 /** Which brain the setup chose, described the way the route takes it. */
 export const autopairBrain = (setup: FiddySetup): AutopairBrain =>
-  setup.brain === 'surp' ? { kind: 'preset', presetId: 'surp' } : { kind: 'default' };
+  setup.brain === 'surp'
+    ? { kind: 'preset', presetId: 'surp' }
+    : { kind: 'default' };
 
 /**
  * Should this browser be paired automatically at all? Only a signed-in session
@@ -120,9 +122,7 @@ export const shouldAutopair = ({
   setup: FiddySetup;
   fid: number | null | undefined;
 }): boolean =>
-  typeof fid === 'number' &&
-  fid > 0 &&
-  AUTOPAIR_BRAINS.includes(setup.brain);
+  typeof fid === 'number' && fid > 0 && AUTOPAIR_BRAINS.includes(setup.brain);
 
 /** The absolute address the session is asked for at, on this origin. */
 export const ownerSessionUrl = (
@@ -149,7 +149,9 @@ export const ownerSessionUrl = (
 };
 
 const shownText = (value: unknown, limit = 240): string | null =>
-  typeof value === 'string' && value.trim() ? value.trim().slice(0, limit) : null;
+  typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, limit)
+    : null;
 
 /** The sentence to show for a failure: the service's own, else the fallback. */
 export const autopairSentence = (
@@ -213,7 +215,10 @@ export const openOwnerSession = async ({
   try {
     response = await fetchImpl(url ?? ownerSessionUrl(), {
       method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
       body: JSON.stringify({
         proof,
         agent: { name: setup.agentName, brain: autopairBrain(setup) },

@@ -486,7 +486,6 @@ export {
 };
 export type {
   SiwfCompletion,
-  SiwfProof,
   SiwfRelayChannel,
   SiwfRelayStatus,
   SiwfRelayStatusCompleted,

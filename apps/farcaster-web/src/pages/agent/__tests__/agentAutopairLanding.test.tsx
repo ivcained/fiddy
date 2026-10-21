@@ -12,7 +12,13 @@
  * sentence — and the URL field does not exist until they ask for it.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,7 +32,9 @@ const probeAgentService = vi.fn();
 
 vi.mock('~/lib/agentService', async () => {
   const actual =
-    await vi.importActual<typeof import('~/lib/agentService')>('~/lib/agentService');
+    await vi.importActual<typeof import('~/lib/agentService')>(
+      '~/lib/agentService',
+    );
   return {
     ...actual,
     listAgents: (...args: unknown[]) => listAgents(...args),
@@ -68,18 +76,26 @@ vi.mock('~/components/page/Page', () => ({
 
 vi.mock('~/components/links/Link', async () => {
   const { routes } =
-    await vi.importActual<typeof import('~/constants/routes')>('~/constants/routes');
+    await vi.importActual<typeof import('~/constants/routes')>(
+      '~/constants/routes',
+    );
   return {
-    Link: ({ to, children }: { to: keyof typeof routes; children?: React.ReactNode }) =>
-      React.createElement('a', { href: routes[to].path }, children),
+    Link: ({
+      to,
+      children,
+    }: {
+      to: keyof typeof routes;
+      children?: React.ReactNode;
+    }) => React.createElement('a', { href: routes[to].path }, children),
   };
 });
 
 vi.mock('~/utils/errorUtils', () => ({ trackError: () => undefined }));
 
 vi.mock('~/lib/agentSchedules', async () => {
-  const actual =
-    await vi.importActual<typeof import('~/lib/agentSchedules')>('~/lib/agentSchedules');
+  const actual = await vi.importActual<typeof import('~/lib/agentSchedules')>(
+    '~/lib/agentSchedules',
+  );
   return {
     ...actual,
     loadSchedules: async () => [],
@@ -123,7 +139,8 @@ const OPEN_REPLY = {
   provisioning: {
     open: false,
     code: 'HATCH_NOT_ENABLED',
-    message: 'Your agent is not awake on this service yet — starting one is not open here.',
+    message:
+      'Your agent is not awake on this service yet — starting one is not open here.',
   },
 };
 
@@ -150,9 +167,9 @@ beforeEach(() => {
   window.sessionStorage.clear();
   agentSession.session = null;
   agentSession.pair.mockClear();
-  listAgents.mockReset().mockResolvedValue([
-    { id: 'a1', name: 'Flo', status: 'running' },
-  ]);
+  listAgents
+    .mockReset()
+    .mockResolvedValue([{ id: 'a1', name: 'Flo', status: 'running' }]);
   fetchHatchQuote
     .mockReset()
     .mockResolvedValue({ hatchEnabled: false, certificate: null });
@@ -224,7 +241,8 @@ describe('a signed-in owner with the built-in brain', () => {
         {
           ok: false,
           code: 'OWNER_SESSION_NOT_OPEN',
-          message: 'This service cannot start your agent yet. Nothing was changed.',
+          message:
+            'This service cannot start your agent yet. Nothing was changed.',
         },
         503,
       ),
@@ -234,7 +252,9 @@ describe('a signed-in owner with the built-in brain', () => {
 
     // Said, in the header, in one sentence — with the name they chose.
     expect(
-      await screen.findByText('This service cannot start your agent yet. Nothing was changed.'),
+      await screen.findByText(
+        'This service cannot start your agent yet. Nothing was changed.',
+      ),
     ).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Flo' })).toBeTruthy();
     expect(screen.getByText('Not awake yet')).toBeTruthy();
@@ -244,12 +264,16 @@ describe('a signed-in owner with the built-in brain', () => {
     expect(screen.getByText(TRIAL_EXCHANGE.message)).toBeTruthy();
     expect(screen.queryByLabelText('Session token')).toBeNull();
     expect(document.querySelector('input[type="url"]')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Hatch your Fiddy · soon' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Hatch your Fiddy · soon' }),
+    ).toBeNull();
     expect(agentSession.pair).not.toHaveBeenCalled();
 
     // The pairing form is one disclosure away, for a self-hoster.
     fireEvent.click(
-      screen.getByRole('button', { name: 'I run my own agent service — pair it' }),
+      screen.getByRole('button', {
+        name: 'I run my own agent service — pair it',
+      }),
     );
     expect(await screen.findByLabelText('Session token')).toBeTruthy();
   });
@@ -270,7 +294,9 @@ describe('a signed-in owner with the built-in brain', () => {
 
     render(<AgentPage />);
 
-    expect(await screen.findByText('Your agent, on your accounts')).toBeTruthy();
+    expect(
+      await screen.findByText('Your agent, on your accounts'),
+    ).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(agentSession.pair).not.toHaveBeenCalled();
   });

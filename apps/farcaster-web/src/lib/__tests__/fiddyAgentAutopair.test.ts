@@ -12,15 +12,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AGENT_SERVICE_URL } from '~/lib/agentService';
-import { defaultFiddySetup, type FiddySetup } from '~/lib/fiddySetup';
 import {
   AUTOPAIR_SENTENCES,
   autopairBrain,
-  autopairSentence,
   openOwnerSession,
   ownerSessionUrl,
   shouldAutopair,
 } from '~/lib/fiddyAgentAutopair';
+import { defaultFiddySetup, type FiddySetup } from '~/lib/fiddySetup';
 
 const setupWith = (patch: Partial<FiddySetup> = {}): FiddySetup => ({
   ...defaultFiddySetup(),
@@ -77,8 +76,12 @@ afterEach(() => {
 
 describe('which setups are paired automatically', () => {
   it('pairs the brains Fiddy provides, for a signed-in account', () => {
-    expect(shouldAutopair({ setup: setupWith({ brain: 'fiddy' }), fid: 4242 })).toBe(true);
-    expect(shouldAutopair({ setup: setupWith({ brain: 'surp' }), fid: 4242 })).toBe(true);
+    expect(
+      shouldAutopair({ setup: setupWith({ brain: 'fiddy' }), fid: 4242 }),
+    ).toBe(true);
+    expect(
+      shouldAutopair({ setup: setupWith({ brain: 'surp' }), fid: 4242 }),
+    ).toBe(true);
   });
 
   it.each([
@@ -96,7 +99,9 @@ describe('which setups are paired automatically', () => {
   });
 
   it('describes the chosen brain the way the route takes it', () => {
-    expect(autopairBrain(setupWith({ brain: 'fiddy' }))).toEqual({ kind: 'default' });
+    expect(autopairBrain(setupWith({ brain: 'fiddy' }))).toEqual({
+      kind: 'default',
+    });
     expect(autopairBrain(setupWith({ brain: 'surp' }))).toEqual({
       kind: 'preset',
       presetId: 'surp',
@@ -154,49 +159,71 @@ describe('reading the service’s answer', () => {
   });
 
   it('sends the proof and the chosen brain, and nothing else', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse(reply()));
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(reply()));
     await openOwnerSession({
       proof,
       setup: setupWith({ brain: 'surp' }),
       fetchImpl: fetchImpl as unknown as typeof fetch,
       url: 'https://fiddy.fun/api/fiddy/owner-session',
     });
-    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body ?? '{}')) as {
+    const body = JSON.parse(
+      String(fetchImpl.mock.calls[0]?.[1]?.body ?? '{}'),
+    ) as {
       proof: unknown;
       agent: { name: string; brain: unknown };
     };
     expect(body.proof).toEqual(proof);
-    expect(body.agent).toEqual({ name: 'Flo', brain: { kind: 'preset', presetId: 'surp' } });
+    expect(body.agent).toEqual({
+      name: 'Flo',
+      brain: { kind: 'preset', presetId: 'surp' },
+    });
   });
 
   it('falls back to the built-in service when the answer names no usable address', async () => {
     const outcome = await ask(
       jsonResponse(reply({ session: { baseUrl: 'http://localhost:3000' } })),
     );
-    expect(outcome).toMatchObject({ ok: true, session: { baseUrl: DEFAULT_AGENT_SERVICE_URL } });
+    expect(outcome).toMatchObject({
+      ok: true,
+      session: { baseUrl: DEFAULT_AGENT_SERVICE_URL },
+    });
   });
 
   it.each([
     ['no session at all', reply({ session: null })],
     ['a token too short to be one', reply({ session: { token: 'tiny' } })],
-    ['a token with whitespace', reply({ session: { token: 'a token with spaces' } })],
+    [
+      'a token with whitespace',
+      reply({ session: { token: 'a token with spaces' } }),
+    ],
   ])('refuses %s as malformed rather than pairing it', async (_label, body) => {
     const outcome = await ask(jsonResponse(body));
     expect(outcome).toMatchObject({ ok: false, code: 'MALFORMED' });
-    expect(outcome.ok === false && outcome.sentence).toBe(AUTOPAIR_SENTENCES.MALFORMED);
+    expect(outcome.ok === false && outcome.sentence).toBe(
+      AUTOPAIR_SENTENCES.MALFORMED,
+    );
   });
 
   it('shows the service’s own sentence for a refusal', async () => {
-    const sentence = 'Farcaster’s own registry could not be reached, so your agent was not started.';
+    const sentence =
+      'Farcaster’s own registry could not be reached, so your agent was not started.';
     const outcome = await ask(
-      jsonResponse({ ok: false, code: 'IDENTITY_CHAIN_UNREACHABLE', message: sentence }, 503),
+      jsonResponse(
+        { ok: false, code: 'IDENTITY_CHAIN_UNREACHABLE', message: sentence },
+        503,
+      ),
     );
-    expect(outcome).toMatchObject({ ok: false, code: 'IDENTITY_CHAIN_UNREACHABLE' });
+    expect(outcome).toMatchObject({
+      ok: false,
+      code: 'IDENTITY_CHAIN_UNREACHABLE',
+    });
     expect(outcome.ok === false && outcome.sentence).toBe(sentence);
   });
 
   it('falls back to its own sentence when the refusal carries none', async () => {
-    const outcome = await ask(jsonResponse({ ok: false, code: 'OWNER_SESSION_NOT_OPEN' }, 503));
+    const outcome = await ask(
+      jsonResponse({ ok: false, code: 'OWNER_SESSION_NOT_OPEN' }, 503),
+    );
     expect(outcome.ok === false && outcome.sentence).toBe(
       AUTOPAIR_SENTENCES.OWNER_SESSION_NOT_OPEN,
     );
@@ -205,25 +232,27 @@ describe('reading the service’s answer', () => {
   it('says nothing was changed when the service cannot be reached at all', async () => {
     const outcome = await ask(new Error('Failed to fetch'));
     expect(outcome).toMatchObject({ ok: false, code: 'UNREACHABLE' });
-    expect(outcome.ok === false && outcome.sentence).toMatch(/Nothing was changed/);
+    expect(outcome.ok === false && outcome.sentence).toMatch(
+      /Nothing was changed/,
+    );
   });
 
   it('treats a body it cannot read as malformed', async () => {
-    const outcome = await ask(
-      ({
-        ok: true,
-        status: 200,
-        json: async () => {
-          throw new Error('not json');
-        },
-      }) as unknown as Response,
-    );
+    const outcome = await ask({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error('not json');
+      },
+    } as unknown as Response);
     expect(outcome).toMatchObject({ ok: false, code: 'MALFORMED' });
   });
 
   it('asks for nothing at all without a proof to prove with', async () => {
     const outcome = await ask(jsonResponse(reply()), { proof: null as never });
     expect(outcome).toMatchObject({ ok: false, code: 'NO_PROOF' });
-    expect(outcome.ok === false && outcome.sentence).toMatch(/one more sign-in/);
+    expect(outcome.ok === false && outcome.sentence).toMatch(
+      /one more sign-in/,
+    );
   });
 });

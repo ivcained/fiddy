@@ -20,11 +20,11 @@ import {
   buildLocalAuthToken,
   buildLocalOnboardingState,
   createSiwfChannel,
+  saveSiwfProof,
   SiwfRelayError,
   SiwfTimeoutError,
   verifySiwfCompletion,
   watchSiwfChannel,
-  saveSiwfProof,
 } from '~/lib/siwfSession';
 import { logError } from '~/utils/logUtils';
 import { setItem } from '~/utils/storageUtils';

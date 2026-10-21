@@ -42,9 +42,9 @@ export const AgentPairPanel = memo<AgentPairPanelProps>(
           Pair your own agent service
         </h1>
         <p className="mb-5 text-sm text-muted">
-          For self-hosters: paste the address of the service that runs your agent
-          and a session token for it. Both stay in this browser; the agent keeps
-          its own keys.
+          For self-hosters: paste the address of the service that runs your
+          agent and a session token for it. Both stay in this browser; the agent
+          keeps its own keys.
         </p>
 
         <form
