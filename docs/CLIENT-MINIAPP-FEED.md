@@ -92,8 +92,9 @@ inside the follow graph but past the end of the newest-first feed the client
 renders. Its value here is that it is a second real `fc:miniapp` cast from a
 different host, so the cast-page reading is not a one-off property of one site.
 
-Probes: `apps/farcaster-web/scripts/verify-miniapp-in-feed.mjs` and
-`scripts/probe-miniapp-embed-cors.mjs`.
+Probes: `apps/farcaster-web/scripts/verify-miniapp-in-feed.mjs` (the evidence
+run), `scripts/probe-miniapp-embed-cors.mjs` (the browser read of the two real
+miniapp pages) and `scripts/shot-miniapp-in-feed.mjs` (the picture, §2.4).
 
 ```
 SNAPCHAIN_HTTP_URL=https://<node> npx vite --port 5183
@@ -101,6 +102,11 @@ MINIAPP_SERVER=https://localhost:5183 \
 MINIAPP_SERVED_HEAD=<sha of the tree the server serves> \
 MINIAPP_NODE=https://<node> \
   node scripts/verify-miniapp-in-feed.mjs
+
+# the picture (§2.4) — same server, same head, scrolls the fixture into view
+MINIAPP_SERVER=https://localhost:5183 \
+MINIAPP_SHOT_DIR=<dir> \
+  node scripts/shot-miniapp-in-feed.mjs
 ```
 
 ---
@@ -113,8 +119,8 @@ words:
 
 | surface | what the client did |
 | --- | --- |
-| `/` — the default **Home** tab | refuses by name, in its own console: `HandledFetchError: getExploreFeed 501 - explore is a ranking, and ranking is an indexer's job`. The ranked feed is not served, and the column sits on a spinner until the reader presses **Following** (the desktop column carried the same sentence as its own text, verbatim). |
-| `/` — the **Following** tab | **the fixture cast is in the column at both viewports** — its text and its hash `0x8b3019a85b…` are both in the feed's cast list (`fixtureTextOnScreen=true`, `mobile-390` and `desktop-1440`). |
+| `/` — the ranked feed's refusal | measured, in the client's own console: `HandledFetchError: getExploreFeed 501 - explore is a ranking, and ranking is an indexer's job`; the desktop column carries the same sentence as its own text, verbatim. The ranked feed is not served on a read node. |
+| `/` — the column itself | **the fixture cast is in the column at both viewports**: its text, and its hash `0x8b3019a85b…` in the feed's cast list (`fixtureTextOnScreen=true` at `mobile-390` and `desktop-1440`). Measured with `followingTabClicked=false` — the probe's tab locator (`a[title="Following"]`) no longer matches this build, and that turned out not to matter: the column carries the follows' casts without it. (The previous revision of this doc said the column "sits on a spinner until the reader presses **Following**". That is not what this run shows, and the row is corrected.) |
 | the fixture cast's card in the feed | **a mini-app card DOES render**, at both viewports, identically: one image, `https://beep.works/images/beeper-og-0326.png`, and one control named **`Open Beeper`**. No iframe (`iframes=0`). |
 | — but not the page's own words | the card does **not** carry the page's declared art (`…/send/cmi8…/opengraph-image`) nor the page's declared button (`Beep @topp-airdrop`). Both checks fail at both viewports, with the offending sources printed next to them. |
 | the cast's own page, fresh fixture | the card there carries the page's **own** descriptor: image `https://beep.works/send/cmi8mtgn500afiolnh4qelc53/opengraph-image` and button `Beep @topp-airdrop` — both exactly the page's `fc:miniapp` values (§1). No iframe. |
@@ -191,6 +197,19 @@ arrival slice exists.
   this card measured the feed's own card. The catalog/relevant reads are visible
   in the same report (`frame/relevant/` ×8 in the arrival window) but their
   surfaces are not part of this card's question.
+
+### 2.4 The pictures, and what each one is
+
+The run writes screenshots at both widths, and one of them is worth description
+rather than a caption, because the last review of this card was right about it:
+
+| file (all in this card's attachments) | what it is |
+| --- | --- |
+| `miniapp-in-feed.txt` | the run's report, verbatim. Every number in §2 comes from it. |
+| `mobile-390-feed-fixture-in-view.png`, `desktop-1440-feed-fixture-in-view.png` | **the picture the card asked for**: the fixture cast scrolled into the middle of the viewport with its mini-app card under it (the app's art and the control reading `Open Beeper`), the shell's own "Let Fiddy post as you?" sheet dismissed first. Taken by `scripts/shot-miniapp-in-feed.mjs`, a companion to the probe, on the **same head and the same dev server** (`b3bdd7c`, `https://localhost:5183`) — because the probe's own feed screenshot lands on the top of the column with that sheet over it. That is measured, and it is why the companion exists. |
+| `mobile-390-3-cast-detail.png`, `desktop-1440-3-cast-detail.png` (from the run) | the cast's own page, rendered, with the card carrying the page's **own** art and its own button `Beep @topp-airdrop` — the difference §2.1 explains. The shell's sheet covers the lower half of the mobile one. |
+| `desktop-1440-4-aged-fixture-detail.png` (from the run) | the aged second fixture's page: a rendered cast with a card (that page's declared image) and a control reading `Join The Firm`. |
+| `mobile-390-2-feed.png` (from the run) | **the top of the column only** — the fixture's row is below the fold and the shell's sheet covers the lower half. It is attached because it is what the run's own feed screenshot is; it is **not** a picture of the card, and the fixture's presence at that moment is the report's `fixtureTextOnScreen=true` rather than this image. |
 
 ---
 
