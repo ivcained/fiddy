@@ -101,7 +101,10 @@ export interface EmbedKindResolverOptions {
   /** A URL that could not be answered is not asked again until this has passed. */
   retryAfterMs?: number;
   /** The last-resort probe. Defaults to the browser's `Image()`. */
-  imageProbe?: (url: string, timeoutMs: number) => Promise<EmbedKind | undefined>;
+  imageProbe?: (
+    url: string,
+    timeoutMs: number,
+  ) => Promise<EmbedKind | undefined>;
   /** Clock seam for tests. */
   now?: () => number;
 }

@@ -50,6 +50,11 @@ import {
 } from 'farcaster-node-client';
 
 import {
+  createEmbedKindResolver,
+  type EmbedKindAnswer,
+  type EmbedKindResolver,
+} from './embedKinds';
+import {
   apiCastFeedItemFromNode,
   apiCastFromNode,
   apiUserFromNode,
@@ -58,11 +63,6 @@ import {
   floorCount,
   NodeCount,
 } from './fromNode';
-import {
-  createEmbedKindResolver,
-  type EmbedKindAnswer,
-  type EmbedKindResolver,
-} from './embedKinds';
 
 /** Raised when the node genuinely cannot answer a request the app made. */
 export class NodeCannotAnswerError extends Error {

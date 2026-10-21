@@ -23,8 +23,8 @@
  * (`~/pages/settingsNode`).
  */
 
-export * from './fromNode';
 export * from './embedKinds';
+export * from './fromNode';
 export * from './hostedRoutes';
 export * from './localDrafts';
 export * from './mediaUpload';

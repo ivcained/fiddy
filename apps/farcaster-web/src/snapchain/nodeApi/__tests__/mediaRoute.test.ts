@@ -12,14 +12,14 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { offlineEmbedKinds } from './fakeEmbedKinds';
-
 import {
   classifyHostedRequest,
   createNodeBackedFetch,
   isOwnMediaUploadUrl,
   mediaUploadUrl,
 } from '~/snapchain/nodeApi';
+
+import { offlineEmbedKinds } from './fakeEmbedKinds';
 
 const MEDIA_ENV = { VITE_FIDDY_MEDIA_URL: 'http://localhost:3217' };
 

@@ -47,7 +47,7 @@ import type {
   NodeUserDataBody,
 } from 'farcaster-node-client';
 
-import { embedKindFromExtension, type EmbedKindAnswer } from './embedKinds';
+import { type EmbedKindAnswer, embedKindFromExtension } from './embedKinds';
 
 /** Zero-safe count with the caveat that produced it. */
 export interface NodeCount {

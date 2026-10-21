@@ -24,9 +24,14 @@ import {
 const CLOUDFLARE_PHOTO =
   'https://imagedelivery.net/BXluQx4ige9GuW0la56BHw/a62d038c-974d-4c48-a658-c764f4205c00/original';
 
+/**
+ * A response with a content type (and, when it matters, a status). `Response.ok`
+ * follows from the status: a 404 or a 405 built here is already `ok === false`,
+ * so there is nothing else to say about it.
+ */
 const responseWith = (
   contentType: string | null,
-  { ok = true, status = 200 }: { ok?: boolean; status?: number } = {},
+  { status = 200 }: { status?: number } = {},
 ): Response =>
   new Response(null, {
     status,
@@ -92,7 +97,9 @@ describe('a content type is an answer when it is one', () => {
   it('maps media types, with parameters and in any case', () => {
     expect(embedKindFromContentType('image/jpeg')).toBe('image');
     expect(embedKindFromContentType('IMAGE/PNG')).toBe('image');
-    expect(embedKindFromContentType('image/webp; charset=binary')).toBe('image');
+    expect(embedKindFromContentType('image/webp; charset=binary')).toBe(
+      'image',
+    );
     expect(embedKindFromContentType('video/mp4')).toBe('video');
   });
 
@@ -108,10 +115,12 @@ describe('a content type is an answer when it is one', () => {
 describe('a probe one URL at a time', () => {
   it('asks with HEAD and remembers the answer', async () => {
     const calls: { url: string; method: string }[] = [];
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      calls.push({ url: String(input), method: init?.method ?? 'GET' });
-      return responseWith('image/jpeg');
-    }) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ url: String(input), method: init?.method ?? 'GET' });
+        return responseWith('image/jpeg');
+      },
+    ) as unknown as typeof fetch;
 
     const resolver = testResolver(fetchImpl);
     expect(resolver.kindOf(CLOUDFLARE_PHOTO)).toBeUndefined();
@@ -129,7 +138,7 @@ describe('a probe one URL at a time', () => {
         const method = init?.method ?? 'GET';
         methods.push(method);
         if (method === 'HEAD') {
-          return responseWith(null, { ok: false, status: 405 });
+          return responseWith(null, { status: 405 });
         }
         return responseWith('video/mp4');
       },
@@ -155,7 +164,10 @@ describe('a probe one URL at a time', () => {
     });
     await resolver.classify([CLOUDFLARE_PHOTO]);
 
-    expect(imageProbe).toHaveBeenCalledWith(CLOUDFLARE_PHOTO, expect.any(Number));
+    expect(imageProbe).toHaveBeenCalledWith(
+      CLOUDFLARE_PHOTO,
+      expect.any(Number),
+    );
     expect(resolver.kindOf(CLOUDFLARE_PHOTO)).toBe('image');
   });
 
@@ -165,7 +177,9 @@ describe('a probe one URL at a time', () => {
     }) as unknown as typeof fetch;
 
     const resolver = testResolver(fetchImpl);
-    await expect(resolver.classify([CLOUDFLARE_PHOTO])).resolves.toBeUndefined();
+    await expect(
+      resolver.classify([CLOUDFLARE_PHOTO]),
+    ).resolves.toBeUndefined();
     await resolver.settle();
 
     expect(resolver.kindOf(CLOUDFLARE_PHOTO)).toBeUndefined();
@@ -175,7 +189,7 @@ describe('a probe one URL at a time', () => {
 
   it('treats a 404 as no answer rather than as a link', async () => {
     const fetchImpl = vi.fn(async () =>
-      responseWith(null, { ok: false, status: 404 }),
+      responseWith(null, { status: 404 }),
     ) as unknown as typeof fetch;
 
     const resolver = testResolver(fetchImpl);
@@ -188,7 +202,9 @@ describe('a probe one URL at a time', () => {
 
 describe('the cost of asking', () => {
   it('asks each URL once, however many times it is classified', async () => {
-    const fetchImpl = vi.fn(async () => responseWith('image/jpeg')) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () =>
+      responseWith('image/jpeg'),
+    ) as unknown as typeof fetch;
     const resolver = testResolver(fetchImpl);
 
     await resolver.classify([CLOUDFLARE_PHOTO, CLOUDFLARE_PHOTO]);
@@ -319,7 +335,9 @@ describe('remembering across a session (and beyond it)', () => {
       storage: broken,
       imageProbe: async () => undefined,
     });
-    await expect(resolver.classify([CLOUDFLARE_PHOTO])).resolves.toBeUndefined();
+    await expect(
+      resolver.classify([CLOUDFLARE_PHOTO]),
+    ).resolves.toBeUndefined();
     expect(resolver.kindOf(CLOUDFLARE_PHOTO)).toBe('image');
   });
 });

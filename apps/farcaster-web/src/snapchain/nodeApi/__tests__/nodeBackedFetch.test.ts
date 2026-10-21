@@ -16,8 +16,8 @@ import { describe, expect, it } from 'vitest';
 
 import { createNodeBackedFetch } from '~/snapchain/nodeApi';
 
-import { createFixtureNodeFetch, TERMINAL_PAGE_TOKEN } from './fakeNodeFetch';
 import { offlineEmbedKinds } from './fakeEmbedKinds';
+import { createFixtureNodeFetch, TERMINAL_PAGE_TOKEN } from './fakeNodeFetch';
 
 type Json = Record<string, unknown>;
 
