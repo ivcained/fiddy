@@ -113,3 +113,30 @@ back is what the agent API was called with, the surface is a chat with an input
 and no URL or token field, a refusal is the service's own sentence with the name
 still on screen and the conversation still shown, an unreachable service says so
 in one sentence, and the self-hoster's form appears only when asked for.
+
+## Released, and what live shows today
+
+`fiddy.fun` serves `1d993e32c396623a4b15e7b6ee0a30fd2176bd29` (released on
+2026-10-22 with `scripts/release-client.sh`; the served bundle was byte-identical
+to the build, rollback target `5d77be6e…`). The chunk the agent surface lives in
+(`assets/AgentPage-C6C6Fm2n.js`) is byte-identical to the build too, and carries
+the owner-session path, the _"I run my own agent service"_ copy and every
+sentence above.
+
+**The server half is not deployed, and the surface says so.** Written with the
+client: `legitmate-farcaster` main is `70678fa` (PR #3, CI success) — but
+`/opt/fiddy-auth/releases/<sha>` still stops at the staged build, and the live
+vhost has no location for the route. Measured the same day:
+
+```
+curl -X POST https://fiddy.fun/api/fiddy/owner-session
+→ 404, text/html, nginx's own page
+```
+
+So a signed-in owner whose setup names the built-in brain currently sees
+_"The agent service did not answer. Nothing was changed — you can try again, or
+pair your own."_ over the chat and the pre-login conversation: no form, no
+spinner, no invented session. The nginx location `/api/fiddy/trial-chat` needs
+covers this route as well, and `/api/agents/*` needs a proxy or CORS for the
+minted session to be usable afterwards. That decision is the topology card
+(`t_bf774a5b`), which owns it and now carries this measurement.
