@@ -25,7 +25,17 @@
  * like a fact.
  */
 
-import type { ApiCast, ApiFrame, ApiUser } from 'farcaster-client-data';
+import type {
+  ApiCast,
+  ApiFrame,
+  ApiOpenGraphMetadata,
+  ApiUser,
+} from 'farcaster-client-data';
+
+import {
+  type EmbedCard,
+  openGraphFromCard,
+} from '~/snapchain/nodeApi/embedCards';
 
 import { NEYNAR_BASE_URL } from './catalog';
 
@@ -138,6 +148,120 @@ const timestampMs = (value: unknown): number => {
 
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|avif)(\?|$)/i;
 
+/**
+ * What Neynar says a link embed's own page declared.
+ *
+ * Neynar has already read the page, and it hands back what it found: `html` is
+ * the page's own open-graph tags, `frame` is the mini app / frame that page
+ * published, `miniapp` is the newer spelling of the same thing, and `_status`
+ * is how the read went. This is the only place that knowledge exists on a
+ * Neynar read — the protocol stores a bare URL — so an embed that drops it
+ * renders as an empty link card, mini app or not.
+ */
+interface NeynarEmbedHtml {
+  ogUrl?: unknown;
+  ogTitle?: unknown;
+  ogDescription?: unknown;
+  ogSiteName?: unknown;
+  ogImage?: unknown;
+}
+
+interface NeynarEmbedFrame {
+  version?: unknown;
+  title?: unknown;
+  image?: unknown;
+  frames_url?: unknown;
+}
+
+interface NeynarEmbedMetadata {
+  html?: NeynarEmbedHtml | null;
+  frame?: NeynarEmbedFrame | null;
+  miniapp?: NeynarEmbedFrame | null;
+}
+
+/**
+ * Neynar's `ogImage`, which it states either as a URL or as `[{ url }]`.
+ * First usable answer wins; anything else is no answer.
+ */
+const ogImageUrlOf = (value: unknown): string | undefined => {
+  const direct = asString(value);
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const url = ogImageUrlOf(entry);
+      if (url !== undefined) {
+        return url;
+      }
+    }
+    return undefined;
+  }
+  if (value !== null && typeof value === 'object') {
+    return asString((value as { url?: unknown }).url);
+  }
+  return undefined;
+};
+
+/**
+ * A link embed as the page itself declared it: its title, its description, its
+ * picture — and, when the page is a mini app, the card whose button launches
+ * it (`EmbedCard`, so a Neynar read and a node read draw the same card).
+ *
+ * WHAT IT REFUSES TO DO
+ *
+ *   - It never invents a card. No `frame`/`miniapp` in the metadata, no card:
+ *     the embed stays the link it is, rather than a button this client made up.
+ *   - It never puts a broken address in front of a renderer: an image or an
+ *     action that is not `https:` is dropped, and the card falls back to the
+ *     embed's own URL for the action exactly as the hosted API's did.
+ *   - It never states a button's words the page did not: the title is the one
+ *     Neynar read off the page, and when there is none the protocol's own
+ *     name for a nameless button ("Open …") is used, never a marketing line.
+ */
+export const openGraphFromNeynarEmbed = (
+  url: string,
+  metadata: unknown,
+): ApiOpenGraphMetadata => {
+  const meta = (metadata ?? {}) as NeynarEmbedMetadata;
+  const html = meta.html ?? undefined;
+  const frame = meta.miniapp ?? meta.frame ?? undefined;
+
+  const card: EmbedCard = {};
+  const title = asString(html?.ogTitle);
+  if (title !== undefined) {
+    card.title = title;
+  }
+  const description = asString(html?.ogDescription);
+  if (description !== undefined) {
+    card.description = description;
+  }
+  // The mini app's own art wins over the page's og:image: for an app, the card
+  // is the app's picture, and the two are usually the same file anyway.
+  const image = httpsUrlOf(frame?.image) ?? httpsUrlOf(ogImageUrlOf(html?.ogImage));
+  if (image !== undefined) {
+    card.imageUrl = image;
+  }
+  const actionUrl = httpsUrlOf(frame?.frames_url) ?? httpsUrlOf(url);
+  if (image !== undefined && actionUrl !== undefined && frame !== undefined) {
+    card.miniApp = {
+      imageUrl: image,
+      title: asString(frame.title) ?? `Open ${actionUrl}`,
+      actionUrl,
+    };
+  }
+
+  const openGraph = openGraphFromCard(
+    url,
+    Object.keys(card).length > 0 ? card : undefined,
+  );
+  const domain = asString(html?.ogSiteName) ?? hostOf(url);
+  if (domain !== undefined) {
+    openGraph.domain = domain;
+  }
+  return openGraph;
+};
+
 /** Neynar's `embeds` array as the fork's `ApiCastEmbeds`. */
 const embedsFromNeynar = (embeds: unknown): ApiCast['embeds'] => {
   if (!Array.isArray(embeds)) {
@@ -149,11 +273,15 @@ const embedsFromNeynar = (embeds: unknown): ApiCast['embeds'] => {
     sourceUrl: string;
     alt: string;
   }[] = [];
-  const urls: { type: 'url'; openGraph: { url: string } }[] = [];
+  const urls: { type: 'url'; openGraph: ApiOpenGraphMetadata }[] = [];
   const quotes: unknown[] = [];
 
   for (const embed of embeds) {
-    const record = embed as { url?: unknown; cast?: unknown } | null;
+    const record = embed as {
+      url?: unknown;
+      cast?: unknown;
+      metadata?: unknown;
+    } | null;
     const url = asString(record?.url);
     if (url === undefined) {
       if (record?.cast) {
@@ -164,7 +292,12 @@ const embedsFromNeynar = (embeds: unknown): ApiCast['embeds'] => {
     if (IMAGE_EXTENSIONS.test(url)) {
       images.push({ type: 'image', url, sourceUrl: url, alt: '' });
     } else {
-      urls.push({ type: 'url', openGraph: { url } });
+      // The page's own words, when Neynar read them: the title, the picture,
+      // and — for a mini app — the card and button that launch it.
+      urls.push({
+        type: 'url',
+        openGraph: openGraphFromNeynarEmbed(url, record?.metadata),
+      });
     }
   }
 
