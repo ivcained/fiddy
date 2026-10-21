@@ -45,8 +45,19 @@ because the probe's own text is part of the evidence: the run printed one check
 label as `the card carries an image from the app's own host (undefined)` — the
 interpolation read `FIXTURE.host`, a field the fixture object does not carry.
 That label is fixed in the committed probe and **nothing else changed**: same
-predicates, same thresholds, same assertions, same report. A reviewer can confirm
-it with `git diff` — it is a string inside one template literal.
+predicates, same thresholds, same assertions, same report. **It cannot be
+confirmed with `git diff`**, and an earlier revision of this doc said it could: the
+working copy the probe ran from was never committed and is gone, and the only diff
+on offer for that file (`b3bdd7c..a9f7555`) is `9cc0ed1`'s 240-line probe rewrite,
+which reads as the opposite of "one string". It was confirmed the only way it can
+be — by **re-running the committed probe** on the same head and the same server and
+diffing its output against the attached report (review round 2; its report is in
+this card's comment thread). The re-run prints `(beep.works)` where the attached
+report prints `(undefined)`, and every predicate, threshold, count and check
+outcome is identical: `5/9 checks passed`, the same four negative results, the
+arrival slice number for number. That re-run is the reproducible check. What the
+run that produced *this* report did with the label is **not recoverable from git**,
+and the doc says so rather than implying a `git diff` that cannot be run.
 
 The probe's request table now has three slices — **arrival** (the client arriving:
 bundler plus the feed's warm-up render), **feed** (the measured pass) and
@@ -207,9 +218,15 @@ rather than a caption, because the last review of this card was right about it:
 | --- | --- |
 | `miniapp-in-feed.txt` | the run's report, verbatim. Every number in §2 comes from it. |
 | `mobile-390-feed-fixture-in-view.png`, `desktop-1440-feed-fixture-in-view.png` | **the picture the card asked for**: the fixture cast scrolled into the middle of the viewport with its mini-app card under it (the app's art and the control reading `Open Beeper`), the shell's own "Let Fiddy post as you?" sheet dismissed first. Taken by `scripts/shot-miniapp-in-feed.mjs`, a companion to the probe, on the **same head and the same dev server** (`b3bdd7c`, `https://localhost:5183`) — because the probe's own feed screenshot lands on the top of the column with that sheet over it. That is measured, and it is why the companion exists. |
-| `mobile-390-3-cast-detail.png`, `desktop-1440-3-cast-detail.png` (from the run) | the cast's own page, rendered, with the card carrying the page's **own** art and its own button `Beep @topp-airdrop` — the difference §2.1 explains. The shell's sheet covers the lower half of the mobile one. |
-| `desktop-1440-4-aged-fixture-detail.png` (from the run) | the aged second fixture's page: a rendered cast with a card (that page's declared image) and a control reading `Join The Firm`. |
+| `mobile-390-3-cast-detail.png`, `desktop-1440-3-cast-detail.png` (from the run) | the cast's own page, rendered, with the card's **button** carrying the page's own words, `Beep @topp-airdrop` — the difference §2.1 explains. The card's **image area is an unpainted flat grey rectangle in both**: `rgb(56, 56, 56)`, measured on the attached files just now — the mobile one's image area is a single distinct value (`250 × 82` sample, no artwork at all), and the desktop one's is 92% that one grey plus 7% page background caught by the sample box's edges, with **not one pixel brighter than 90 on any channel**. The descriptor *was* there: the report's own DOM row for that pass carries the page's `…/send/cmi8…/opengraph-image` src. So these two pictures show the shutter firing before the image painted, not a card that failed to build — and the next row is the control, from the same run and the same surface, where the art had painted. The shell's sheet covers the lower half of the mobile one. |
+| `desktop-1440-4-aged-fixture-detail.png` (from the run) | the aged second fixture's page: a rendered cast with a card whose image area **has** painted — measured on the attached file: 11,118 distinct colours and 60% of that area brighter than 90 on some channel, i.e. real art — carrying that page's declared image, plus a control reading `Join The Firm`. It is the control for the row above: same surface, same run, art painted here. |
 | `mobile-390-2-feed.png` (from the run) | **the top of the column only** — the fixture's row is below the fold and the shell's sheet covers the lower half. It is attached because it is what the run's own feed screenshot is; it is **not** a picture of the card, and the fixture's presence at that moment is the report's `fixtureTextOnScreen=true` rather than this image. |
+
+Attachment names: the card's store kept the previous attempt's files and suffixed
+the new ones, so four of these arrive as `miniapp-in-feed_1.txt`,
+`mobile-390-3-cast-detail_1.png`, `desktop-1440-3-cast-detail_1.png` and
+`mobile-390-2-feed_1.png`. The names in the table are the ones the probe and this
+doc use; size is the quickest tell between an old file and this run's.
 
 ---
 
@@ -329,7 +346,7 @@ The policy this client holds, and the reasons:
      notifications) needs media;
    - and the loop is closeable honestly: the iframe's `allow="microphone; camera;
      …"` is a **dead grant** today — it asks for what the parent already refuses.
-     A follow-up card (`t_*`, filed from this card) removes `microphone; camera`
+     A follow-up card (`t_f5143ed9`, filed from this card) removes `microphone; camera`
      from that attribute, keeping `clipboard-write` (copy buttons need it), and
      puts the sentence in the settings copy: *"Mini apps run on their own site, in
      a sandbox. They cannot use your camera or microphone, and they cannot see
@@ -360,13 +377,26 @@ The policy this client holds, and the reasons:
   launch) is card `t_93fa5c59`'s, on `main` at 22:54 (`5d90216`, `ecc6127`,
   `9cd530e`, `55a4ddd`). This card measures it, decides the shape and writes the
   policy — it does not re-implement any of it.
-- **Not touched:** `docs/CLIENT-PARITY.md`. Card `t_08e02638` owns that file and
-  its miniapp row; the row is left exactly as it is (`re-measure`) so that card
-  can be the one that closes it. This doc deliberately does not edit it, not even
-  to point at this measurement.
-- **Filed from this card:** the iframe-grant + settings-copy follow-up of §4 item
-  3 (removing the dead `microphone; camera` grant and saying in the copy that
-  miniapps cannot use them).
+- **Not touched:** `docs/CLIENT-PARITY.md` — `git diff main..a9f7555 --
+  docs/CLIENT-PARITY.md` is empty. Card `t_08e02638` owns that file and its
+  miniapp rows, so this doc does not edit it, not even to point at this
+  measurement. What the file actually says today, **quoted rather than
+  paraphrased**, because an earlier revision of this doc paraphrased it wrongly —
+  the cells, verbatim:
+  - line 109, `Mini app / frame rendering in feed`, status cell: `renders (mock) —
+    unverified with a live frame`; next-step cell: `verify once the feed is
+    node-backed`;
+  - line 108, `Mini apps — browse`, status cell: `gated; renders (mock, 21 calls)`;
+    next-step cell: `NEEDS-NODE for the catalog; launching is client-side`.
+  §2 of this doc is what can fill line 109's `verify once the feed is node-backed`
+  cell in; making that edit is `t_08e02638`'s, not this card's. **The correction:**
+  this doc used to say the row is left as it is "(`re-measure`)" — the word
+  `re-measure` appears **nowhere** in `CLIENT-PARITY.md`. It is this card's own
+  body's shorthand for "re-do the measurement", and the cells quoted above are the
+  file's real words.
+- **Filed from this card:** `t_f5143ed9` — the iframe-grant + settings-copy
+  follow-up of §4 item 3 (removing the dead `microphone; camera` grant and saying
+  in the copy that miniapps cannot use them).
 - **Not verified, and said so above:** the launch itself; the Permissions-Policy
   deduction in a real browser; the aged fixture's `Join The Firm` source; the
   no-index-key case; and the button-words difference between the feed and the cast
