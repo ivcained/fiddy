@@ -306,7 +306,7 @@ const SealedCastsSurface: FC = () => {
         )}
       </section>
 
-      <section className="fiddy-sealed__block" data-sealed="message">
+      <section className="fiddy-sealed__block" data-sealed="message-block">
         <span className="fiddy-sealed__label">Your message</span>
         <textarea
           className="fiddy-sealed__field"
