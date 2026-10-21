@@ -36,6 +36,7 @@ import { PrivyRoot } from '~/providers/PrivyRoot';
 import { wagmiConfig } from '~/utils/wagmi';
 
 import { FullScreenErrorBoundary } from './errors/FullScreenErrorBoundary';
+import { MiniAppAutoSignIn } from './session/MiniAppAutoSignIn';
 import { SnapWindowErrorListenerInstaller } from './SnapWindowErrorListenerInstaller';
 
 const AuthGatedBlockedDomainsProvider: FC<{ children: ReactNode }> = ({
@@ -167,6 +168,13 @@ const App: FC = () => {
                                         <ThemeProvider>
                                           <AnalyticsProvider>
                                             <SnapWindowErrorListenerInstaller />
+                                            {/* Inside a Farcaster Mini App host, the
+                                                host already knows who this is:
+                                                this signs in from its own context
+                                                instead of showing a QR code the
+                                                phone could not scan. Does nothing
+                                                anywhere else. */}
+                                            <MiniAppAutoSignIn />
                                             <InteractedSnapUrlsWebProvider>
                                               <PubSubProvider>
                                                 <VideoPlayStatusProvider>
