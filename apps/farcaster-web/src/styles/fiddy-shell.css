@@ -557,6 +557,155 @@ html.fiddy-dark-shell body {
   background: color-mix(in oklab, var(--fiddy-accent), #fff 12%);
 }
 
+/* The action that has just become the point of the screen: the waiting quiet
+   before it, then a ring, so it is unmistakably where to go — and it is only
+   worn after something the visitor did, never on arrival. */
+.fiddy-primary-btn-hot {
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--fiddy-accent), transparent 55%),
+    0 10px 30px color-mix(in oklab, var(--fiddy-accent), transparent 70%);
+  animation: fiddy-primary-invite 1.6s ease-out 1;
+}
+
+@keyframes fiddy-primary-invite {
+  0% {
+    transform: scale(0.985);
+  }
+  60% {
+    transform: scale(1.012);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ---------- the one trial message ----------
+   A small conversation, not a chat app: one prompt line, one input with its
+   send button, three openers, and the answer in place of the input. */
+
+.fiddy-trial {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--fiddy-glass), #fff 6%);
+  border: 1px solid var(--fiddy-glass-border);
+}
+
+.fiddy-trial-label {
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--fiddy-ink);
+}
+
+.fiddy-trial-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.fiddy-trial-row .fiddy-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fiddy-trial-send {
+  flex: none;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--fiddy-accent);
+  color: var(--fiddy-on-accent);
+  font-weight: 800;
+  font-size: 13.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fiddy-trial-send svg {
+  width: 15px;
+  height: 15px;
+}
+
+.fiddy-trial-send:disabled {
+  opacity: 0.45;
+}
+
+.fiddy-trial-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fiddy-trial-chip {
+  border: 1.5px solid var(--fiddy-glass-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fiddy-ink);
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 8px 12px;
+  min-height: 34px;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.fiddy-trial-chip:hover:not(:disabled) {
+  border-color: var(--fiddy-accent-deep);
+  background: color-mix(in oklab, var(--fiddy-accent), transparent 90%);
+}
+
+.fiddy-trial-chip:disabled {
+  opacity: 0.5;
+}
+
+.fiddy-trial-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fiddy-trial-bubble {
+  margin: 0;
+  padding: 10px 13px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 34ch;
+}
+
+.fiddy-trial-bubble-me {
+  align-self: flex-end;
+  background: color-mix(in oklab, var(--fiddy-accent), transparent 78%);
+  color: var(--fiddy-ink);
+  border-bottom-right-radius: 6px;
+}
+
+.fiddy-trial-bubble-agent {
+  align-self: flex-start;
+  background: color-mix(in oklab, var(--fiddy-glass), #fff 14%);
+  border: 1px solid var(--fiddy-glass-border);
+  color: var(--fiddy-ink);
+  border-bottom-left-radius: 6px;
+  max-width: 38ch;
+}
+
+.fiddy-trial-note {
+  margin: 0;
+  color: var(--fiddy-ink-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.fiddy-trial-refusal {
+  color: var(--fiddy-ink);
+}
+
 .fiddy-secondary-btn {
   width: 100%;
   height: 46px;

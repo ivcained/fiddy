@@ -24,6 +24,13 @@
  * is still a real route, so a step can be linked, reloaded and re-entered, and
  * the answers are kept in `~/lib/fiddySetup`.
  *
+ * AND ONE THING TO SAY ON THE LAST SCREEN. "No account needed for this part"
+ * was true but thin: the visitor had spoken to nobody. The ready sheet now
+ * carries one real message to the agent they just named (`TrialChat`), and the
+ * primary action changes with it — from "Go social" to "Save <name> & sign in
+ * with Farcaster" — because after a reply, keeping that agent is the obvious
+ * next thing rather than a generic sign-in.
+ *
  * Voice: no infrastructure words on any of these screens. No node, no protocol,
  * no keys, no scopes. If a sentence needs one of those to be true, the sentence
  * is wrong.
@@ -36,6 +43,7 @@ import { Navigate } from 'react-router-dom';
 import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
 import { BrainSheet, brainSummary } from '~/components/fiddy/BrainSheet';
 import { FiddySheet } from '~/components/fiddy/FiddySheet';
+import { TrialChat } from '~/components/fiddy/TrialChat';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { Link } from '~/components/links/Link';
 import { LoginModal } from '~/components/modals/LoginModal';
@@ -48,6 +56,7 @@ import {
   saveFiddySetup,
   useFiddySetup,
 } from '~/lib/fiddySetup';
+import { loadTrialExchange } from '~/lib/trialChat';
 
 /**
  * The screens this flow renders.
@@ -97,6 +106,12 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
   /** Making a brand-new account, on this device, instead of signing in to one. */
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [draftName, setDraftName] = useState(setup.agentName);
+  // A trial reply that is already in storage was already read on this screen:
+  // the primary action stays the loud one across a reload, because the visitor
+  // has already heard their agent speak.
+  const [trialAnswered, setTrialAnswered] = useState(
+    () => loadTrialExchange() !== null,
+  );
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   // Every step is its own screen, so the heading takes focus and a screen
@@ -194,9 +209,15 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
             title={`${setup.agentName} is ready.`}
             sub="That is the setup done. Nothing has been posted, and nothing is switched on behind your back."
             primary={{
-              label: 'Go social — sign in with Farcaster',
+              // Once the agent has answered, the action stops being "go social"
+              // and becomes "keep the one you just met" — named, because the
+              // name is the thing the visitor chose.
+              label: trialAnswered
+                ? `Save ${setup.agentName} & sign in with Farcaster`
+                : 'Go social — sign in with Farcaster',
               onClick: () => setIsSigningIn(true),
             }}
+            primaryHighlight={trialAnswered}
             quiet={{
               label: 'Do this later',
               onClick: () => go('fiddyWelcome'),
@@ -204,6 +225,12 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
             note="Fiddy opens with your Farcaster account. Already have one? Sign in. New here? Make one right here — Fiddy does the whole thing on this device, and the words that own it never leave your browser."
             titleRef={titleRef}
           >
+            <TrialChat
+              agentName={setup.agentName}
+              setup={setup}
+              onAnswered={() => setTrialAnswered(true)}
+            />
+
             <ul className="fiddy-summary">
               <li>
                 <MessageCircle aria-hidden="true" />

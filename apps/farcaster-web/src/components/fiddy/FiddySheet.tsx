@@ -25,6 +25,13 @@ export interface FiddySheetProps {
   sub?: ReactNode;
   children?: ReactNode;
   primary?: FiddySheetAction | null;
+  /**
+   * Draw the primary action as the thing that just became the point of the
+   * screen. Set only when something the visitor did has earned it — a filled-in
+   * field, a first reply from their agent — never on arrival, because a button
+   * that is loud before anything happened says nothing.
+   */
+  primaryHighlight?: boolean;
   /** The quiet way out: a plain text button, never a second loud one. */
   quiet?: FiddySheetAction | null;
   /** Small honest print under the actions. */
@@ -46,6 +53,7 @@ export const FiddySheet = memo<FiddySheetProps>(
     sub,
     children,
     primary = null,
+    primaryHighlight = false,
     quiet = null,
     note = null,
     egg = 'none',
@@ -96,7 +104,8 @@ export const FiddySheet = memo<FiddySheetProps>(
             {primary ? (
               <button
                 type="button"
-                className="fiddy-primary-btn"
+                className={`fiddy-primary-btn ${primaryHighlight ? 'fiddy-primary-btn-hot' : ''}`}
+                data-highlighted={primaryHighlight ? 'true' : undefined}
                 onClick={primary.onClick}
                 disabled={primary.disabled}
               >
