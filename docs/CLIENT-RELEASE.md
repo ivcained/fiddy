@@ -92,17 +92,28 @@ What it does, and why each step is not optional:
    checkout holds.
 2. **The build must carry the env.** `VITE_SNAPCHAIN_HTTP_URL` (the node the
    client reads through — without it `isNodeConfigured()` is false and a
-   signed-in session lands on the device-only landing) and `VITE_FIDDY_MEDIA_URL`
-   (the media host, named even though `https://fiddy.fun` is the default).
-   Current release: node `https://haatz.quilibrium.com`, media
-   `https://fiddy.fun`.
+   signed-in session lands on the device-only landing), `VITE_FIDDY_MEDIA_URL`
+   (the media host, named even though `https://fiddy.fun` is the default) and
+   `VITE_TOGETHER_API_URL` (the Together surface's collaboration service; the
+   empty string means "same origin", which is what production is). Current
+   release: node `https://haatz.quilibrium.com`, media `https://fiddy.fun`,
+   together `''`.
+   **`VITE_TOGETHER_API_URL` is not optional.** `src/lib/together.ts` falls back
+   to `http://127.0.0.1:8766` when the variable is *undefined*, so a build that
+   merely omits it ships a Together page that renders and then asks the
+   visitor's own machine for the board. Override with
+   `FIDDY_BUILD_TOGETHER_API_URL=<origin>` if the service ever moves off
+   fiddy.fun's origin (docs/TOGETHER.md has the CORS caveat).
 3. **Local gate.** The built bundle must contain the adapter's 501 sentence, the
-   media path and the configured node, **and the built shell must carry no
-   inline script** — the host serves `script-src 'self'`, so an inline
-   `<script>` or an inline `on*=…` handler in `index.html` would be refused in
-   the browser after the release. A build that needs one does not ship
+   media path, the configured node **and the Together route literal, and must
+   NOT contain the `127.0.0.1:8766` fallback** — asserted over every built asset
+   — **and the built shell must carry no inline script** (the host serves
+   `script-src 'self'`, so an inline `<script>` or an inline `on*=…` handler in
+   `index.html` would be refused in the browser after the release). A build that
+   needs one does not ship
    (`apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs`, taken from
-   the frozen tree).
+   the frozen tree). Step 6 repeats the Together assertions on the extracted
+   tree on the VPS, and step 8 checks the served chunk.
 4. **Assemble** `web/` + `server/` + `web/preview/` as described above.
    Sourcemaps are left out: they are 44 MB of source for a public host.
 5. **Upload and extract** into a new immutable `releases/<sha>/`; the running
@@ -117,17 +128,28 @@ What it does, and why each step is not optional:
    asset byte-for-byte (`cmp`) with the build. Any mismatch rolls the symlink
    back.
 
-nginx is **not** touched by the script. The client needs three locations that
+nginx is **not** touched by the script. The client needs four locations that
 exist now and are checked in step 6:
 
 - `location ^~ /snapchain-api/` → `https://haatz.quilibrium.com/` with
   `client_max_body_size 2m` (the server-level limit is 1 KB, and a browser
   cannot POST `application/octet-stream` across origins — hence the relay);
+- `location ~ ^/spaces(/.*)?$` → `http://127.0.0.1:8787` (the hosted
+  collaboration service, `hermes-multiplayer.service`) with
+  `client_max_body_size 48k`, `X-Forwarded-For` (the service throttles the real
+  caller, trusting that header only from loopback) and `Upgrade`/`Connection`
+  (for the board's live stream when it ships). This is the other half of the
+  same-origin build: the client's CSP is `connect-src 'self'`, so Together's
+  `/spaces/*` calls must answer on fiddy.fun's own origin. Backed up at
+  `/root/nginx-backups/fiddy.fun.*.together.bak`;
 - `location /` with `try_files $uri $uri/ /index.html` (a SPA needs route
   fallback) and the client's CSP — the one header in this vhost that changes
   when the shell changes, documented below;
 - `location ^~ /preview/` and `location = /farcaster` → the preview page, under
   the preview's own stricter CSP.
+
+The client's own routes are `/~/together` and `/~/spaces`, so nothing the SPA
+serves lives under `/spaces` — the API prefix does not shadow a page.
 
 ### Rollback
 
