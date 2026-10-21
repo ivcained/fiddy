@@ -14,12 +14,26 @@
  *                         an exchange. Says how much is needed and whether it has
  *                         arrived; it never writes.
  *   `finishAccountSetup` — after registration: add a signing key for this device,
- *                         claim the @name, write the profile. Retried, because a
- *                         node needs a moment to see a brand-new FID.
+ *                         save it on this device, claim the @name, write the
+ *                         profile. Retried, because a node needs a moment to see
+ *                         a brand-new FID.
  *
  * Both take their effects as injected ports, so the whole flow is exercised in
  * tests against a mocked chain and a mocked node — see `__tests__`.
+ *
+ * THE KEY IS NOT MERELY INSTALLED, IT IS KEPT. A gasless KEY_ADD makes the
+ * account *accept* this device's key; it does not make this device *hold* it.
+ * The write path resolves the key it signs with from `~/snapchain/appKeyStorage`
+ * for the session's FID, so a key that is installed on the node and then dropped
+ * on the floor leaves an account that can be read and never written — 501
+ * `NO_APP_KEY` on every heart, follow and post. So `installSigner` hands back the
+ * nonce the next message for this account must exceed, and this module writes
+ * both the key and that nonce to the device's own store before it reports the
+ * step as done. `AccountKeyStore` is the seam: the real one is
+ * `~/snapchain/appKeyStorage`, and tests inject their own.
  */
+
+import { saveAppKey, saveAppNonce } from '~/snapchain/appKeyStorage';
 
 import {
   buildRegistrationRequest,
@@ -121,16 +135,32 @@ export const readFundingState = async ({
   }
 };
 
+/** Where this device keeps the key it signs with, per FID. The real one is
+ *  `~/snapchain/appKeyStorage`; tests inject a spy. */
+export interface AccountKeyStore {
+  saveAppKey: (fid: number, privateKeyHex: string) => Promise<void>;
+  saveAppNonce: (fid: number, nonce: number) => Promise<void>;
+}
+
+/** The device's own store, which is what the write path reads. */
+export const deviceKeyStore: AccountKeyStore = { saveAppKey, saveAppNonce };
+
 /** What the post-registration half needs from the node. Implemented against the
  *  real client in `nodeAccountOps.ts`; faked in tests. */
 export interface AccountNodePort {
   /** Add this device's signing key to the account (gasless: a signature, no
-   *  transaction). Must reject if the node has not seen the account yet. */
+   *  transaction), and resolve once the node shows the key on the FID.
+   *
+   *  Resolves with the nonce the NEXT message for this FID must exceed, read
+   *  from the node after the KEY_ADD merged — the caller stores it so a write
+   *  made after a reload does not reuse a nonce the node has already seen.
+   *  Must reject if the node has not seen the account yet, or if the node
+   *  accepted the KEY_ADD without ever showing the key. */
   installSigner: (parameters: {
     fid: number;
     signingKeyHex: string;
     custody: CustodyAccount;
-  }) => Promise<void>;
+  }) => Promise<{ nextNonce: number }>;
   /** Has the node seen this FID yet, and what does it know about it? */
   readUser: (
     fid: number,
@@ -177,6 +207,7 @@ export const createAccountOnChain = async ({
   username,
   displayName,
   signer,
+  keyStore,
 }: {
   rpcUrl: string;
   custody: CustodyAccount;
@@ -191,6 +222,8 @@ export const createAccountOnChain = async ({
   signingKeyHex: string;
   username?: string;
   displayName?: string;
+  /** Where the device's copy of the key is kept. Defaults to the real store. */
+  keyStore?: AccountKeyStore;
   /** Who pays and signs the registration. Defaults to the custody account
    *  itself; a different signer (a wallet, a sponsor) keeps the account in
    *  `custody`'s name, which is the payer≠owner split. */
@@ -249,16 +282,18 @@ export const createAccountOnChain = async ({
     sleep,
     fetchImpl,
     nameFetchImpl,
+    ...(keyStore ? { keyStore } : {}),
   });
 
   return { txHash, result };
 };
 
 /**
- * Everything after registration: a signing key for this device, the @name, the
- * profile. Retried while the node catches up, because a freshly registered FID
- * is not instantly visible to it and a KEY_ADD for an account the node has not
- * seen is exactly the failure this loop exists to avoid.
+ * Everything after registration: a signing key for this device, saved on this
+ * device; the @name; the profile. Retried while the node catches up, because a
+ * freshly registered FID is not instantly visible to it and a KEY_ADD for an
+ * account the node has not seen is exactly the failure this loop exists to
+ * avoid.
  */
 export const finishAccountSetup = async ({
   rpcUrl,
@@ -273,6 +308,7 @@ export const finishAccountSetup = async ({
     new Promise<void>((resolve) => setTimeout(resolve, ms)),
   fetchImpl,
   nameFetchImpl,
+  keyStore = deviceKeyStore,
 }: {
   rpcUrl: string;
   custody: CustodyAccount;
@@ -286,6 +322,9 @@ export const finishAccountSetup = async ({
   fetchImpl?: typeof fetch;
   /** The name registry's transport, when it differs from the chain's. */
   nameFetchImpl?: typeof fetch;
+  /** Where this device keeps the key it signs with. Defaults to the real store;
+   *  tests inject one so the assertion is about what was written, not a mock. */
+  keyStore?: AccountKeyStore;
 }): Promise<FinishSetupResult> => {
   let fid = 0;
   let lastError: unknown;
@@ -332,7 +371,21 @@ export const finishAccountSetup = async ({
     );
   }
 
-  await node.installSigner({ fid, signingKeyHex, custody });
+  const installed = await node.installSigner({ fid, signingKeyHex, custody });
+
+  // The key is only usable after a reload if this device kept its copy. Write it
+  // before the step is called done: an account whose key was installed and not
+  // saved is an account that cannot post, and reporting "signer" for that would
+  // be the exact lie this flow exists to avoid.
+  try {
+    await keyStore.saveAppKey(fid, signingKeyHex);
+    await keyStore.saveAppNonce(fid, installed.nextNonce);
+  } catch {
+    throw new AccountCreationError(
+      'the account exists, but this device could not save the key that posts for it - open Advanced on this browser and add one',
+    );
+  }
+
   completed.push('signer');
 
   // The name is the one part that can honestly stay unfinished: the account

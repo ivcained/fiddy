@@ -14,6 +14,11 @@
  *   2. `installSigner` — a gasless KEY_ADD, signed with the account's own
  *                        custody key. Nothing is bought and no transaction is
  *                        sent; this is the same path the Advanced screen uses.
+ *                        It reads the key back out of `/v1/signersByFid` before
+ *                        it resolves, and hands the caller the nonce the next
+ *                        message for this FID must exceed — the device stores
+ *                        both, which is what makes the account writable after a
+ *                        reload rather than only until the tab closes.
  *   3. `setProfile`    — @name and display name, written with the key from
  *                        step 2 and then read back out of `/v1/userDataByFid`.
  *
@@ -110,7 +115,7 @@ export const createNodeAccountOps = ({
       );
     }
 
-    await issueAppKey({
+    const issued = await issueAppKey({
       node,
       fid,
       appKey,
@@ -118,6 +123,29 @@ export const createNodeAccountOps = ({
       nonce: state.currentUserNonce + 1,
       ...(onStep ? { onStep } : {}),
     });
+
+    // `issueAppKey` waits for the key to appear, so this read is confirmation of
+    // a fact rather than a second wait — but it is what the doc claims, so it
+    // happens here as well as inside the client: the step is only "done" once
+    // the node itself lists this key on this FID.
+    const confirmed = await fetchSignerState({
+      node,
+      fid,
+      publicKeyHex: appKey.publicKeyHex,
+    });
+
+    if (!confirmed.signer) {
+      throw new NodeAccountOpsError(
+        'the server Fiddy reads from accepted the posting key but is not showing it yet - try the last step again in a minute',
+      );
+    }
+
+    // The next message for this FID must carry a nonce strictly greater than the
+    // one the node reports, so take the higher of "what we used" and "what the
+    // node now says" — a stale read must not hand back a nonce that was spent.
+    return {
+      nextNonce: Math.max(issued.userId.nonce, confirmed.currentUserNonce) + 1,
+    };
   },
 
   setProfile: async ({ fid, signingKeyHex, username, displayName }) => {

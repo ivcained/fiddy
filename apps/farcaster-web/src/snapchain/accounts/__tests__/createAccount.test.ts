@@ -10,14 +10,36 @@
  * What is asserted is what a person would care about: that no money is spent
  * before it has arrived, that the bytes signed are a registration for the price
  * that was read, that the signing key is installed only once the node knows the
- * account, and that a taken @name leaves a working account rather than a broken
- * one.
+ * account, that the key this device installed is still on the device when the
+ * flow calls the account ready (an account that cannot post is not ready), and
+ * that a taken @name leaves a working account rather than a broken one.
  */
 
 import { encodeFunctionData } from 'viem';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * The device's own storage, as this suite sees it. `appKeyStorage` writes
+ * through `~/utils/storageUtils`, so the assertions below are about the exact
+ * keys a reload would read back — not about a mock's call log.
+ */
+const deviceStore = new Map<string, unknown>();
+
+vi.mock('~/utils/storageUtils', () => ({
+  getItem: vi.fn(
+    async ({ key, fallback }: { key: string; fallback: unknown }) =>
+      deviceStore.has(key) ? deviceStore.get(key) : fallback,
+  ),
+  setItem: vi.fn(async ({ key, value }: { key: string; value: unknown }) => {
+    deviceStore.set(key, value);
+  }),
+  deleteItem: vi.fn(async (key: string) => {
+    deviceStore.delete(key);
+  }),
+}));
 
 import {
+  type AccountKeyStore,
   type AccountNodePort,
   createAccountOnChain,
   finishAccountSetup,
@@ -128,11 +150,14 @@ const chain = ({
 const fakeNode = ({
   seesFid = true,
   profileWriteFails = false,
+  nextNonce = 8,
 }: {
   seesFid?: boolean;
   profileWriteFails?: boolean;
+  /** What the node reports after the KEY_ADD merged, plus the next nonce. */
+  nextNonce?: number;
 } = {}) => {
-  const installSigner = vi.fn(async () => undefined);
+  const installSigner = vi.fn(async () => ({ nextNonce }));
   const setProfile = vi.fn(async () => {
     if (profileWriteFails) {
       throw new Error('node said no');
@@ -177,6 +202,13 @@ const fnameFetch = ({
 };
 
 const instantSleep = vi.fn(async () => undefined);
+
+/** The key this device generated for itself, as the flow passes it around. */
+const DEVICE_KEY = `0x${'11'.repeat(32)}`;
+
+beforeEach(() => {
+  deviceStore.clear();
+});
 
 describe('what the screen is told while someone sends money', () => {
   it('says how much is needed and whether it has arrived', async () => {
@@ -317,6 +349,13 @@ describe('registering', () => {
       to: 4242,
       fid: 4242,
     });
+
+    // And the key that was installed is also kept here, because that is the only
+    // place the write path looks for it: an account whose key was installed and
+    // not stored is an account this browser cannot post from.
+    expect(deviceStore.get('snapchain_app_key_4242')).toBe(
+      `0x${'11'.repeat(32)}`,
+    );
   });
 
   it('never trusts a signature-supplying signer that is not the custody account', async () => {
@@ -470,6 +509,73 @@ describe('after registration', () => {
     );
 
     expect(registryCalls.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the posting key on this device, so the account still posts after a reload', async () => {
+    const { fetchImpl } = chain({ fidNow: 4242 });
+    const { account } = custody();
+    const node = fakeNode({ nextNonce: 8 });
+
+    const result = await finishAccountSetup({
+      rpcUrl: 'http://rpc.test',
+      custody: account,
+      node: node.port,
+      signingKeyHex: DEVICE_KEY,
+      sleep: instantSleep,
+      fetchImpl,
+    });
+
+    expect(result.completed).toContain('signer');
+
+    // Read back the way a reload does — through the store the write path uses,
+    // by the keys it derives from the FID.
+    expect(deviceStore.get('snapchain_app_key_4242')).toBe(DEVICE_KEY);
+    expect(deviceStore.get('snapchain_app_nonce_4242')).toBe(8);
+  });
+
+  it('stores the nonce the node reported after the KEY_ADD, not the one it started at', async () => {
+    const { fetchImpl } = chain({ fidNow: 4242 });
+    const { account } = custody();
+    const keyStore: AccountKeyStore = {
+      saveAppKey: vi.fn(async () => undefined),
+      saveAppNonce: vi.fn(async () => undefined),
+    };
+
+    await finishAccountSetup({
+      rpcUrl: 'http://rpc.test',
+      custody: account,
+      node: fakeNode({ nextNonce: 12 }).port,
+      signingKeyHex: DEVICE_KEY,
+      sleep: instantSleep,
+      fetchImpl,
+      keyStore,
+    });
+
+    expect(keyStore.saveAppKey).toHaveBeenCalledWith(4242, DEVICE_KEY);
+    expect(keyStore.saveAppNonce).toHaveBeenCalledWith(4242, 12);
+  });
+
+  it('does not call the account ready when this device could not save the key', async () => {
+    const { fetchImpl } = chain({ fidNow: 4242 });
+    const { account } = custody();
+    const keyStore: AccountKeyStore = {
+      saveAppKey: vi.fn(async () => {
+        throw new Error('storage is full');
+      }),
+      saveAppNonce: vi.fn(async () => undefined),
+    };
+
+    await expect(
+      finishAccountSetup({
+        rpcUrl: 'http://rpc.test',
+        custody: account,
+        node: fakeNode().port,
+        signingKeyHex: DEVICE_KEY,
+        sleep: instantSleep,
+        fetchImpl,
+        keyStore,
+      }),
+    ).rejects.toThrow(/could not save the key that posts for it/);
   });
 });
 

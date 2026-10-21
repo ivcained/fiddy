@@ -5,6 +5,12 @@
  * - Never stores seed phrases or custody keys
  * - Only stores the Ed25519 private key hex that the app uses to sign messages
  * - Uses localforage with namespaced keys to avoid collisions
+ *
+ * WHERE THE PHRASE LIVES INSTEAD: `~/snapchain/accounts/localAccounts` keeps the
+ * recovery phrase of an account this device created, in the same localforage
+ * store, and that is a deliberate trade — the phrase never leaves the browser,
+ * but it sits at rest unencrypted alongside the keys here. This module's
+ * invariant is about what THIS module writes, and it still holds.
  */
 
 import { deleteItem, getItem, setItem } from '~/utils/storageUtils';

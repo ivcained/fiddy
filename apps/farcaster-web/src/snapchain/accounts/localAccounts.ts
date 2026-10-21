@@ -20,6 +20,7 @@
  * the client then holds.
  */
 
+import { clearAppKey } from '~/snapchain/appKeyStorage';
 import { deleteItem, getItem, setItem } from '~/utils/storageUtils';
 
 /** Every account this browser knows, in the order they were added. */
@@ -132,15 +133,30 @@ export const selectLocalAccount = async (id: string) => {
 /**
  * Forget an account on this device.
  *
- * This is the honest kind of "remove": it deletes what is stored here, and says
- * out loud that an account whose phrase is gone cannot be recovered by Fiddy —
- * the keys were never ours to restore.
+ * This is the honest kind of "remove": it deletes what is stored here — the
+ * entry, the recovery phrase, and the posting key this device holds for that
+ * FID — and says out loud that an account whose phrase is gone cannot be
+ * recovered by Fiddy, because the keys were never ours to restore. Forgetting an
+ * account that still has a key installed on the node leaves the key valid there;
+ * what this removes is this browser's ability to use it.
+ *
+ * The key is left alone when another account in the list still carries that
+ * same FID: one FID is one key, and forgetting a duplicate entry must not
+ * disarm the account that is still held.
  */
 export const removeLocalAccount = async (id: string) => {
   const accounts = await loadLocalAccounts();
+  const removed = accounts.find((account) => account.id === id);
   const remaining = accounts.filter((account) => account.id !== id);
 
   await setItem({ key: ACCOUNTS_KEY, value: remaining });
+
+  if (
+    removed?.fid !== undefined &&
+    !remaining.some((account) => account.fid === removed.fid)
+  ) {
+    await clearAppKey(removed.fid);
+  }
 
   const currentId = await loadCurrentAccountId();
 

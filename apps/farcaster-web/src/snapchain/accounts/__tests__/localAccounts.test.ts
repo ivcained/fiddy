@@ -125,6 +125,44 @@ describe('the list of accounts', () => {
     expect(await loadCurrentAccountId()).toBeUndefined();
   });
 
+  it('takes the posting key off the device when an account is forgotten', async () => {
+    await saveLocalAccount(
+      account({ id: '0xaaa', custodyAddress: '0xaaa', fid: 4242 }),
+    );
+    store.set('snapchain_app_key_4242', '0xdead');
+    store.set('snapchain_app_nonce_4242', 8);
+
+    await removeLocalAccount('0xaaa');
+
+    // Nothing this browser could sign for that account with is left behind.
+    expect(store.has('snapchain_app_key_4242')).toBe(false);
+    expect(store.has('snapchain_app_nonce_4242')).toBe(false);
+  });
+
+  it('leaves the key alone while another entry still holds that FID', async () => {
+    await saveLocalAccount(
+      account({ id: '0xaaa', custodyAddress: '0xaaa', fid: 4242 }),
+      { select: false },
+    );
+    await saveLocalAccount(
+      account({ id: '0xbbb', custodyAddress: '0xbbb', fid: 4242 }),
+    );
+    store.set('snapchain_app_key_4242', '0xdead');
+
+    await removeLocalAccount('0xbbb');
+
+    expect(store.get('snapchain_app_key_4242')).toBe('0xdead');
+  });
+
+  it('leaves keys alone for an account it never had a number for', async () => {
+    await saveLocalAccount(account({ id: '0xaaa', custodyAddress: '0xaaa' }));
+    store.set('snapchain_app_key_4242', '0xdead');
+
+    await removeLocalAccount('0xaaa');
+
+    expect(store.get('snapchain_app_key_4242')).toBe('0xdead');
+  });
+
   it('ignores junk that is not an account', async () => {
     store.set('fiddy:accounts', [{ nope: true }, account({ id: '0xaaa' })]);
 
