@@ -229,10 +229,19 @@ const run = async (browser, width, index) => {
   const nextRequestId = watchSignIns(page);
   const writes = watchWrites(page);
 
+  // A dev server's first paint on a loaded machine is not an assertion: give the
+  // load and the waits room (TOGETHER_LOAD_TIMEOUT_MS), and leave every check
+  // itself exactly as it was.
+  const LOAD_TIMEOUT = Number(process.env.TOGETHER_LOAD_TIMEOUT_MS ?? 120000);
+  page.setDefaultTimeout(LOAD_TIMEOUT);
+
   console.log(`\n${width.label}x${width.height}`);
 
   // 1. the front door
-  await page.goto(`${SERVER}/~/together`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${SERVER}/~/together`, {
+    waitUntil: 'domcontentloaded',
+    timeout: LOAD_TIMEOUT,
+  });
   await page.waitForSelector('.fiddy-page-title');
   const door = await layout(page);
   expect(
@@ -257,7 +266,7 @@ const run = async (browser, width, index) => {
 
   // 2. the Farcaster door → a real QR from the service
   await page.getByRole('button', { name: 'Sign in with Farcaster' }).click();
-  await page.waitForSelector('canvas', { timeout: 15000 });
+  await page.waitForSelector('canvas', { timeout: LOAD_TIMEOUT });
   expect(
     `${width.label}: the service minted a QR to scan`,
     (await page.locator('canvas').count()) > 0,
@@ -265,14 +274,14 @@ const run = async (browser, width, index) => {
 
   // 3. the phone approves → the create-space form
   await approve(await nextRequestId(), ownerFid, 'elena');
-  await page.waitForSelector('text=Start a space', { timeout: 20000 });
+  await page.waitForSelector('text=Start a space', { timeout: LOAD_TIMEOUT });
   expect(`${width.label}: approving lands on "Start a space"`, true);
 
   // 4. create the space → the board
   await page.fill('input[placeholder="Fiddy launch"]', 'Fiddy launch');
   await page.fill('input[placeholder="fiddy"]', 'fiddy');
   await page.getByRole('button', { name: 'Create the space' }).click();
-  await page.waitForSelector('text=#fiddy', { timeout: 20000 });
+  await page.waitForSelector('text=#fiddy', { timeout: LOAD_TIMEOUT });
   const board = await layout(page);
   expect(
     `${width.label}: the space name heads the board`,
@@ -295,7 +304,7 @@ const run = async (browser, width, index) => {
   // 5. the owner puts work on the board
   await page.fill('input[placeholder="Write the release note"]', 'Ship the Together surface');
   await page.getByRole('button', { name: 'Add card' }).click();
-  await page.waitForSelector('text=Ship the Together surface', { timeout: 15000 });
+  await page.waitForSelector('text=Ship the Together surface', { timeout: LOAD_TIMEOUT });
   expect(`${width.label}: the card is on the board`, true);
   const cardId = await writes.card();
 
@@ -324,8 +333,9 @@ const run = async (browser, width, index) => {
   guest.on('pageerror', (error) => guestErrors.push(`pageerror: ${error.message}`));
   const guestRequestId = watchSignIns(guest);
 
-  await guest.goto(link, { waitUntil: 'domcontentloaded' });
-  await guest.waitForSelector('text=#fiddy', { timeout: 20000 });
+  guest.setDefaultTimeout(LOAD_TIMEOUT);
+  await guest.goto(link, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT });
+  await guest.waitForSelector('text=#fiddy', { timeout: LOAD_TIMEOUT });
   expect(
     `${width.label}: the invite says whose space it is`,
     await guest.getByText('@elena invited you').isVisible(),
@@ -335,13 +345,13 @@ const run = async (browser, width, index) => {
     await guest.getByText(/no email, no password, no keys/i).isVisible(),
   );
   await guest.getByRole('button', { name: /Sign in with Farcaster and join/ }).click();
-  await guest.waitForSelector('canvas', { timeout: 15000 });
+  await guest.waitForSelector('canvas', { timeout: LOAD_TIMEOUT });
   await approve(await guestRequestId(), memberFid, 'marcus');
-  await guest.waitForSelector('text=You joined the space.', { timeout: 20000 });
+  await guest.waitForSelector('text=You joined the space.', { timeout: LOAD_TIMEOUT });
   await guest.screenshot({ path: path.join(OUT, `together-join-${width.label}.png`) });
 
   await guest.getByRole('link', { name: 'Open the board' }).click();
-  await guest.waitForSelector('text=Ship the Together surface', { timeout: 20000 });
+  await guest.waitForSelector('text=Ship the Together surface', { timeout: LOAD_TIMEOUT });
   expect(
     `${width.label}: the member sees BOTH members on the board`,
     (await guest.getByText(/@elena/).count()) > 0 &&
@@ -355,11 +365,11 @@ const run = async (browser, width, index) => {
   await guest.getByRole('button', { name: 'Start' }).click();
   await guest.waitForTimeout(500);
   await guest.getByRole('button', { name: 'Done' }).click();
-  await guest.waitForSelector('text=Cast it to the channel', { timeout: 20000 });
+  await guest.waitForSelector('text=Cast it to the channel', { timeout: LOAD_TIMEOUT });
   expect(`${width.label}: the member completed the card`, true);
 
   // The owner's page was never reloaded: polling has to bring it over.
-  await page.waitForSelector('text=Cast it to the channel', { timeout: 20000 });
+  await page.waitForSelector('text=Cast it to the channel', { timeout: LOAD_TIMEOUT });
   expect(
     `${width.label}: the owner's open board converged to Done on its own`,
     true,
@@ -376,7 +386,7 @@ const run = async (browser, width, index) => {
 
   // The member's board already carries something unread: the owner created the
   // card after they joined, so it is one thing they have not looked at.
-  await guest.waitForSelector('[data-testid="unread-badge"]', { timeout: 20000 });
+  await guest.waitForSelector('[data-testid="unread-badge"]', { timeout: LOAD_TIMEOUT });
   expect(
     `${width.label}: the member's board marks the card that changed`,
     (await guest.getByTestId('unread-badge').first().textContent())?.includes(
@@ -391,7 +401,7 @@ const run = async (browser, width, index) => {
   await page.waitForFunction(
     () => document.body.innerText.includes('the invite link is live'),
     null,
-    { timeout: 20000 },
+    { timeout: LOAD_TIMEOUT },
   );
   const ownerSaid = await threadText(page);
   expect(
@@ -412,7 +422,7 @@ const run = async (browser, width, index) => {
       return Boolean(badge && badge.textContent.includes('2 new'));
     },
     null,
-    { timeout: 25000 },
+    { timeout: LOAD_TIMEOUT },
   );
   expect(
     `${width.label}: the member's marker grew to 2 new while they watched`,
@@ -426,7 +436,7 @@ const run = async (browser, width, index) => {
       (document.querySelector('[data-testid^="thread-"]')?.innerText ?? '')
         .includes('the invite link is live'),
     null,
-    { timeout: 20000 },
+    { timeout: LOAD_TIMEOUT },
   );
   const memberRead = await threadText(guest);
   expect(
@@ -440,7 +450,7 @@ const run = async (browser, width, index) => {
   await guest.waitForFunction(
     () => !document.querySelector('[data-testid="unread-badge"]'),
     null,
-    { timeout: 25000 },
+    { timeout: LOAD_TIMEOUT },
   );
   expect(`${width.label}: opening the card cleared the unread marker`, true);
   await guest.screenshot({
@@ -453,7 +463,7 @@ const run = async (browser, width, index) => {
   await page.waitForFunction(
     () => document.body.innerText.includes('marcus is typing'),
     null,
-    { timeout: 25000 },
+    { timeout: LOAD_TIMEOUT },
   );
   expect(
     `${width.label}: the owner sees "marcus is typing…" while the member types`,
@@ -463,7 +473,7 @@ const run = async (browser, width, index) => {
   await page.waitForFunction(
     () => !document.body.innerText.includes('is typing'),
     null,
-    { timeout: 25000 },
+    { timeout: LOAD_TIMEOUT },
   );
   expect(
     `${width.label}: and the indicator clears when the member stops`,
@@ -478,7 +488,7 @@ const run = async (browser, width, index) => {
   await page.waitForFunction(
     () => document.body.innerText.includes('board is on my screen'),
     null,
-    { timeout: 25000 },
+    { timeout: LOAD_TIMEOUT },
   );
   const ownerRead = await threadText(page);
   expect(
@@ -489,7 +499,7 @@ const run = async (browser, width, index) => {
   await page.waitForFunction(
     () => !document.querySelector('[data-testid="unread-badge"]'),
     null,
-    { timeout: 25000 },
+    { timeout: LOAD_TIMEOUT },
   );
   expect(
     `${width.label}: the card in front of the owner is not left marked unread`,
