@@ -484,6 +484,16 @@ export const createEmbedCardResolver = (
         signal: controller.signal,
         credentials: 'omit',
         redirect: 'follow',
+        // The other half of "credential-free": no referrer either.
+        //
+        // MEASURED (2026-10-22, doc §4 item 5): this read is a request to
+        // somebody else's host made on the reader's behalf, and with a referrer
+        // it would tell that host which cast was being read and on which page —
+        // i.e. not just that the card was drawn, but what the reader was looking
+        // at when it was. With `no-referrer` the page learns it was fetched and
+        // nothing about where from. (`credentials: 'omit'` was already here;
+        // this is the same sentence's second clause.)
+        referrerPolicy: 'no-referrer',
       });
       if (response.ok && isHtmlResponse(response)) {
         const html = await readBoundedHtml(response, maxHtmlBytes);

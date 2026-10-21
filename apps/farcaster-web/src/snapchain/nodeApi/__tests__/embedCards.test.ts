@@ -246,6 +246,28 @@ describe('reading a page once, per embed', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('makes that read without credentials and without a referrer', async () => {
+    const fetchImpl = vi.fn(async () =>
+      withUrl(
+        htmlResponse(page(`<meta name="og:title" content="Example">`)),
+        'https://app.example/',
+      ),
+    );
+    const resolver = createEmbedCardResolver({ fetchImpl, storage: null });
+
+    await resolver.resolve(['https://app.example/']);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const init = (
+      fetchImpl.mock.calls[0] as unknown as [string, RequestInit?]
+    )[1];
+    expect(init?.credentials).toBe('omit');
+    // The reader's IP is the unavoidable price of reading a page for its card;
+    // which cast they were looking at is not. A referrer would hand the page's
+    // host that second thing too.
+    expect(init?.referrerPolicy).toBe('no-referrer');
+  });
+
   it('never asks the index about a page that declared its own app', async () => {
     const indexLookup = vi.fn(async () => ({
       imageUrl: 'https://index.example/art.png',
