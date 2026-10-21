@@ -1,4 +1,5 @@
 import { FC, lazy, memo, Suspense, useState } from 'react';
+import { ErrorBoundary } from 'react-error-boundary';
 
 import { Divider2 } from '~/components/Divider';
 import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
@@ -76,17 +77,37 @@ const LoginModal: FC<LoginModalProps> = memo(({ onClose }) => {
           >
             {socialDoors ? (
               <div className="w-full" data-fiddy="login-social">
-                <Suspense
-                  fallback={
+                {/* A third party may not take the way in down with it.
+                    MEASURED (2026-10-22): with an app id configured and Privy's
+                    SDK answering with a refusal — a real SDK and an app id the
+                    dashboard does not know is enough — the render threw, the
+                    nearest boundary was the app's full-screen one, and pressing
+                    "Go social" replaced the whole client with "We encountered an
+                    unexpected error. Try again": no doors, and no Farcaster
+                    sign-in either. So the doors get their own boundary, and it
+                    fails to the honest sentence with the other way in still
+                    standing below it. */}
+                <ErrorBoundary
+                  fallbackRender={() => (
                     <SocialSignUpOptions
                       disabled
                       onPress={() => undefined}
-                      unavailableNote="Getting Google and X ready — one moment."
+                      unavailableNote="Google and X are not answering right now. You can still sign in with Farcaster below."
                     />
-                  }
+                  )}
                 >
-                  <SocialSignUpPrivy />
-                </Suspense>
+                  <Suspense
+                    fallback={
+                      <SocialSignUpOptions
+                        disabled
+                        onPress={() => undefined}
+                        unavailableNote="Getting Google and X ready — one moment."
+                      />
+                    }
+                  >
+                    <SocialSignUpPrivy />
+                  </Suspense>
+                </ErrorBoundary>
 
                 <div className="w-full py-6">
                   <Divider2 text="or use a Farcaster account" />

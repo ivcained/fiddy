@@ -45,18 +45,26 @@ import { SocialSignUpOptions } from './SocialSignUpOptions';
 
 /** The sign-up as the modal sees it: ready to draw, or honest about waiting. */
 const SocialSignUpPrivy: FC = memo(() => {
-  const { ready, configured } = usePrivyRoot();
+  const { ready, configured, failed } = usePrivyRoot();
 
   if (!configured) {
     return null;
   }
 
   if (!ready) {
+    // Two different silences, said differently: one is still loading, one has
+    // already refused (see ~/providers/PrivyRoot — a provider that refuses
+    // leaves the client standing and `failed` true). A person who is told "one
+    // moment" forever is being lied to.
     return (
       <SocialSignUpOptions
         disabled
         onPress={() => undefined}
-        unavailableNote="Getting Google and X ready — one moment."
+        unavailableNote={
+          failed
+            ? 'Google and X are not answering right now. You can still sign in with Farcaster below.'
+            : 'Getting Google and X ready — one moment.'
+        }
       />
     );
   }
@@ -128,9 +136,7 @@ const SocialSignUpFlow: FC = memo(() => {
     [login],
   );
 
-  return (
-    <SocialSignUpOptions busy={busy} message={message} onPress={press} />
-  );
+  return <SocialSignUpOptions busy={busy} message={message} onPress={press} />;
 });
 
 SocialSignUpFlow.displayName = 'SocialSignUpFlow';
@@ -176,7 +182,11 @@ const HeldWordsButtonInner: FC<{ address?: string; label?: string }> = memo(
           {label}
         </button>
         {message ? (
-          <p className="text-sm text-danger" role="alert" data-fiddy="held-words-error">
+          <p
+            className="text-sm text-danger"
+            role="alert"
+            data-fiddy="held-words-error"
+          >
             {message}
           </p>
         ) : null}
