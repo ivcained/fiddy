@@ -333,7 +333,14 @@ export const BrainSheet = memo(() => {
     setBusy('probe');
     try {
       const probe = await probeBrain(session, chosen);
-      setNotice(probeSentence(probe));
+      // A check that did not work is a failure, and it is announced as one. A
+      // service's own "no, that key was refused" is the same failure as a
+      // transport error, so it does not get to arrive quietly as a status.
+      if (probe.ok) {
+        setNotice(probeSentence(probe));
+      } else {
+        setError(probeSentence(probe));
+      }
       setModels(probe.models);
     } catch (caught) {
       setError(plainWords(caught));

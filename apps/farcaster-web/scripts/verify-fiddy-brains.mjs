@@ -33,6 +33,23 @@ const check = (name, ok, detail = '') => {
   checks.push({ name, ok, detail });
 };
 
+/**
+ * Wait for something, and answer whether it arrived. A probe that throws on the
+ * first missing element reports one failure and hides the rest; this one records
+ * every check it can and says what it saw instead.
+ */
+const appears = async (page, selector, timeout = 8000) => {
+  try {
+    await page.waitForSelector(selector, { timeout });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const textOf = async (page, selector) =>
+  (await page.locator(selector).first().innerText().catch(() => '')).replace(/\s+/g, ' ');
+
 const cards = [
   ['fiddy', 'Fiddy'],
   ['openai', 'ChatGPT'],
@@ -77,7 +94,22 @@ const run = async () => {
   });
 
   await page.goto(`${ORIGIN}/welcome/brain`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-fiddy="brains"]', { timeout: 20000 });
+  try {
+    await page.waitForSelector('[data-fiddy="brains"]', { timeout: 20000 });
+  } catch {
+    // A probe that fails must say what it saw: the URL it is actually on, the
+    // text the page rendered, the console errors, and a screenshot.
+    const url = page.url();
+    const text = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 400);
+    await page.screenshot({ path: `${OUT}/fiddy-brains-FAILED.png`, fullPage: true }).catch(() => {});
+    console.log(`RED  the sheet did not render at ${ORIGIN}/welcome/brain`);
+    console.log(`     the browser is on ${url}`);
+    console.log(`     the page says: ${text || '(nothing)'}`);
+    console.log(`     console errors: ${consoleErrors.slice(0, 3).join(' | ') || '(none)'}`);
+    console.log(`     screenshot: ${OUT}/fiddy-brains-FAILED.png`);
+    await browser.close();
+    process.exit(1);
+  }
   await page.screenshot({ path: `${OUT}/fiddy-brains-step.png`, fullPage: true });
 
   check('the pick-a-brain step renders the sheet', true);
@@ -117,11 +149,11 @@ const run = async () => {
   // 4. An empty form is refused on this side, in plain words, with no call made.
   probeRequests = [];
   await page.locator('[data-fiddy-action="test-brain"]').click();
-  const emptyError = await page.locator('[data-fiddy="brain-error"]').innerText();
+  const emptyError = await textOf(page, '[data-fiddy="brain-error"]');
   check(
     'an empty form is refused before anything is asked of the service',
     /address/i.test(emptyError) && probeRequests.length === 0,
-    emptyError.replace(/\s+/g, ' '),
+    emptyError || '(no refusal appeared)',
   );
 
   // 5. A private address is refused in words an owner can act on.
@@ -136,12 +168,12 @@ const run = async () => {
     models: [],
   };
   await page.locator('[data-fiddy-action="test-brain"]').click();
-  await page.waitForSelector('[data-fiddy="brain-error"]', { timeout: 10000 });
-  const refused = await page.locator('[data-fiddy="brain-error"]').innerText();
+  await appears(page, '[data-fiddy="brain-error"]');
+  const refused = await textOf(page, '[data-fiddy="brain-error"]');
   check(
     'a private address is refused, and the refusal says what to do',
     /private network/i.test(refused) && /public address/i.test(refused),
-    refused.replace(/\s+/g, ' '),
+    refused || '(no refusal appeared)',
   );
   const asked = probeRequests.at(-1) ?? {};
   check(
@@ -158,17 +190,20 @@ const run = async () => {
     models: ['model-one', 'model-two'],
   };
   await page.locator('[data-fiddy-action="test-brain"]').click();
-  await page.waitForSelector('[data-fiddy="brain-models"]', { timeout: 10000 });
-  const notice = await page.locator('[data-fiddy="brain-notice"]').first().innerText();
-  check('a working key says so, and how many models it found', /that key works/i.test(notice), notice.replace(/\s+/g, ' '));
-  await page.locator('[data-fiddy-model="model-two"]').click();
+  const offered = await appears(page, '[data-fiddy="brain-models"]');
+  const notice = await textOf(page, '[data-fiddy="brain-notice"]');
+  check('a working key says so, and how many models it found', /that key works/i.test(notice), notice || '(no notice appeared)');
+  check('the models the service listed are offered as picks', offered);
+  if (offered) {
+    await page.locator('[data-fiddy-model="model-two"]').click();
+  }
   const picked = await page.locator('[data-fiddy-field="brain-model"]').inputValue();
   check('picking a model from the list fills the field', picked === 'model-two', picked);
   await page.screenshot({ path: `${OUT}/fiddy-brains-tested.png`, fullPage: true });
 
   // 7. Saving keeps the choice, and keeps no key. This is the whole promise.
   await page.locator('[data-fiddy-action="use-brain"]').click();
-  await page.waitForSelector('[data-fiddy="brain-notice"]', { timeout: 10000 });
+  await appears(page, '[data-fiddy="brain-notice"]');
   const stored = await page.evaluate(() => {
     const raw = window.localStorage.getItem('fiddy.setup') ?? '';
     return { raw, parsed: JSON.parse(raw || '{}') };
