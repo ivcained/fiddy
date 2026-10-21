@@ -40,6 +40,30 @@ Window B is **not** a property of the commit; it is a neighbour's in-flight edit
 in the shared tree. Any verdict measured in window B is void and has to be
 re-measured on a quiet tree.
 
+## 2026-10-21 refresh — what landed after this audit, and what is left
+
+This document was written a day before the work it maps. Everything below it is
+the audit as measured at `041c593`; this section is the current state, so nobody
+acts on a row that has since changed. Each line names the card that landed it
+and the evidence that card left.
+
+| Surface (as audited below) | Now | Evidence |
+| --- | --- | --- |
+| Composer — text posting | **works.** The submit is a message this device signs and a server carries; the refusal the audit recorded is gone. | card `t_aa93f0c5` (writes through providers, `88cf2ba`), released to fiddy.fun by `t_49d63304`; `~/snapchain/nodeApi/nodeWrites.ts` |
+| Reactions, follows, recasts | **work**, on the same path — a write is confirmed against the server's own state before any success is reported | `t_aa93f0c5` |
+| Composer — image | **works**, through our own media host rather than Warpcast's | card `t_54ee6c54`: `~/snapchain/nodeApi/mediaUpload.ts` sends `POST /v1/generate-image-upload-url` to `POST /api/fiddy/media`; that card's probe 14/14 and a live check of the deployed route (POST 201, GET 200 immutable, cross-site 403, bad name 404) |
+| Composer — video | **still not ours.** The picker's video path is Warpcast's pipeline: `hostedRoutes.ts` classifies `/v1/prepare-video-upload`, `/v1/upload-video-with-tus` and `/v1/uploaded-video` as `hosted` (read at `13d504e` for this refresh). "Post with video" is therefore open, and its fix is a media-host change — its own card, filed from this one. | the routing table at `13d504e` |
+| Mini apps — catalogue, and embeds in the feed | **being wired now** by card `t_93fa5c59` (running while this was written): readers via Neynar, `fc:miniapp` meta for the card in the feed. Not this card's to redo, and not a gap this card may call done. | that card's own body |
+| Reads — feed, cast detail, profile, channel, notifications | **node-backed and verified** | `t_c9861884`, `scripts/verify-node-backed-client.mjs` 12/12 |
+| Advanced screen / the Fiddy command line | **was a dead route**: the page rendered one word and the settings list had no entry for it, so reaching it meant typing its address. It now carries the CLI entry — the four `bin/fiddy` lines, each copyable — and the list links it. The command-line agentic extras next to it are named as not-here-yet. | this card: `scripts/verify-advanced-cli.mjs` 11/11 at 390px and 1440px, `~/pages/settingsAdvanced/__tests__/settingsAdvanced.test.tsx` 8/8 |
+
+Still open, honestly: **video** (above); the **miniapp catalogue and embeds**
+(`t_93fa5c59`); **search, the channel directory, direct messages, audio rooms,
+wallet surfaces and notification grouping** (hosted-API products with no node
+equivalent — see "Still not node-backed"); and **a cast that reaches the real
+network**, which needs the operator's test account and a node that merges —
+neither a probe's nor this card's to do.
+
 ## The two things the audit found, before the table
 
 1. **A real third-party session cannot reach a single authed surface.** With a
@@ -124,12 +148,18 @@ that same gated endpoint, so there is nothing to fall back to client-side.
   `packages/farcaster-node-client` writes `submitMessage` and reads `/v1/*`, and
   the cast embed is just a URL. Media must be pinned somewhere public.
 
-**What this needs before it can be implemented** (this is why it is not done in
-this pass): either a pinning endpoint + credential from the operator, or a
-go-ahead to add a small upload service on the VPS (that is a `services/` change,
-explicitly out of scope for this card → it wants its own card). Until then the
-honest state for both media buttons is a plain "media isn't ready yet" — not a
-hosted-API error toast.
+**What this needed before it could be implemented** — and what happened instead,
+because the answer arrived: the operator's go-ahead went to a small upload
+service of our own (`services/`, which this card's scope excludes → that work
+went its own way as card `t_54ee6c54`). **It is built and live.** Our media host
+takes the bytes (`POST /api/fiddy/media`), types them by their own magic bytes,
+caps them at 25 MB, stores them under a content-hash name and answers with the
+public URL the cast embeds; `~/snapchain/nodeApi/mediaUpload.ts` is the client
+half. Image posting therefore works end to end (that card's probe 14/14, plus a
+live check of the deployed route). Video did **not** come along with it: the
+picker's video path is Warpcast's pipeline and is classified `hosted` in
+`hostedRoutes.ts` at `13d504e`, so "post with video" is still open and is filed
+as its own card.
 
 ## What is node-backed now (card `t_c9861884`, measured same day)
 
@@ -538,23 +568,32 @@ The acceptance run before this card's change (12/12 at `d00b7a7`, the write
 layer's edits still in flight) and the offer run at `88cf2ba` are on the same card
 rather than restated here as one number.
 
-## Fix order for Phase 2 (posting loop first)
+## Fix order for Phase 2 (posting loop first) — status at 2026-10-21
 
-1. Text posting: composer → `packages/farcaster-node-client.submitMessage`
-   (gasless app-key path already built; no new signing path). Include the
-   channel picker in the same write (`parent_url`), since "channels work" is a
-   must-have and it is the same message.
-2. Feed reads behind the adapter so a posted cast is visible again after reload
-   (a write you cannot see is not a working loop).
-3. Frame / mini-app embed rendering + launch in-feed, verified against a live
-   frame URL, not just the mock.
-4. Media: the seam above, once the storage decision has an owner.
-5. Notifications and DMs: honest states (derive from the node where possible,
-   hide the rest with a note) — do not fake either.
+The order below was written as a plan. It is kept because the *order* was right;
+each item now carries where it landed, so this section cannot read as work still
+to do.
 
-Overlap warning: another live card (`t_c9861884`) is rewiring the same surfaces
-(reads, notifications, posting) through the same node client. Whoever lands
-second rebases on the first; the parity table above is the shared map.
+1. **Text posting — done.** Composer → `submitMessage`, no new signing path.
+   `~/snapchain/nodeApi/nodeWrites.ts` builds and signs the message and confirms
+   it against the server's own state (card `t_aa93f0c5`). The channel picker's
+   write rides the same message (`parent_url`), so "post into a channel" is not
+   a separate path.
+2. **Feed reads behind the adapter — done** (card `t_c9861884`): a posted cast
+   is visible again after a reload, measured — see "What is node-backed now".
+3. **Frame / mini-app embeds in the feed — in flight elsewhere** (card
+   `t_93fa5c59`): readers via Neynar, `fc:miniapp` meta for the card. This card
+   does not duplicate it, and does not call it done.
+4. **Media — half done.** Images work through our own host (card
+   `t_54ee6c54`); video is still Warpcast's pipeline and has its own card (see
+   the refresh section).
+5. **Notifications and DMs — done, honestly** (cards `t_c9861884` and
+   `t_963a9287`): notifications are derived from node reads, and direct messages
+   are hidden behind a plain "Direct Casts · soon" rather than an empty inbox.
+
+The overlap warning that used to sit here is spent: `t_c9861884` landed, and
+this card worked around the shared tree rather than through it — see "How this
+card avoided the shared tree, and what it cost" below.
 
 ## Measurement hygiene (why some cells say "re-measure")
 
@@ -567,3 +606,64 @@ mid-audit — which is exactly the contamination recorded above.
 Verdicts are only as good as a quiet tree. Before trusting a live verdict:
 confirm `git status` shows nothing in flight, record `git rev-parse HEAD`, and
 re-run the probe.
+## Phase 3: the command line's door, and what is not built (this card, 2026-10-21)
+
+The agentic half of Fiddy starts on the command line, and until this card the
+product said so nowhere: `/~/settings/advanced` rendered the single word
+"Advanced", and the settings list had no entry for it (both read off the source
+at `13d504e`; the route itself has existed since the fork). A door nothing
+points at is not a door.
+
+What is there now:
+
+* `~/pages/settingsAdvanced/SettingsAdvancedPage` — the Advanced screen: what
+  the Fiddy command is, the four subcommands `bin/fiddy` actually has
+  (`provision`, `node up`, `client up`, `doctor`), each with the plain-words
+  reason to run it and a copy control; the two walkthrough links
+  (`fiddy.fun/client` and the deploy page beside it); a link to the setup screen
+  and to the agent surface that works today.
+* `~/layouts/SettingsNav` gains the entry — that is what makes the screen
+  reachable at all.
+* `~/lib/advancedCli.ts` — the copy and the command list, out of the page so the
+  words can be asserted on their own.
+* The agentic extras the command line is *for* ("chat with your agent from the
+  terminal", "let your agent post from a script") are named with a `soon` note
+  and **no control**: there is nothing behind one, and this card builds no agent
+  backend.
+
+Verified rather than asserted — `apps/farcaster-web/scripts/verify-advanced-cli.mjs`,
+**11/11**, signed in with a real SIWE session against a dev server started from
+this card's own worktree: the entry visible in the settings list at 390px and in
+the rail at 1440px, the page opening from it, the four commands on screen, the
+copy control reporting "Copied" with the clipboard read back holding
+`fiddy provision`, no protocol vocabulary in the column (the card's jargon ban),
+the two agentic rows carrying their note with zero buttons under them, no
+horizontal overflow at either width, and zero uncaught page errors. Unit level:
+`~/pages/settingsAdvanced/__tests__/settingsAdvanced.test.tsx`, 8/8 — the
+commands, the plain words, the not-here-yet rows, and both branches of the copy
+control (a copy that happened, and a browser that refuses one, which is reported
+rather than claimed).
+
+One probe defect was found and fixed on the way, worth knowing before re-running
+it: waiting for "some nav" on `/~/settings` matched the shell's left rail and
+measured the page before the settings list had rendered — **4/11 on a working
+client**. The wait is now on the entry itself, and the failure branch prints what
+the list actually showed.
+
+## How this card avoided the shared tree, and what it cost
+
+`/Users/lc/Projects/fiddy` is one working tree shared by every Fiddy card. This
+card was blocked twice for exactly that (see its comments), and on the third
+attempt files were still in flight, so the work was done in an isolated
+`git worktree` at a fixed revision (`13d504e`,
+`~/.hermes/kanban/workspaces/t_08e02638/wt`, branch `t_08e02638-parity`) — the
+way the neighbouring cards and their reviewers already work. Nothing was written
+to the shared tree, no `git stash` was cycled over another card's work, and the
+probe ran against a dev server started from the worktree, so every number above
+belongs to a known revision.
+
+The cost is real, and it is why this is written down: the work lands as a
+fast-forward of `13d504e` rather than as commits in the middle of the shared
+tree's own history, and every parity verdict in this document is for `13d504e`
+plus this diff — not for whatever `main` had become by the time anyone reads it.
+Re-run the probes before trusting a verdict.
