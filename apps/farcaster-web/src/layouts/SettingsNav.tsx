@@ -108,6 +108,17 @@ const SettingsNav: FC = memo(() => {
       >
         <SettingsNavLinkLabel>Developer tools</SettingsNavLinkLabel>
       </SettingsNavLink>
+      {/* The command line's own door. Without this entry the route existed and
+          nothing pointed at it, so the Fiddy CLI was reachable only by reading
+          the repository (see ~/pages/settingsAdvanced). */}
+      <SettingsNavLink
+        to="settingsAdvanced"
+        params={{}}
+        searchParams={{}}
+        title="Advanced"
+      >
+        <SettingsNavLinkLabel>Advanced</SettingsNavLinkLabel>
+      </SettingsNavLink>
       <SettingsNavLink
         to="#"
         params={{}}
