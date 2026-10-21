@@ -1,8 +1,16 @@
 /**
  * The Fiddy Agent surface.
  *
- * Three states, no fake ones:
- *   not paired  — the egg, one hatch action, and the honest availability line
+ * Four states, no fake ones:
+ *   signed in, built-in brain — the owner picked the Fiddy or Surp brain on the
+ *     way in, so their owner session is asked for on arrival and they land in
+ *     **Chat**, under the name they chose, with the conversation they already
+ *     had before signing in. When starting an agent is closed on this service,
+ *     or the service cannot be reached, the header says so in one sentence —
+ *     still no URL field, still no token to paste.
+ *   not paired, own service — the egg, one hatch action, the honest availability
+ *     line, and the pairing form, which is the right screen for somebody who
+ *     runs their own control plane.
  *   pairing     — paste the address of the service that runs your agent
  *   paired      — the agent itself: identity, chat, scheduled tasks, channels
  *
@@ -12,7 +20,7 @@
  */
 
 import { Brain, Plug } from 'lucide-react';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   AgentHatchCard,
@@ -24,6 +32,7 @@ import { brainSummary } from '~/components/fiddy/BrainSheet';
 import { Link } from '~/components/links/Link';
 import { Page } from '~/components/page/Page';
 import { useAgentSession } from '~/hooks/agent/useAgentSession';
+import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import {
   loadSchedules,
   newScheduleId,
@@ -51,6 +60,14 @@ import {
   probeAgentService,
 } from '~/lib/agentService';
 import { allowedChannelCount, useFiddySetup } from '~/lib/fiddySetup';
+import {
+  AUTOPAIR_SENTENCES,
+  openOwnerSession,
+  shouldAutopair,
+  type AutopairProvisioning,
+} from '~/lib/fiddyAgentAutopair';
+import { clearSiwfProof, loadSiwfProof } from '~/lib/siwfSession';
+import { clearTrialExchange, loadTrialExchange } from '~/lib/trialChat';
 import { trackError } from '~/utils/errorUtils';
 
 import { AgentChannelsPanel } from './Component/AgentChannelsPanel';
@@ -93,6 +110,7 @@ const newMessageId = (): string =>
 const AgentPage: React.FC = () => {
   const { status, session, pair, forget } = useAgentSession();
   const setup = useFiddySetup();
+  const { fid } = useCurrentUser();
 
   const [view, setView] = useState<'surface' | 'pair'>('surface');
   const [pairBusy, setPairBusy] = useState(false);
@@ -121,6 +139,117 @@ const AgentPage: React.FC = () => {
 
   const paired: AgentServiceSession | null =
     status === 'paired' ? session : null;
+
+  /**
+   * The owner session this browser asks the service for, on arrival, when the
+   * setup names a brain Fiddy itself provides. `started` is a ref rather than
+   * state on purpose: this must run at most once per visit, and a re-render must
+   * never be able to ask twice.
+   */
+  const [autopair, setAutopair] = useState<{
+    state: 'idle' | 'running' | 'failed';
+    sentence: string | null;
+    provisioning: AutopairProvisioning | null;
+  }>({ state: 'idle', sentence: null, provisioning: null });
+  const autopairStarted = useRef(false);
+  const trialStarted = useRef(false);
+
+  /** The exchange the visitor had before signing in, if there was one. */
+  const [trial, setTrial] = useState<{
+    messages: AgentChatMessage[];
+    name: string | null;
+    note: string | null;
+  }>({ messages: [], name: null, note: null });
+
+  // Adopt the conversation that happened before the sign-in, once. It is read
+  // from storage, shown first, and then deleted so a later visit cannot seed the
+  // same two messages again.
+  useEffect(() => {
+    if (trialStarted.current) {
+      return;
+    }
+    trialStarted.current = true;
+    const exchange = loadTrialExchange();
+    if (!exchange) {
+      return;
+    }
+    setTrial({
+      messages: [
+        { id: newMessageId(), role: 'owner', text: exchange.message, at: exchange.at },
+        {
+          id: newMessageId(),
+          role: 'agent',
+          text: exchange.reply,
+          at: exchange.at + 1,
+        },
+      ],
+      name: exchange.agentName,
+      note: exchange.note,
+    });
+    clearTrialExchange();
+  }, []);
+
+  // Ask for the owner session: signed in, built-in brain, nothing paired yet.
+  useEffect(() => {
+    if (status !== 'unpaired' || autopairStarted.current) {
+      return;
+    }
+    if (!shouldAutopair({ setup, fid })) {
+      return;
+    }
+    autopairStarted.current = true;
+    let cancelled = false;
+    setAutopair({ state: 'running', sentence: null, provisioning: null });
+
+    void (async () => {
+      const outcome = await openOwnerSession({ proof: loadSiwfProof(), setup });
+      if (cancelled) {
+        return;
+      }
+      if (!outcome.ok) {
+        setAutopair({
+          state: 'failed',
+          sentence: outcome.sentence,
+          provisioning: null,
+        });
+        return;
+      }
+      // The proof has been spent; a session is what is kept now.
+      clearSiwfProof();
+      await pair({
+        baseUrl: outcome.session.baseUrl,
+        token: outcome.session.token,
+      });
+      setTab('chat');
+      setAutopair({
+        state: 'idle',
+        sentence: null,
+        provisioning: outcome.provisioning,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status, fid, pair, setup]);
+
+  /** What to call the agent while it is not yet a live instance. */
+  const namedAgent = trial.name ?? setup.agentName;
+
+  /** The thread: what was said before signing in, then what has been said since. */
+  const thread = trial.messages.length
+    ? [...trial.messages, ...messages]
+    : messages;
+
+  /**
+   * The one sentence the surface is allowed to say about an agent that is not
+   * awake. The service's own words when it sent any, and otherwise the plainest
+   * true thing: nothing was changed.
+   */
+  const notAwakeSentence =
+    autopair.provisioning?.message ??
+    autopair.sentence ??
+    AUTOPAIR_SENTENCES.UNREACHABLE;
 
   // The live Hermes catalog is public: it is a receipt for what a hatched agent
   // ships with, so it is fetched before anyone pairs.
@@ -468,6 +597,65 @@ const AgentPage: React.FC = () => {
       );
     }
 
+    if (!paired && shouldAutopair({ setup, fid })) {
+      // Signed in with a brain Fiddy provides: this is a chat, not a form. The
+      // service is asked for the owner's session on arrival; whether that is
+      // open or closed, what the owner sees is their agent's name and one
+      // sentence — plus the one conversation they already started.
+      return (
+        <section className="solid-glass-pane mx-auto w-full max-w-xl rounded-[18px] p-5">
+          <header className="mb-3 flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-[#d4ff3f] bg-[#1d1e1c]">
+              <span
+                aria-hidden="true"
+                className="text-lg font-bold text-[#d4ff3f]"
+              >
+                {namedAgent.charAt(0).toUpperCase()}
+              </span>
+            </div>
+            <div>
+              <h1 className="font-[SeasonMix] text-lg font-semibold text-default">
+                {namedAgent}
+              </h1>
+              <p
+                role="status"
+                aria-live="polite"
+                className="text-sm text-muted"
+              >
+                {autopair.state === 'running' ? 'Waking your agent…' : 'Not awake yet'}
+              </p>
+            </div>
+          </header>
+
+          <p role="alert" className="mb-2 text-sm text-muted">
+            {autopair.state === 'running'
+              ? 'You are signed in, so this browser asked the service that runs your agent for your session.'
+              : notAwakeSentence}
+          </p>
+          {trial.note ? (
+            <p className="mb-2 text-xs text-muted">{trial.note}</p>
+          ) : null}
+
+          <AgentChatPanel
+            messages={thread}
+            busy={false}
+            onSend={() => undefined}
+            awaiting={{ note: `You can write to ${namedAgent} once it is awake.` }}
+          />
+
+          <div className="mt-4 border-t border-[rgba(255,255,255,0.09)] pt-4">
+            <button
+              type="button"
+              onClick={() => setView('pair')}
+              className="text-sm text-[#d4ff3f] underline underline-offset-4 hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d4ff3f]"
+            >
+              I run my own agent service — pair it
+            </button>
+          </div>
+        </section>
+      );
+    }
+
     if (!paired) {
       return (
         <AgentHatchCard
@@ -604,7 +792,7 @@ const AgentPage: React.FC = () => {
 
         {tab === 'chat' ? (
           <AgentChatPanel
-            messages={messages}
+            messages={thread}
             busy={chatBusy}
             onSend={(text) => void sendMessage(text)}
           />

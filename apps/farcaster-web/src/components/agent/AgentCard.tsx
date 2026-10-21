@@ -121,7 +121,7 @@ export const AgentHatchCard = memo<AgentHatchCardProps>(
             onClick={onPair}
             className="text-sm text-[#d4ff3f] underline underline-offset-4 hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d4ff3f]"
           >
-            I already run an agent — pair it
+            I run my own agent service — pair it
           </button>
         </div>
       </section>

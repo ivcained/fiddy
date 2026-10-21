@@ -70,6 +70,13 @@ vi.mock('~/components/page/Page', () => ({
 
 vi.mock('~/utils/errorUtils', () => ({ trackError: () => undefined }));
 
+// The surface reads the signed-in account to decide whether it can be paired
+// automatically; these tests are about the states either side of that, so the
+// account is signed out (`fid: 0`). See agentAutopairLanding.test.tsx.
+vi.mock('~/hooks/data/useCurrentUser', () => ({
+  useCurrentUser: () => ({ fid: 0 }),
+}));
+
 const { AgentPage } = await import('~/pages/agent/AgentPage');
 
 const scheduleStore = new Map<string, unknown>();
@@ -184,7 +191,7 @@ describe('not paired', () => {
     render(<AgentPage />);
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'I already run an agent — pair it',
+        name: 'I run my own agent service — pair it',
       }),
     );
 
@@ -208,7 +215,7 @@ describe('not paired', () => {
     render(<AgentPage />);
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'I already run an agent — pair it',
+        name: 'I run my own agent service — pair it',
       }),
     );
 

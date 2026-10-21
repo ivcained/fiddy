@@ -39,11 +39,12 @@ export const AgentPairPanel = memo<AgentPairPanelProps>(
     return (
       <section className="solid-glass-pane mx-auto w-full max-w-xl rounded-[18px] p-6">
         <h1 className="mb-1 font-[SeasonMix] text-xl font-semibold text-default">
-          Pair your agent
+          Pair your own agent service
         </h1>
         <p className="mb-5 text-sm text-muted">
-          Paste the address of the service that runs your agent and a session
-          token for it. Both stay in this browser; the agent keeps its own keys.
+          For self-hosters: paste the address of the service that runs your agent
+          and a session token for it. Both stay in this browser; the agent keeps
+          its own keys.
         </p>
 
         <form

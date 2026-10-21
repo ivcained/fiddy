@@ -20,10 +20,17 @@ export interface AgentChatPanelProps {
   messages: AgentChatMessage[];
   busy: boolean;
   onSend: (text: string) => void;
+  /**
+   * Set when this agent cannot be written to yet (its session is still being
+   * asked for, or starting one is closed on the service). The sentence takes the
+   * place of the input instead of leaving a field that would swallow a message
+   * and answer with nothing.
+   */
+  awaiting?: { note: string } | null;
 }
 
 export const AgentChatPanel = memo<AgentChatPanelProps>(
-  ({ messages, busy, onSend }) => {
+  ({ messages, busy, onSend, awaiting = null }) => {
     const [draft, setDraft] = useState('');
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -78,35 +85,44 @@ export const AgentChatPanel = memo<AgentChatPanelProps>(
           ) : null}
         </div>
 
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit();
-          }}
-          className="flex items-end gap-2 border-t border-[rgba(255,255,255,0.09)] p-3"
-        >
-          <textarea
-            ref={inputRef}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submit();
-              }
-            }}
-            rows={2}
-            placeholder="Message your agent…"
-            className="min-h-[44px] flex-1 resize-y rounded-lg border border-[rgba(255,255,255,0.09)] bg-[#1d1e1c] px-3 py-2 text-sm text-default placeholder:text-muted focus:border-[#d4ff3f] focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={busy || draft.trim().length === 0}
-            className="rounded-lg bg-[#d4ff3f] px-4 py-2 text-sm font-semibold text-[#1a1c10] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        {awaiting ? (
+          <p
+            role="status"
+            className="border-t border-[rgba(255,255,255,0.09)] p-3 text-sm text-muted"
           >
-            Send
-          </button>
-        </form>
+            {awaiting.note}
+          </p>
+        ) : (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              submit();
+            }}
+            className="flex items-end gap-2 border-t border-[rgba(255,255,255,0.09)] p-3"
+          >
+            <textarea
+              ref={inputRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
+              rows={2}
+              placeholder="Message your agent…"
+              className="min-h-[44px] flex-1 resize-y rounded-lg border border-[rgba(255,255,255,0.09)] bg-[#1d1e1c] px-3 py-2 text-sm text-default placeholder:text-muted focus:border-[#d4ff3f] focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={busy || draft.trim().length === 0}
+              className="rounded-lg bg-[#d4ff3f] px-4 py-2 text-sm font-semibold text-[#1a1c10] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Send
+            </button>
+          </form>
+        )}
       </section>
     );
   },
