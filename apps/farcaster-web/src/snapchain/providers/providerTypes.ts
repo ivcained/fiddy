@@ -15,7 +15,12 @@
  *   farcaster-public   `api.farcaster.xyz` — Farcaster's own public client API.
  *                      No account needed for the public reads it documents, but
  *                      it is READ-ONLY here and it cannot tell us how far behind
- *                      the network it is. It is a safety net, never a first choice.
+ *                      the network it is. MEASURED (2026-10-21): a page on
+ *                      another origin cannot read it at all — it sends no
+ *                      cross-origin permission for any `/v1/**` or `/v2/**`
+ *                      path — so in this web client it is a thing the reader can
+ *                      see and name, never one that answers. See
+ *                      `publicServerOffTheWeb`.
  *
  * Two invariants, both load-bearing:
  *

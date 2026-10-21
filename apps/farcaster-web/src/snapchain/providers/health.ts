@@ -23,6 +23,10 @@
  */
 
 import type { NodeProvider } from './providerTypes';
+import {
+  PUBLIC_SERVER_NO_ANSWER_REASON,
+  PUBLIC_SERVER_UNREADABLE_FROM_A_PAGE,
+} from './publicServerOffTheWeb';
 
 export type ProviderStatus =
   | 'live'
@@ -529,11 +533,20 @@ export const probeNeynar = async ({
 };
 
 /**
- * Probe `api.farcaster.xyz`: one documented public read that needs no account.
+ * Probe `api.farcaster.xyz`: a read of the kind this client asks it for.
  *
- * It reports reachability and speed, and freshness stays `unknown` — this API
- * publishes nothing about how far behind it is, and this client will not
- * pretend otherwise.
+ * It used to ask `/fc/primary-address` — the ONE path on that server a page on
+ * another origin is allowed to read (`access-control-allow-origin: *`). So the
+ * check said "reachable", the failover moved the reader onto it, and then every
+ * read the client actually makes was refused by the browser: MEASURED
+ * (2026-10-21) eleven distinct reads on the live site, all CORS failures, while
+ * the reader's unseen counts, spaces and explore panels showed "Failed to
+ * fetch". A reachability check has to ask the question the reads will ask, so it
+ * asks `/v2/user-by-fid` — a documented public read that needs no account, and
+ * one this client's data layer really uses.
+ *
+ * Freshness stays `unknown`: this API publishes nothing about how far behind it
+ * is, and this client will not pretend otherwise.
  */
 export const probeFarcasterPublic = async ({
   provider,
@@ -545,7 +558,7 @@ export const probeFarcasterPublic = async ({
   config?: HealthConfig;
 }): Promise<ProbeSample> => {
   const { response, latencyMs, aborted } = await fetchWithDeadline(
-    `${provider.baseUrl}/fc/primary-address?fid=12152&protocol=ethereum`,
+    `${provider.baseUrl}/v2/user-by-fid?fid=3`,
     { fetchImpl, timeoutMs: config.timeoutMs },
   );
 
@@ -553,7 +566,12 @@ export const probeFarcasterPublic = async ({
     return failedSample(
       aborted
         ? `It did not answer within ${config.timeoutMs / 1000}s.`
-        : 'It did not answer at all.',
+        : // A browser that never got an answer back means one of two things,
+          // and this client will not pick for the reader: the server is
+          // unreachable from here, or it did not permit this origin to read it —
+          // which is what api.farcaster.xyz does for every read this client
+          // makes (see `providers/publicServerOffTheWeb`).
+          PUBLIC_SERVER_NO_ANSWER_REASON,
       latencyMs,
     );
   }
@@ -606,7 +624,13 @@ export const probeProvider = async ({
     case 'neynar':
       return probeNeynar({ apiKey, provider, fetchImpl, config });
     case 'farcaster-public':
-      return probeFarcasterPublic({ provider, fetchImpl, config });
+      // Measured, so it is not asked: a page on another origin cannot read that
+      // server (see `publicServerOffTheWeb`). Asking anyway would put a CORS
+      // failure in the console once a minute to learn nothing new, and would let
+      // the failover park the reader on a server that cannot answer a single one
+      // of this client's reads. `probeFarcasterPublic` stays for a context that
+      // really can read it (a native shell).
+      return failedSample(PUBLIC_SERVER_UNREADABLE_FROM_A_PAGE, null);
     case 'snapchain':
     default:
       return probeSnapchain({ provider, fetchImpl, config });

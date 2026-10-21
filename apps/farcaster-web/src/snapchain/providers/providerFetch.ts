@@ -15,11 +15,12 @@
  *                      reads (feed, unseen, notifications) only exist here.
  *   neynar             the thin mapper in `neynarMap.ts`, for the reads Neynar
  *                      actually serves. Everything else is refused by name.
- *   farcaster-public   the same request path at `api.farcaster.xyz`, whose
- *                      public reads already speak the hosted shapes — no mapper
- *                      needed, and no credential forwarded. Its signed-in
- *                      endpoints answer 401, which this turns into a sentence
- *                      saying that read needs a node.
+ *   farcaster-public   `api.farcaster.xyz`. A page cannot read it at all
+ *                      (measured 2026-10-21; see `publicServerOffTheWeb`), so
+ *                      its requests are refused here in the words of their own
+ *                      classification: no cross-origin fetch is fired at an
+ *                      origin that would refuse it, and no credential is ever
+ *                      forwarded anywhere.
  *
  * Two rules this file exists to enforce:
  *
@@ -56,10 +57,14 @@ import {
   type RequestLogEntry,
 } from '~/snapchain/nodeApi/nodeBackedFetch';
 
-import { FARCASTER_PUBLIC_BASE_URL, NEYNAR_BASE_URL } from './catalog';
+import { NEYNAR_BASE_URL } from './catalog';
 import { answerFromNeynar } from './neynarMap';
 import { neynarApiKeyFromEnv } from './preferences';
 import type { NodeProvider } from './providerTypes';
+import {
+  PUBLIC_SERVER_OFF_THE_WEB_STATUS,
+  publicServerCannotAnswer,
+} from './publicServerOffTheWeb';
 
 export interface ProviderBackedFetchOptions {
   /** Which provider is live right now, asked fresh on every request. */
@@ -241,53 +246,12 @@ export const createProviderBackedFetch = ({
     }
   };
 
-  /** Same request, at Farcaster's own public server, without our session. */
-  const answerFromFarcasterPublic = async (
-    { url, method }: ParsedRequest,
-    provider: NodeProvider,
-  ): Promise<Response> => {
-    const endpoint = hostedApiPath(url.pathname);
-
-    if (method !== 'GET' && method !== 'HEAD') {
-      return errorResponse(
-        501,
-        `${method} ${endpoint} is a write, and Farcaster's own public server does not take writes from this client. Posting goes through your node (or ours) instead.`,
-      );
-    }
-
-    const target = `${provider.baseUrl || FARCASTER_PUBLIC_BASE_URL}${endpoint}${url.search}`;
-    let response: Response;
-    try {
-      response = await boundFetch(target, {
-        method: 'GET',
-        credentials: 'omit',
-      });
-    } catch (error) {
-      return errorResponse(
-        502,
-        `Farcaster's own public server did not answer: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    if (response.status === 401 || response.status === 403) {
-      return errorResponse(
-        501,
-        `${endpoint} needs a signed-in session, which only Farcaster's own app can hold. This client reads that from a node — not from the public server.`,
-      );
-    }
-
-    // The body is already in the hosted shapes the client expects, so it is
-    // passed through as-is; only the status and content type are re-stated.
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        'content-type':
-          response.headers.get('content-type') ??
-          'application/json; charset=utf-8',
-      },
-    });
-  };
+  // (Farcaster's own public server used to be answered right here, by fetching
+  // the same path cross-origin and passing the hosted body through. That is
+  // gone: measured 2026-10-21, a page on another origin cannot read that server
+  // at all, so every one of those fetches came back a CORS failure while the
+  // client showed "Failed to fetch". What replaced it is `publicServerOffTheWeb`
+  // and the refusal in `providerBackedFetch`.)
 
   const answer = async (
     parsed: ParsedRequest,
@@ -312,8 +276,9 @@ export const createProviderBackedFetch = ({
         });
       }
 
-      case 'farcaster-public':
-        return answerFromFarcasterPublic(parsed, provider);
+      // `farcaster-public` never reaches this switch: the caller refuses its
+      // requests in place, because a page cannot read that server at all (see
+      // `publicServerOffTheWeb`, and the guard in `providerBackedFetch`).
 
       case 'snapchain':
       default: {
@@ -421,6 +386,38 @@ export const createProviderBackedFetch = ({
           ? { body: JSON.stringify(parsed.body) }
           : {}),
       });
+    }
+
+    // Farcaster's own public server cannot be read from a web page at all —
+    // measured on the live site: eleven distinct reads, every one of them
+    // refused by CORS (see `publicServerOffTheWeb`). So it is refused here
+    // rather than asked. The reader gets a sentence about the read itself
+    // instead of "Failed to fetch", and no request leaves the page for an
+    // origin that will throw it away.
+    //
+    // It counts as a failed read through `onRead`, exactly like any other 5xx
+    // answer: this server did not answer the read, and the engine should be
+    // able to move the reader onto a node because of it. (The measurement also
+    // fixed the other half of this: `probeFarcasterPublic` now asks a read this
+    // client actually makes, so in a page this server is measured as not
+    // answering and is never made live in the first place.)
+    if (provider.kind === 'farcaster-public') {
+      // The routing log keeps it: this request WAS routed to that provider, and
+      // the provider could not answer it — that is the fact worth recording.
+      log.push({ path, providerId: provider.id, kind: provider.kind });
+      const refusal = errorResponse(
+        PUBLIC_SERVER_OFF_THE_WEB_STATUS,
+        publicServerCannotAnswer(route),
+      );
+      recordSelfAnswered(
+        requestLog,
+        parsed,
+        route,
+        refusal,
+        bodyPreviewOf(parsed),
+      );
+      onRead?.(provider.id, refusal.status < 500);
+      return refusal;
     }
 
     log.push({ path, providerId: provider.id, kind: provider.kind });

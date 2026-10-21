@@ -22,6 +22,7 @@ import {
   judgeProbe,
   probeFarcasterPublic,
   probeNeynar,
+  probeProvider,
   type ProbeSample,
   probeSnapchain,
 } from '~/snapchain/providers/health';
@@ -233,6 +234,82 @@ describe('probeFarcasterPublic', () => {
     });
     expect(sample.ok).toBe(true);
     expect(sample.watermark).toBeNull();
+  });
+
+  it('asks a read this client actually makes, not the one path a page may read', async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      urls.push(String(url));
+      return jsonResponse({ result: { user: { fid: 3 } } });
+    }) as unknown as typeof fetch;
+
+    await probeFarcasterPublic({
+      provider: farcasterPublicProvider(),
+      fetchImpl,
+    });
+
+    // MEASURED (2026-10-21): `/fc/primary-address` is the only path on that
+    // server a page on another origin may read, so a probe of it called the
+    // server reachable while every read the client makes was CORS-refused.
+    expect(urls[0]).toBe('https://api.farcaster.xyz/v2/user-by-fid?fid=3');
+  });
+
+  it('names both reasons no answer can come back, instead of guessing', async () => {
+    const fetchImpl = (async () => {
+      // Exactly what a browser throws when it refuses to hand over a
+      // cross-origin answer — a refused request and a dead host are the same
+      // TypeError here.
+      throw new TypeError('Failed to fetch');
+    }) as unknown as typeof fetch;
+
+    const sample = await probeFarcasterPublic({
+      provider: farcasterPublicProvider(),
+      fetchImpl,
+    });
+
+    expect(sample.ok).toBe(false);
+    expect(sample.reason).toContain('unreachable from here');
+    expect(sample.reason).toContain('not allowed to read it');
+    // The status the failover acts on: not answering at all.
+    expect(
+      judgeProbe({
+        providerId: 'farcaster-public',
+        sample,
+        freshness: 'unknown',
+        now: 1_000,
+      }).status,
+    ).toBe('down');
+  });
+});
+
+describe('probeProvider: Farcaster’s own public server, from a page', () => {
+  it('is not asked at all, and the reader is told why it cannot answer', async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(String(url));
+      return jsonResponse({ result: {} });
+    }) as unknown as typeof fetch;
+
+    const sample = await probeProvider({
+      provider: farcasterPublicProvider(),
+      apiKey: null,
+      fetchImpl,
+    });
+
+    // Zero requests: the answer cannot change while the page is open, and asking
+    // would put a CORS failure in the console every minute for nothing.
+    expect(calls).toEqual([]);
+    expect(sample.ok).toBe(false);
+    expect(sample.reason).toContain('permits its own origins only');
+
+    const health = judgeProbe({
+      providerId: 'farcaster-public',
+      sample,
+      freshness: 'unknown',
+      now: 1_000,
+    });
+    expect(health.status).toBe('down');
+    expect(health.detail).toContain('permits its own origins only');
   });
 });
 

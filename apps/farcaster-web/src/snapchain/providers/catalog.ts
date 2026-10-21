@@ -98,7 +98,7 @@ export const farcasterPublicProvider = (): NodeProvider => ({
   source: 'builtin',
   label: "Farcaster's own public server",
   detail:
-    'Open to everyone and needs no account, but it only serves its public list, it cannot write, and it cannot say how far behind it is. A safety net, not a first choice.',
+    'Open to everyone and needs no account — but a web page is not allowed to read it at all (it permits its own origins only), it cannot write, and it cannot say how far behind it is. Fiddy cannot read it from a page, so it never answers here. Listed so you can see what it is.',
   baseUrl: FARCASTER_PUBLIC_BASE_URL,
   readOnly: true,
 });

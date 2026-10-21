@@ -1,12 +1,13 @@
 /**
  * The routing fetch, as tests — including the one thing that must never happen.
  *
- * The live provider decides where a request goes, and the three ways of
- * answering are each checked here: a node-backed read goes to the node the live
- * provider names, Farcaster's public server gets the same path at its own
- * address with no session attached, and Neynar gets its mapped call. The last
- * test is the security one: this device's session headers are never replayed to
- * a third-party server.
+ * The live provider decides where a request goes, and the ways of answering are
+ * each checked here: a node-backed read goes to the node the live provider
+ * names, Neynar gets its mapped call (and none of this device's session), and
+ * Farcaster's own public server — which a page cannot read at all, measured
+ * 2026-10-21 — is refused in place instead of being asked. The last test is the
+ * security one: this device's session headers are never replayed to a
+ * third-party server.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -105,88 +106,79 @@ describe('createProviderBackedFetch: a node provider', () => {
 });
 
 describe('createProviderBackedFetch: Farcaster’s own public server', () => {
-  it('asks the same path at that server, and passes the hosted answer through', async () => {
-    const calls: { url: string; init?: RequestInit }[] = [];
-    const fetchImpl = (async (url: string, init?: RequestInit) => {
-      calls.push({ url, init });
-      return jsonResponse({ result: { user: { fid: 3 } } });
-    }) as unknown as typeof fetch;
+  // MEASURED (2026-10-21, the live site): a page on another origin cannot read
+  // that server at all — every `/v1/**` and `/v2/**` path answers `Vary: Origin`
+  // and no `Access-Control-Allow-Origin`, so the client's reads came back CORS
+  // failures ("Failed to fetch") twice a minute. The seam now refuses them in
+  // place; the tests below are the ones that would catch a regression to asking.
 
-    const handle = createProviderBackedFetch({
+  const handleWith = (
+    fetchImpl: typeof fetch,
+    onRead?: (providerId: string, ok: boolean) => void,
+  ) =>
+    createProviderBackedFetch({
       getActiveProvider: () => farcasterPublicProvider(),
       getSignedInFid: () => 3,
       nodeBaseUrl: '/snapchain-api',
       fetchImpl,
+      ...(onRead ? { onRead } : {}),
     });
 
-    const response = await handle.fetch(
-      'https://farcaster.xyz/~api/v2/user-by-fid?fid=3',
-    );
-
-    expect(calls[0]!.url).toBe(
-      'https://api.farcaster.xyz/v2/user-by-fid?fid=3',
-    );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ result: { user: { fid: 3 } } });
-  });
-
-  it('sends no session at all to a third-party server', async () => {
-    const calls: { init?: RequestInit }[] = [];
-    const fetchImpl = (async (_url: string, init?: RequestInit) => {
-      calls.push({ init });
+  it('does not ask it for a read a node assembles — and says what the read needs', async () => {
+    const calls: string[] = [];
+    const handle = handleWith((async (url: string) => {
+      calls.push(String(url));
       return jsonResponse({ result: {} });
-    }) as unknown as typeof fetch;
-
-    const handle = createProviderBackedFetch({
-      getActiveProvider: () => farcasterPublicProvider(),
-      getSignedInFid: () => 3,
-      nodeBaseUrl: '/snapchain-api',
-      fetchImpl,
-    });
-
-    await handle.fetch('https://farcaster.xyz/~api/v2/user-by-fid?fid=3', {
-      headers: {
-        authorization: 'Bearer this-device-session-token',
-        cookie: 'fiddy=1',
-        'fc-device-id': 'device-1',
-      },
-    });
-
-    const headers = new Headers(calls[0]!.init?.headers ?? undefined);
-    expect(headers.get('authorization')).toBeNull();
-    expect(headers.get('cookie')).toBeNull();
-    expect(headers.get('fc-device-id')).toBeNull();
-    expect(calls[0]!.init?.credentials).toBe('omit');
-  });
-
-  it('says a signed-in read needs a node instead of showing a raw 401', async () => {
-    const fetchImpl = (async () =>
-      jsonResponse(
-        { errors: [{ message: 'Authentication required' }] },
-        401,
-      )) as unknown as typeof fetch;
-    const handle = createProviderBackedFetch({
-      getActiveProvider: () => farcasterPublicProvider(),
-      getSignedInFid: () => 3,
-      nodeBaseUrl: '/snapchain-api',
-      fetchImpl,
-    });
+    }) as unknown as typeof fetch);
 
     const response = await handle.fetch('https://farcaster.xyz/~api/v2/unseen');
 
+    expect(calls).toEqual([]);
     expect(response.status).toBe(501);
     const body = (await response.json()) as { errors: { message: string }[] };
-    expect(body.errors[0]!.message).toContain('needs a signed-in session');
-    expect(body.errors[0]!.message).toContain('reads that from a node');
+    expect(body.errors[0]!.message).toContain('/v2/unseen is read from a node');
+    expect(body.errors[0]!.message).toContain('cannot be read from a web page');
+    expect(handle.log[0]!.providerId).toBe('farcaster-public');
   });
 
-  it('refuses a write by name', async () => {
-    const handle = createProviderBackedFetch({
-      getActiveProvider: () => farcasterPublicProvider(),
-      getSignedInFid: () => 3,
-      nodeBaseUrl: '/snapchain-api',
-      fetchImpl: (async () => jsonResponse({})) as unknown as typeof fetch,
-    });
+  it('does not ask it for a hosted feature either — the classification already says whose job it is', async () => {
+    const calls: string[] = [];
+    const handle = handleWith((async (url: string) => {
+      calls.push(String(url));
+      return jsonResponse({ result: {} });
+    }) as unknown as typeof fetch);
+
+    const response = await handle.fetch(
+      'https://farcaster.xyz/~api/v1/audio-rooms',
+    );
+
+    expect(calls).toEqual([]);
+    expect(response.status).toBe(501);
+    const body = (await response.json()) as { errors: { message: string }[] };
+    expect(body.errors[0]!.message).toContain(
+      'audio rooms are a hosted product, not protocol messages',
+    );
+    expect(body.errors[0]!.message).toContain('cannot be read from a web page');
+  });
+
+  it('counts the refusal as a read that did not answer, so the engine can move on', async () => {
+    const reads: { providerId: string; ok: boolean }[] = [];
+    const handle = handleWith(
+      (async () => jsonResponse({})) as unknown as typeof fetch,
+      (providerId, ok) => reads.push({ providerId, ok }),
+    );
+
+    await handle.fetch('https://farcaster.xyz/~api/v2/unseen');
+
+    expect(reads).toEqual([{ providerId: 'farcaster-public', ok: false }]);
+  });
+
+  it('refuses a write by name, without asking', async () => {
+    const calls: string[] = [];
+    const handle = handleWith((async (url: string) => {
+      calls.push(String(url));
+      return jsonResponse({});
+    }) as unknown as typeof fetch);
 
     const response = await handle.fetch(
       'https://farcaster.xyz/~api/v2/feed-items',
@@ -196,9 +188,60 @@ describe('createProviderBackedFetch: Farcaster’s own public server', () => {
       },
     );
 
+    expect(calls).toEqual([]);
     expect(response.status).toBe(501);
     const body = (await response.json()) as { errors: { message: string }[] };
     expect(body.errors[0]!.message).toContain('does not take writes');
+  });
+
+  // The measurement itself, kept as a test: these are the eleven distinct reads
+  // that actually left the live page (https://fiddy.fun, 89cdd01) for
+  // api.farcaster.xyz, every one of them refused by the browser, twice a poll.
+  // Not one of them may leave the page again — that is the whole fix, and a
+  // regression to asking shows up here rather than as 66 console errors in a
+  // release probe.
+  it('fires nothing at all for the eleven reads the live page was refused', async () => {
+    const calls: string[] = [];
+    const handle = handleWith((async (url: string) => {
+      calls.push(String(url));
+      return jsonResponse({ result: {} });
+    }) as unknown as typeof fetch);
+
+    const measured = [
+      '/v1/audio-rooms',
+      '/v1/favorite-frames?limit=20',
+      '/v1/get-trending-topics',
+      '/v2/highlighted-channels',
+      '/v2/direct-cast-inbox?limit=15&category=default',
+      '/v2/explore-feed',
+      '/v2/feeds',
+      '/v2/channel-streaks?fid=3',
+      '/v2/user-following-channels?forComposer=true&limit=50',
+      '/v2/user-thread-casts?castHashPrefix=0x2c45b3e3&username=borodutch&limit=15',
+      '/v2/unseen',
+    ];
+
+    for (const path of measured) {
+      const response = await handle.fetch(`https://farcaster.xyz/~api${path}`);
+      const body = (await response.json()) as {
+        errors: { message: string }[];
+      };
+      // Every read is answered with a sentence about the read itself…
+      expect(body.errors[0]!.message).toContain(
+        'cannot be read from a web page',
+      );
+      // …and never with the browser's own words for a refused request.
+      expect(body.errors[0]!.message).not.toContain('Failed to fetch');
+      expect(response.status).toBe(501);
+    }
+
+    expect(calls).toEqual([]);
+    // Each one was routed to that provider and could not be answered by it, so
+    // the failover engine still sees eleven failed reads and can move the reader.
+    expect(handle.log).toHaveLength(measured.length);
+    expect(
+      handle.log.every((entry) => entry.providerId === 'farcaster-public'),
+    ).toBe(true);
   });
 });
 
@@ -250,6 +293,40 @@ describe('createProviderBackedFetch: Neynar', () => {
     };
     expect(body.result.user.username).toBe('dwr');
     expect(handle.log[0]!.kind).toBe('neynar');
+  });
+
+  // The security invariant the whole seam exists to keep: this device's session
+  // with Fiddy's own API is never replayed to a third-party server. (It used to
+  // be checked through Farcaster's public server; that one is now refused in
+  // place and asks nothing, so Neynar — the only third party a request still
+  // reaches — is where it is checked.)
+  it('replays no session to a third-party server', async () => {
+    const calls: { init?: RequestInit }[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      calls.push({ init });
+      return jsonResponse({ users: [{ fid: 3, username: 'dwr' }] });
+    }) as unknown as typeof fetch;
+
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => neynarProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl,
+      neynarApiKey: 'neynar-key',
+    });
+
+    await handle.fetch('https://farcaster.xyz/~api/v2/user-by-fid?fid=3', {
+      headers: {
+        authorization: 'Bearer this-device-session-token',
+        cookie: 'fiddy=1',
+        'fc-device-id': 'device-1',
+      },
+    });
+
+    const headers = new Headers(calls[0]!.init?.headers ?? undefined);
+    expect(headers.get('authorization')).toBeNull();
+    expect(headers.get('cookie')).toBeNull();
+    expect(headers.get('fc-device-id')).toBeNull();
   });
 });
 
