@@ -279,11 +279,26 @@ and each says why:
   `script-src 'self' 'unsafe-inline'` in their own locations: their HTML carries
   an inline `<script>` and no inline handler. Different page, different CSP —
   tightening it means moving that script out, which is not the client's shell.
-- The client still makes a few hosted calls the public origin cannot serve:
-  `api.farcaster.xyz/v1/audio-rooms` and `/v2/unseen` fail CORS, and PostHog
-  analytics posts to `ph.neynar.com` with the fork's placeholder key
-  (`REPLACE_ME`), which the CSP also refuses (`script-src-elem`). None of them
-  touches the composer or the media path.
+- ~~The client still makes a few hosted calls the public origin cannot serve~~
+  **Closed by `481ac9c`/`48e1566`** (2026-10-21): `api.farcaster.xyz/v1/**` and
+  `/v2/**` and `ph.neynar.com` are no longer asked at all by a page. Two halves:
+  the provider seam refuses a request for Farcaster's own public server in place,
+  in the words of that request's own classification
+  (`src/snapchain/providers/publicServerOffTheWeb.ts`), and the health probe no
+  longer asks that server for the ONE path a page may read (`/fc/primary-address`)
+  — which is what used to measure it "reachable", park the reader on it, and make
+  every real read fail. Analytics with no `VITE_POSTHOG_API_KEY` in the build
+  sends nothing (`src/constants/analytics.ts`). `/fc/*` is untouched (it answers,
+  and it is not routed through the seam).
+  Verify with `scripts/verify-no-off-site-reads.mjs` against the served origin:
+  same harness, pre-fix 374 reads / 24 refused by CORS / 2 PostHog with
+  `REPLACE_ME` → FAIL; fixed 351 reads / 0 refused / 0 PostHog → PASS, and the
+  "Unseen counts couldn't load — Farcaster didn't answer. Retrying." banner that
+  the parked reader used to carry is gone.
+- Farcaster's wallet modal frame (`wallet.farcaster.xyz`) measures itself with
+  its own PostHog key inside its own document, so a page that frames it will show
+  those requests in the network panel. Not this client's doing, and not fixable
+  from here; `verify-no-off-site-reads.mjs` reports them as another document's.
 - `VITE_WALLETCONNECT_PROJECT_ID` is not set in the release build (the working
   clone's `.env.local` holds a placeholder), so WalletConnect-based wallets
   stay unavailable; the node picker and the public relay work without it.
