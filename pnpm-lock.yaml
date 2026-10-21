@@ -19743,7 +19743,7 @@ snapshots:
       postcss: 8.5.10
       resolve-from: 5.0.0
     optionalDependencies:
-      expo: 55.0.24(0486a1249d5ce994fefe85df11fdbe21)
+      expo: 55.0.24(98112db57379aaeeda971a714ba8e109)
     transitivePeerDependencies:
       - bufferutil
       - supports-color

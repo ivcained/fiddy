@@ -106,10 +106,18 @@ await phone.route('https://relay.farcaster.xyz/**', async (route) => {
   });
 });
 
-await phone.goto(`${SERVER}/`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+// MEASURED (2026-10-22, load average ~45 on 10 cores, dozens of sibling dev
+// servers on this machine): a cold dev-server route compiles on first visit, and
+// a 30s wait reported an empty body for a landing that was merely still
+// compiling. The budgets are generous on purpose and env-settable, so a busier
+// machine can say so rather than report a client that never painted.
+const BOOT_BUDGET_MS = Number(process.env.PROBE_BOOT_BUDGET_MS ?? 180_000);
+
+await phone.goto(`${SERVER}/`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
+await phone.setDefaultTimeout(BOOT_BUDGET_MS);
 await phone.waitForFunction(
   () => (document.body?.innerText ?? '').trim().length > 60,
-  { timeout: 60_000 },
+  { timeout: BOOT_BUDGET_MS },
   );
 
 const clickByText = async (page, pattern) => {
