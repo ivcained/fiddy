@@ -70,7 +70,9 @@ describe('the browser config', () => {
 describe('when a provider is switched off in the dashboard', () => {
   it('recognises the code however Privy delivers it', () => {
     expect(isMethodDisabledError('disallowed_login_method')).toBe(true);
-    expect(isMethodDisabledError({ code: 'disallowed_login_method' })).toBe(true);
+    expect(isMethodDisabledError({ code: 'disallowed_login_method' })).toBe(
+      true,
+    );
     expect(
       isMethodDisabledError({
         error: 'error: disallowed_login_method for this app',

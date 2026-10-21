@@ -15,8 +15,8 @@ import {
   isSocialAccount,
   pickSocialIdentity,
   pickSocialWallet,
-  shortAddress,
   type PrivyUserLike,
+  shortAddress,
 } from '~/lib/socialAccount';
 import { describeLocalAccount } from '~/snapchain/accounts/localAccounts';
 

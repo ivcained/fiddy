@@ -26,9 +26,9 @@
 import { KeyRound, MessageCircle, ShieldCheck } from 'lucide-react';
 import React, { FC, lazy, memo, Suspense, useState } from 'react';
 
+import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
 import { FiddySheet } from '~/components/fiddy/FiddySheet';
 import { SeedBackupNotice } from '~/components/fiddy/seedBackup/SeedBackupNotice';
-import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
 import { Link } from '~/components/links/Link';
 import { LoginModal } from '~/components/modals/LoginModal';
 import { Page } from '~/components/page/Page';
@@ -86,7 +86,8 @@ const FiddyAccountPage: FC = memo(() => {
     );
   }
 
-  const identityLabel = current.email ?? (current.username ? `@${current.username}` : undefined);
+  const identityLabel =
+    current.email ?? (current.username ? `@${current.username}` : undefined);
 
   return (
     <Page className="fiddy-surface" meta={{ title: 'Fiddy — your account' }}>
@@ -127,7 +128,8 @@ const FiddyAccountPage: FC = memo(() => {
               <span>
                 <b>No Farcaster account yet</b>
                 <small>
-                  posting, the feed and messages need one — that is the step above
+                  posting, the feed and messages need one — that is the step
+                  above
                 </small>
               </span>
             </li>
@@ -139,7 +141,9 @@ const FiddyAccountPage: FC = memo(() => {
                     ? `${accounts.length} accounts on this device`
                     : 'One account on this device'}
                 </b>
-                <small>switch between them from the shell once you are in</small>
+                <small>
+                  switch between them from the shell once you are in
+                </small>
               </span>
             </li>
           </ul>
@@ -165,10 +169,20 @@ const FiddyAccountPage: FC = memo(() => {
         </FiddySheet>
 
         <footer className="fiddy-legal">
-          <Link to="privacyPolicy" params={{}} searchParams={{}} title="Privacy Policy">
+          <Link
+            to="privacyPolicy"
+            params={{}}
+            searchParams={{}}
+            title="Privacy Policy"
+          >
             Privacy
           </Link>
-          <Link to="termsOfUse" params={{}} searchParams={{}} title="Terms of Use">
+          <Link
+            to="termsOfUse"
+            params={{}}
+            searchParams={{}}
+            title="Terms of Use"
+          >
             Terms
           </Link>
         </footer>

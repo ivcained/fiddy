@@ -29,11 +29,11 @@
  * says out loud what is still missing.
  */
 
+import { SOCIAL_PROVIDERS, type SocialProviderId } from '~/lib/socialSignUp';
 import {
   accountIdFor,
   type LocalAccount,
 } from '~/snapchain/accounts/localAccounts';
-import { SOCIAL_PROVIDERS, type SocialProviderId } from '~/lib/socialSignUp';
 
 /** The linked-account shapes this mapping reads, and nothing more. */
 export type PrivyLinkedAccountLike = {
@@ -214,4 +214,5 @@ export const buildSocialAccountRecord = ({
 export const isSocialAccount = (
   account: LocalAccount | undefined,
 ): account is SocialAccountRecord =>
-  Boolean(account) && (account as SocialAccountRecord).walletCustody === 'privy';
+  Boolean(account) &&
+  (account as SocialAccountRecord).walletCustody === 'privy';

@@ -114,10 +114,15 @@ export const isMethodDisabledError = (error: unknown): boolean => {
   }
 
   if (error && typeof error === 'object') {
-    const candidate = error as { code?: unknown; error?: unknown; message?: unknown };
+    const candidate = error as {
+      code?: unknown;
+      error?: unknown;
+      message?: unknown;
+    };
 
     return [candidate.code, candidate.error, candidate.message].some(
-      (value) => typeof value === 'string' && value.includes(METHOD_DISABLED_CODE),
+      (value) =>
+        typeof value === 'string' && value.includes(METHOD_DISABLED_CODE),
     );
   }
 

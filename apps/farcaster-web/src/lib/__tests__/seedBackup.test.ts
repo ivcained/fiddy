@@ -52,17 +52,17 @@ describe('a fresh account', () => {
     const asked = noteBackupAsked(initialSeedBackupState(), NOW);
 
     expect(shouldAskForBackup(asked, NOW + 60_000)).toBe(false);
-    expect(
-      shouldAskForBackup(asked, NOW + MIN_GAP_BETWEEN_ASKS_MS - 1),
-    ).toBe(false);
+    expect(shouldAskForBackup(asked, NOW + MIN_GAP_BETWEEN_ASKS_MS - 1)).toBe(
+      false,
+    );
   });
 
   it('is asked again on a later visit, because nothing was decided yet', () => {
     const asked = noteBackupAsked(initialSeedBackupState(), NOW);
 
-    expect(
-      shouldAskForBackup(asked, NOW + MIN_GAP_BETWEEN_ASKS_MS + 1),
-    ).toBe(true);
+    expect(shouldAskForBackup(asked, NOW + MIN_GAP_BETWEEN_ASKS_MS + 1)).toBe(
+      true,
+    );
   });
 });
 
@@ -117,7 +117,10 @@ describe('"I have written them down"', () => {
 
 describe('what is stored', () => {
   it('is keyed by the account, so one account’s answer never answers for another', async () => {
-    await saveSeedBackupState('0xAAA', deferBackup(initialSeedBackupState(), NOW));
+    await saveSeedBackupState(
+      '0xAAA',
+      deferBackup(initialSeedBackupState(), NOW),
+    );
 
     const other = await loadSeedBackupState('0xbbb');
 
@@ -127,7 +130,10 @@ describe('what is stored', () => {
   });
 
   it('survives a reload of the same account', async () => {
-    await saveSeedBackupState('0xaaa', markBackupSaved(initialSeedBackupState(), NOW));
+    await saveSeedBackupState(
+      '0xaaa',
+      markBackupSaved(initialSeedBackupState(), NOW),
+    );
 
     const reloaded = await loadSeedBackupState('0xAAA');
 
@@ -144,9 +150,15 @@ describe('what is stored', () => {
   });
 
   it('holds no words: the stored value is four facts and a status', async () => {
-    await saveSeedBackupState('0xaaa', deferBackup(initialSeedBackupState(), NOW));
+    await saveSeedBackupState(
+      '0xaaa',
+      deferBackup(initialSeedBackupState(), NOW),
+    );
 
-    const stored = store.get('fiddy:seed-backup:0xaaa') as Record<string, unknown>;
+    const stored = store.get('fiddy:seed-backup:0xaaa') as Record<
+      string,
+      unknown
+    >;
 
     expect(Object.keys(stored).sort()).toEqual([
       'lastShownAt',

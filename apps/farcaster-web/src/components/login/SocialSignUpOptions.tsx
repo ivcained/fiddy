@@ -11,10 +11,7 @@
 import React, { FC, memo } from 'react';
 
 import { DefaultButton } from '~/components/forms/buttons/DefaultButton';
-import {
-  SOCIAL_PROVIDERS,
-  type SocialProviderId,
-} from '~/lib/socialSignUp';
+import { SOCIAL_PROVIDERS, type SocialProviderId } from '~/lib/socialSignUp';
 
 type SocialSignUpOptionsProps = {
   onPress: (provider: SocialProviderId) => void;
@@ -31,7 +28,10 @@ type SocialSignUpOptionsProps = {
 const SocialSignUpOptions: FC<SocialSignUpOptionsProps> = memo(
   ({ onPress, busy, disabled = false, unavailableNote, message }) => {
     return (
-      <div className="flex w-full flex-col items-center" data-fiddy="social-sign-up">
+      <div
+        className="flex w-full flex-col items-center"
+        data-fiddy="social-sign-up"
+      >
         <div className="w-full space-y-3 text-center">
           <div className="text-2xl font-semibold text-default">
             Start with Google or X

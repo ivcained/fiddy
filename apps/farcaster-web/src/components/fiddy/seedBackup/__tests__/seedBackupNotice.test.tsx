@@ -62,13 +62,17 @@ describe('an account whose words are held for it', () => {
     render(
       <SeedBackupNotice
         account={heldAccount}
-        heldWordsSlot={<button type="button">Open the secure backup window</button>}
+        heldWordsSlot={
+          <button type="button">Open the secure backup window</button>
+        }
       />,
     );
 
     expect(await screen.findByText('Back up your account')).toBeTruthy();
     expect(
-      screen.getByText(/You signed up with Google, so the words behind this account/),
+      screen.getByText(
+        /You signed up with Google, so the words behind this account/,
+      ),
     ).toBeTruthy();
     expect(screen.getByText(/Nobody can give them to you again/)).toBeTruthy();
   });
@@ -104,7 +108,8 @@ describe('an account whose words live on this device', () => {
 
     fireEvent.click(await screen.findByText('Show me my backup words'));
 
-    const panel = () => document.querySelector('[data-fiddy="seed-backup-words"]')!;
+    const panel = () =>
+      document.querySelector('[data-fiddy="seed-backup-words"]')!;
 
     expect(panel().getAttribute('data-hidden')).toBe('true');
     expect(panel().querySelectorAll('li').length).toBe(12);
@@ -112,11 +117,15 @@ describe('an account whose words live on this device', () => {
 
     fireEvent.click(screen.getByText('Tap to show the words'));
 
-    await waitFor(() => expect(panel().getAttribute('data-hidden')).toBe('false'));
+    await waitFor(() =>
+      expect(panel().getAttribute('data-hidden')).toBe('false'),
+    );
 
     fireEvent.click(screen.getByText('I have written them down'));
 
-    expect(await screen.findByText(/Saved\. Your account is written down/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Saved\. Your account is written down/),
+    ).toBeTruthy();
 
     const stored = store.get(seedBackupKeyFor(deviceAccount.id)) as {
       status: string;

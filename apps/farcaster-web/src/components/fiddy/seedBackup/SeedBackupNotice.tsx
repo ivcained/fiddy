@@ -31,8 +31,8 @@ import {
   markBackupSaved,
   noteBackupAsked,
   saveSeedBackupState,
-  shouldAskForBackup,
   type SeedBackupState,
+  shouldAskForBackup,
 } from '~/lib/seedBackup';
 import { SOCIAL_PROVIDERS } from '~/lib/socialSignUp';
 import type { LocalAccount } from '~/snapchain/accounts/localAccounts';
@@ -174,8 +174,8 @@ const SeedBackupNotice: FC<SeedBackupNoticeProps> = memo(
             </p>
             <p className="text-muted">
               Nobody can give them to you again and nobody else can reset them —
-              not Fiddy. Taking your own copy now means one bad day is not the end
-              of the account.
+              not Fiddy. Taking your own copy now means one bad day is not the
+              end of the account.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <button
@@ -213,7 +213,7 @@ const SeedBackupNotice: FC<SeedBackupNoticeProps> = memo(
             >
               {account.phrase ? (
                 <ol
-                  className="grid grid-cols-3 gap-2 font-mono text-xs text-default"
+                  className="font-mono grid grid-cols-3 gap-2 text-xs text-default"
                   aria-hidden={revealed ? undefined : true}
                 >
                   {account.phrase.split(/\s+/).map((word, index) => (
@@ -223,13 +223,16 @@ const SeedBackupNotice: FC<SeedBackupNoticeProps> = memo(
                   ))}
                 </ol>
               ) : (
-                <div className="space-y-2" aria-hidden={revealed ? undefined : true}>
+                <div
+                  className="space-y-2"
+                  aria-hidden={revealed ? undefined : true}
+                >
                   <p className="text-xs text-muted">
                     {providerName
                       ? `Your words are held in the ${providerName} sign-up. This is the wallet that owns the account:`
                       : 'This is the wallet that owns the account:'}
                   </p>
-                  <p className="font-mono text-xs text-default break-all">
+                  <p className="font-mono break-all text-xs text-default">
                     {account.custodyAddress}
                   </p>
                   {revealed ? heldWordsSlot : null}
