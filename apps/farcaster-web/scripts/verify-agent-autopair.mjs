@@ -94,7 +94,6 @@ const pressByText = async (page, re) => {
 const readSurface = (page) =>
   page.evaluate(() => {
     const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
-    const roleOf = (el) => (el.getAttribute('role') || '').toLowerCase();
     return {
       path: window.location.pathname,
       text: text.slice(0, 400),
@@ -115,7 +114,7 @@ const readSurface = (page) =>
       liveRegions: Array.from(document.querySelectorAll('[role="status"],[role="alert"]'))
         .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim())
         .filter(Boolean)
-        .filter((value, index, all) => all.indexOf(value) === index && roleOf(el) !== ''),
+        .filter((value, index, all) => all.indexOf(value) === index),
       ownerMessages: document.querySelectorAll('[aria-label="Conversation with your agent"] div').length,
     };
   });
@@ -364,7 +363,7 @@ const main = async () => {
       typeof openAsk.proof?.signature === 'string' &&
       openAsk.agent?.name === AGENT_NAME &&
       openAsk.agent?.brain?.kind === 'default',
-    JSON.stringify(openAsk).slice(0, 160),
+    openAsk ? JSON.stringify(openAsk).slice(0, 160) : 'the route was never called',
   );
   check(
     'the session that came back is what the agent API is called with',
