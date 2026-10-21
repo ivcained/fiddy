@@ -136,20 +136,27 @@ words:
 | — but not the page's own words | the card does **not** carry the page's declared art (`…/send/cmi8…/opengraph-image`) nor the page's declared button (`Beep @topp-airdrop`). Both checks fail at both viewports, with the offending sources printed next to them. |
 | the cast's own page, fresh fixture | the card there carries the page's **own** descriptor: image `https://beep.works/send/cmi8mtgn500afiolnh4qelc53/opengraph-image` and button `Beep @topp-airdrop` — both exactly the page's `fc:miniapp` values (§1). No iframe. (This is the DOM check, which passed with the sources printed beside it; the screenshot of that same pass caught the image **before it painted** — see §2.4, where both rows are described and the paint failure is measured rather than glossed.) |
 | the aged fixture's page | the card carries that page's declared image (`thefirm.biz/api/employees/17/og-image`), and a control reading **`Join The Firm`** — which is neither the page's declared button (`Inspect e-ID`) nor its `og:title` (`@sds is Performing Business at The Firm`). Where that word comes from is **not verified** (§2.3). |
-| the embed URL itself | the browser **tried to read the page and was refused**: `GET https://beep.works/send/cmi8… → failed` — 8 times in the arrival window and 4 more in the measured feed window, with the client's own console line: `Access to fetch at 'https://beep.works/…' from origin 'https://localhost:5183' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.` The same refusal appears in the same run for `warpletbox.xyz/embed`, a railway-hosted podium embed and a Neynar-hosted miniapp. |
+| the embed URL itself | the browser **tried to read the page and was refused**: eight refused reads of `https://beep.works/send/cmi8…` in the arrival window and six more in the measured feed window — by the run's own table, arrival `6× GET` + `2× HEAD` and feed `4× GET` + `2× HEAD`, every row `→ failed` (quotations in §2.1) — with the client's own console line: `Access to fetch at 'https://beep.works/…' from origin 'https://localhost:5183' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.` The same refusal appears in the same run for `warpletbox.xyz/embed`, a railway-hosted podium embed and a Neynar-hosted miniapp. |
 
 ### 2.1 Where the in-feed card's data actually came from — measured, from the arrival slice
 
 This is the whole answer to "should we render it, or refuse it by name", and it is
-two requests, both in the run's own table:
+two requests, each of which the run's own table records twice — a `GET` row and a
+`HEAD` row, both refused:
 
 ```
-8× arrival · GET /send/cmi8mtgn500afiolnh4qelc53 @ beep.works → failed   ← the page read, refused
+6× arrival · GET  /send/cmi8mtgn500afiolnh4qelc53 @ beep.works → failed   ← the page read, refused
+2× arrival · HEAD /send/cmi8mtgn500afiolnh4qelc53 @ beep.works → failed   ← the same read, other method
 42× arrival · GET /v2/farcaster/frame/search/ @ api.neynar.com → 200      ← the index, answering
              (8 more of the same route answered 400 and were not used)
 ```
 
-and one request that explains the second one, fetched separately
+The measured feed window repeats the refusal with its own pair of rows,
+`4× feed · GET` and `2× feed · HEAD`, both `→ failed` — so the page read was
+refused eight times while arriving and six times in the feed, and the index is
+what answered.
+
+One request explains the second one, fetched separately
 (**measured**, 2026-10-22):
 
 ```
@@ -390,10 +397,14 @@ The policy this client holds, and the reasons:
     next-step cell: `NEEDS-NODE for the catalog; launching is client-side`.
   §2 of this doc is what can fill line 109's `verify once the feed is node-backed`
   cell in; making that edit is `t_08e02638`'s, not this card's. **The correction:**
-  this doc used to say the row is left as it is "(`re-measure`)" — the word
-  `re-measure` appears **nowhere** in `CLIENT-PARITY.md`. It is this card's own
-  body's shorthand for "re-do the measurement", and the cells quoted above are the
-  file's real words.
+  this doc used to say the row is left as it is "(`re-measure`)" — as though that
+  were the file's word. It is not: `re-measure` is this card's own body's shorthand
+  for "re-do the measurement", and **no miniapp row in `CLIENT-PARITY.md` carries
+  it**. (`grep -n re-measure docs/CLIENT-PARITY.md` does hit the file five times —
+  lines 41, 92, 194, 267 and 598, the last being the heading `## Measurement
+  hygiene (why some cells say "re-measure")` — but none of those hits is either
+  miniapp row; line 92's `re-measure` belongs to a Trending row.) The cells quoted
+  above are the file's real words.
 - **Filed from this card:** `t_f5143ed9` — the iframe-grant + settings-copy
   follow-up of §4 item 3 (removing the dead `microphone; camera` grant and saying
   in the copy that miniapps cannot use them).
