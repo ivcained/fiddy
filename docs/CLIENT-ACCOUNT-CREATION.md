@@ -429,12 +429,18 @@ clean-runner CI run is what settles it: the full suite is green on the merge.
 
 ### 7.4 The release, and what the live client shows
 
+*Refreshed 2026-10-22 (`t_f0c9d881`): the fixed driver now lives in the repo and reads
+7/7, the mobile row's old red is named rather than left unmeasured, and every number
+below carries the revision **and** the served entry chunk's sha it came from.*
+
 The card said to check one fact first. It was checked, and it changed under the card:
 
 | when (IST) | `https://fiddy.fun/release.json` → `revision` | what it is |
 | --- | --- | --- |
 | 00:30 | `256601e` | the state the card described — before the writes, the Together surface and this set |
 | **00:32:41** | **`55a4ddd58`** | `current` swapped (VPS symlink mtime `2026-10-21 19:02:41Z`) by the release run staged the evening before at 22:59:40, which finished while this card was open |
+| 02:09:07 | `b1e9197b6` | the one-tap connect release (`t_62596c9c`), tree staged `2026-10-21 20:39:07Z` |
+| **02:18:47** | **`aa06c630`** | `current` swapped (symlink mtime `2026-10-21 20:48:47Z`, tree staged 02:18:34) — the revision every 7/7 run below was measured on |
 
 So the "stalled cutover" was **one live run, not the state of the world**: it spent
 ~1 h 35 m getting a build through a contended box and then cut over cleanly. Read,
@@ -443,14 +449,32 @@ not assumed:
     $ curl -s https://fiddy.fun/release.json
     {"revision":"55a4ddd58","mode":"node-backed-client","node":"https://haatz.quilibrium.com","media":"https://fiddy.fun"}
 
-**The live revision contains `824a20c`** — the acceptance's first clause, on the
-served bytes:
+and the same read when the fixed driver landed, six hours later:
+
+    $ curl -s https://fiddy.fun/release.json
+    {"revision":"aa06c630d41bdfc09411d2b8ab5c2783091c9e3e","mode":"node-backed-client","node":"https://haatz.quilibrium.com","media":"https://fiddy.fun"}
+
+**Release churn, 2026-10-22 — worth writing down, because it decides what a number
+here means.** Three release records landed while this measurement work was open, the
+last two **9.5 minutes apart** by their release-tree mtimes (`b1e9197b6` 02:09:07,
+`aa06c630` 02:18:34; the commits are 25 minutes apart — `b1e9197b6` at 01:51:32,
+`aa06c630` at 02:16:24). And `b1e9197b6` and `aa06c630` serve **one built site under
+two release records**: a `sha256sum` over both trees' `web/` differs in exactly two
+files — `web/release.json` (the revision field) and the `web/preview/` variant build —
+while `web/assets/index-BZPuaWpC.js` is byte-identical (`bac16fb0…`) in both, and
+`fiddy.fun` serves the same 335-file, 17 MB `web/assets` from either. A measured number
+in this file therefore has to name the revision **and** the served entry chunk's sha,
+or it reads as a verdict on the wrong build within the hour. Every number below does.
+
+**The release this card measured contains `824a20c`** — the acceptance's first clause,
+on the served bytes:
 
 | check | how | result |
 | --- | --- | --- |
 | `824a20c` is an ancestor of the live revision | `git merge-base --is-ancestor 824a20c 55a4ddd58` | yes |
+| …and of the revision live now | `git merge-base --is-ancestor 824a20c aa06c630` (and `… 55a4ddd58 aa06c630`) | yes, both — the line only moved forward |
 | what the live revision is | `git log -1 --format='%h %cI %s' 55a4ddd58` | `55a4ddd 2026-10-21T22:54:32+05:30 test(client): the miniapps probe presses the card, and reads the centre column` |
-| the served entry chunk | `curl -s https://fiddy.fun/` → `/assets/index-xFMI6dSv.js` | 7,719,292 bytes, `sha256 4929aaf28e78b98e…` |
+| the served entry chunk (**at `55a4ddd58`**; the sha is different now — see below) | `curl -s https://fiddy.fun/` → `/assets/index-xFMI6dSv.js` | 7,719,292 bytes, `sha256 4929aaf28e78b98e…` |
 | those bytes are *that build's* bytes | `cmp` against the stage tree's `dist/assets/index-xFMI6dSv.js` | identical — `cmp` silent, equal sha256 |
 | the served entry still carries the account copy | `grep -c -F 'New to Farcaster? Make an account' served-live-entry.js` | 1, inside `LoginModal` |
 
@@ -476,20 +500,69 @@ refuses. The tip release that supersedes it (`63bc576`, card `t_082a2d4d`) died
 inside its own `vite build` the same way (0 assets, no cutover), so live stayed at
 `55a4ddd58`.
 
-**The live client, measured.** `live-measure-fiddy.mjs` (the script attached to
-`t_451ad931`) cannot read green on this Mac, so what follows is every pass of it and
-the cause of every red rather than one number. Two defects in the driver — not in
-the client — account for all of them:
+**The live client, measured — the driver is fixed, and the repo carries it.**
+`apps/farcaster-web/scripts/live-measure-fiddy.mjs`, driver sha256
+`900b0921fc6e5e4a7fd4cbd198e7542ce1716c2a49bdc993e3a15002ce19fa39`, runs from the repo
+root against whatever `release.json` names and passes the app's own lint gate
+(`eslint --quiet --max-warnings 1080`):
 
-1. it sleeps a fixed 3-6 s after each navigation and then reads the DOM. This box
-   needs 30-60 s for the deployed SPA to boot, so its rows read `""` or its own
-   string `"Loading Fiddy…"`;
-2. its sheet row clicks `document.querySelector('[data-fiddy="create-account-entry"]')`
+    node apps/farcaster-web/scripts/live-measure-fiddy.mjs
+
+Its companion, `apps/farcaster-web/scripts/live-measure-fiddy.PARITY.md`, records row
+by row that no assertion was removed or weakened on the way from the probe. The file
+that `t_c50646cc` validated had sha256 `5894652688df2d8ff23985c788cb67a5808bf472b80e6bd9153e9c6ca84201d8`;
+the landing moved five hunks for lint hygiene only — the header's run instructions, the
+dead locals, the wait ceiling in a failure note, and `Uint8Array` where Node's `Buffer`
+was used (`AbortSignal` is now declared for `scripts/` in `eslint.config.mjs`) — because a
+probe the repo's lint refuses reddens CI. No row name, selector or threshold moved.
+
+**One run of the landed file: 2026-10-22T02:39:40+05:30, 15.2 s, 7/7 green** on
+`aa06c630d41bdfc09411d2b8ab5c2783091c9e3e` — the revision `release.json` named, read
+before and after the run and unchanged — serving entry chunk
+`/assets/index-BZPuaWpC.js`, 7,729,824 bytes, sha256
+`bac16fb0cbba582b45702d7242456ef4b7d4424a1b5aac10932cf6de0c27cb9d`. The acceptance run
+that fixed the driver reads the same 7/7 (02:21:36, same revision, same chunk sha —
+`artifact-live-measure-aa06c630d41b.json` on `t_c50646cc`).
+
+This section used to say the probe *cannot* read green on this Mac and filed the cause
+as two driver defects on `t_c50646cc` (`t_451ad931`'s script read 4/7, 3/7 once the
+fixed sleeps were replaced by a boot wait). **Both are fixed**, and the two runs above
+are what that means:
+
+1. it slept a fixed 3-6 s after each navigation and then read the DOM — shorter than
+   this box's boot (30-60 s for the deployed 7.7 MB SPA), so its rows read `""` or its
+   own string `"Loading Fiddy…"`. Every step now waits on a **positive element signal**
+   (the onboarding surface, the sign-in button, the in-modal entry *holding a box*, the
+   `create-account` marker, the rail entry with a box, the switcher sheet, the menu
+   toggle), with `LIVE_BOOT_MS` as the ceiling. A wait on `body.innerText.length > 0` is
+   explicitly *not* a boot signal: with the sign-in modal up the body already begins
+   `Loading Fiddy… fiddy Asking Farcaster for a sign-in code…`;
+2. its sheet row clicked `document.querySelector('[data-fiddy="create-account-entry"]')`
    — the **first** match in the document, which on this build is the *onboarding
    screen's* entry, hidden at 0×0 (measured: box 0×0, `inDialog: false`, and
-   `document.elementFromPoint` at its centre returns the welcome container). The
-   entry inside the sign-in modal is the **second** node (520×40 outside a dialog,
-   259×40 inside it).
+   `document.elementFromPoint` at its centre returns the welcome container). The entry
+   inside the sign-in modal is the **second** node (520×40 outside a dialog, 259×40
+   inside it). The click is now scoped to the in-modal node the row above tests for, and
+   the sheet is a selector wait rather than a sleep. The same first-match mistake is
+   fixed on the rail's click and on the mobile read: the node with a real box is the one
+   meant, not the first in the DOM.
+
+The third change is sequencing, not correctness: the stub used to answer the relay's
+status poll with credentials at once, so the client signed itself in ~1 s after the
+modal opened and the modal closed under the click. The poll is now held `pending` until
+the creation sheet has been read — and because opening that sheet tears down the poll
+(the sheet replaces the dialog), the client is *not* signed in afterwards: the rail
+phase starts the sign-in again from the setup screen, with a two-way wait (an entry with
+a box, **or** a shell that booted and is signed out), which is the difference between a
+13 s run and a 200 s one.
+
+No assertion was touched: the seven check names are byte-identical to the probe's, and
+the parity note records two rows **stricter** (6, 7) and one a narrower match on the
+same claim (1). Nothing was removed and no threshold was loosened.
+
+For the record, every pass of the *attached* probe on `55a4ddd58` before the fix — the
+4/7 this section used to report, kept because it is the record of why the driver drove
+differently:
 
 | pass | driver | result |
 | --- | --- | --- |
@@ -501,41 +574,86 @@ the client — account for all of them:
 | 6 | as 5, click forced | 5/8 — the forced click landed on defect 2's hidden node |
 | 7 | as 5, clicking **the in-modal node**, the attached probe's own DOM `.click()` | **4/4 — green** |
 
-Pass 7 is the measurement that matters — the two account rows on the deployed
-build, in the client's own words:
+The landed driver's run is the measurement that matters — **all seven rows on the
+revision live now**, in the client's own words:
 
-| the check | `55a4ddd58`, live | evidence |
+| the check | `aa06c630`, live (7/7) | evidence |
 | --- | --- | --- |
-| the create-account entry is on the deployed setup screen | **green** | `Go social — sign in with Farcaster` |
-| the create-account entry is **inside the sign-in modal** | **green** | `entries: 2, entriesInModal: 1` — the in-modal node is 259×40 and reads `New to Farcaster? Make an account` |
-| that entry **opens the account-creation sheet** | **green** | after the click, `[data-fiddy="create-account"]` is present and says: `Pick your name — This is the @name people will see. You can change it later. YOUR @NAME Lowercase letters, numbers and dashes. This is the name people will type to find you. YOUR DISPLAY NAME Continue Back …` |
-| the rail carries the switcher | **green** | the entry reads `Your accounts`, width 176 (every pass) |
-| the switcher sheet opens from the rail | **green** | `Your accounts — This browser is not holding an account of its own yet. An account you make here is held on this device. Make one and it shows up in this list. Make another account … The words that own an account stay on this device. Fiddy keeps no copy of them.` |
-| the mobile menu carries the switcher | **present in the DOM; the row is not driven green** | the entry **is** in the mobile document (`found: true`, text `Your accounts`) but at width 0 with the menu closed, and no pass found the button that opens that menu: the attached probe reports `"tried": []` (its header query returns no sized buttons on this box), and a 390×844 diagnostic pointed at the menu (`artifact-live-diagnose-mobile-55a4ddd58.json`) could not get as far as the signed-in mobile shell inside its 180 s budget. The feature is in the shipped bytes — `account-switcher-entry` is in the served entry chunk, and the mobile header at this sha renders the entry inside the menu sheet (`src/layouts/MobileHeader.tsx:400`). What is missing for this row is a driver, not the feature, and it is written here as unmeasured rather than as green |
-| no write to the node or the relay left the machine | **green** | pass 7 aborted nothing at all; the passes that ran longer aborted only third-party beacons (Neynar PostHog `flags/`, `wallet.farcaster.xyz/cdn-cgi/rum`, `privy.farcaster.xyz/api/v1/analytics_events`, a Datadog CSP report). Nothing reached the node, the relay or a write API in any pass |
+| the sign-in entry is on the deployed setup screen | **green** | `Go social — sign in with Farcaster` |
+| the create-account entry is reachable from the sign-in modal | **green** | `entries: 2, entriesInModal: 1` — the first match 0×0, the in-modal node 259×40 reading `New to Farcaster? Make an account` |
+| the entry opens the account-creation sheet | **green** | clicking the **in-modal** node, `[data-fiddy="create-account"]` is present 100 ms later and says: `Pick your name — This is the @name people will see. You can change it later. YOUR @NAME Lowercase letters, numbers and dashes…` |
+| the rail carries the account switcher on the deployed build | **green** | `found: true, attempt: 1, count: 1`; entry `Your accounts`, 176×41 |
+| the switcher sheet opens from the rail | **green** | opens on the click at the entry that holds a box; its copy: `This browser is not holding an account of its own yet. An account you make here is held on this device… The words that own an account stay on this device. Fiddy keeps no copy of them.` |
+| the mobile menu carries the account switcher | **green** | toggle found and clicked by its label (`clickedBy: role:Home`); **nothing visible before the press** (`visibleCount 0`), the menu's copy 321×41 `inMobileChrome: true` after — while the first DOM match stays 0×0 (`firstMatchWidth: 0`) |
+| no write left the machine during this measurement | **green** | `chainWrites []` and `unclassifiedWrites []`; `telemetry []` and `abortedWrites []` in this run. What the row now means, and the self-check that proves it, are the paragraph below |
 
-The attached probe's own `no write left the machine` row needs the caveat stated
-rather than smoothed: it counts *any* cross-origin POST, so it reads red on a page
-that fires analytics — including at `256601e`, where its baseline run listed those
-same beacons **and** counted HEADs as writes (the script was tightened after that
-run, which is why the row is red for a shorter list here). What matters for this
-feature is the row below it.
+**The mobile row's old red, named — it was never the feature.** The toggle that opens
+the mobile menu is the `<button>` whose copy is `{currentPageTitle ?? 'Menu'}`
+(`apps/farcaster-web/src/layouts/MobileHeader.tsx:475-487`) — `'Home'` on `/` — and it
+carries **no `aria-label`**: the only labelled buttons in that bar are `Search` and
+`Close search`. The chrome it sits in is a `<nav>` wrapped in a `<div>`, rendered inside
+`<main>` (`src/layouts/MainContent.tsx:21`), **not** in a `<header>`. The attached probe
+scanned `document.querySelector('header') ?? document.body` and kept buttons with
+`top < 140 && width > 0`; on this build the only `header` is the desktop top bar
+(`FiddyTopBar.tsx:27`, `hidden sm:flex`), so at phone width its buttons have zero width
+and the scan came back `"tried": []`. And the row's `visible` was *the first DOM match's*
+width — the rail's copy, 0×0, `inMobileChrome: false` — not the copy inside the menu,
+which is 321×41 and `inMobileChrome: true`. The row could not have gone green however
+the menu behaved. The driver now waits for the toggle by structure, clicks it by its
+label, requires that **no** switcher was visible before the press, and then reads the
+entry that holds a box: green, with the old red explained rather than deleted.
+
+**The write row's meaning changed with the driver, and this is the part to read before
+quoting it green.** The attached probe's row counted *any* cross-origin POST, so it read
+red on a page that fires its own analytics — including at `256601e`, where its baseline
+run listed those same beacons **and** counted HEADs as writes (the script was tightened
+after that run, which is why the row was red for a shorter list here). The landed row
+means three things, separately:
+
+- writes to the Farcaster **node or relay** (`haatz.quilibrium.com`,
+  `relay.farcaster.xyz`, `api.neynar.com`, `hub.farcaster`; `POST`/`PUT`/`PATCH`/`DELETE`)
+  are `chain` → **the row goes red**;
+- the page's own **telemetry beacons** (`ph.neynar.com`, `wallet.farcaster.xyz/cdn-cgi/rum`,
+  `privy.farcaster.xyz/api/v1/analytics_events`,
+  `csp-report.browser-intake-datadoghq.com`) are reported in their own list and are never
+  counted as a write;
+- a POST to a host on **neither** list is `unclassified` → **the row goes red**, which is
+  stricter than the probe: an unknown destination used to pass.
+
+That classifier is exercised with no browser involved:
+
+    LIVE_SELFCHECK=1 node apps/farcaster-web/scripts/live-measure-fiddy.mjs
+
+Its verdicts (`write-row-selfcheck.json` on `t_c50646cc`, and re-run on the landed file
+itself): the four beacon hosts are `telemetry` → green; `haatz.quilibrium.com`,
+`relay.farcaster.xyz`, `api.neynar.com` are `chain` → red; `some.unknown.example` is
+`unclassified` → red. The write-abort itself is unchanged — nothing leaves the browser
+either way.
 
 **Two live findings that outlive this card.** They are recorded here because the
 release is the moment they became visible, and neither is this card's to fix:
 
-1. The live `55a4ddd58` bundle still carries the laptop fallback: `127.0.0.1:8766`
-   is in `together-BTCrPddb.js` (0 occurrences in the entry chunk), because that
-   build ran under the pre-`63bc576` script with no `VITE_TOGETHER_API_URL`. On
-   fiddy.fun, `/~/together` therefore asks the visitor's own laptop for the board.
-   The new step-3 gate refuses exactly this bundle; the release that bakes the
-   empty-string origin is `t_082a2d4d`'s, and it has died once mid-build.
-2. The box, not the code, is what fails here: five concurrent `vite build`s, load
-   100-175, swap at 31 of 32 GB. Two release runs and five of the seven
+1. At `55a4ddd58` the served bundle still carried the laptop fallback: `127.0.0.1:8766`
+   was in `together-BTCrPddb.js` (1 file of the 325 in that release's `web/assets`; 0 in
+   the entry chunk), because that build ran under the pre-`63bc576` script with no
+   `VITE_TOGETHER_API_URL`. On fiddy.fun, `/~/together` therefore asked the visitor's own
+   laptop for the board. **That is no longer true on the revision live now:** 0 of the 335
+   files in `aa06c630`'s `web/assets` contain `127.0.0.1:8766` — nor in `b1e9197b6`'s, the
+   first live record after `55a4ddd58` — and the Together page ships as
+   `TogetherPage-B6un8jQK.js`. The step-3 gate that refuses such a bundle is what
+   happened in between; `t_082a2d4d`'s release died once mid-build and never cut over.
+2. The box, not the code, is what failed here: five concurrent `vite build`s, load
+   100-175, swap at 31 of 32 GB. Two release runs and five of the seven pre-fix
    measurement passes above died inside that contention, not inside the client. A
    release on this machine is a one-at-a-time operation.
 
-Every number above is reproducible from the artifacts attached to `t_c6256597`:
-`artifact-live-measure-55a4ddd58-run1-red.json` … `-run7-modal-entry.json`,
-`artifact-live-diagnose-55a4ddd58.json`, `artifact-live-diagnose-mobile-55a4ddd58.json`,
-and the drivers under `measure/`.
+Every number above is reproducible. The pre-fix passes and the `55a4ddd58` rows from the
+artifacts attached to `t_c6256597` (`artifact-live-measure-55a4ddd58-run1-red.json` …
+`-run7-modal-entry.json`, `artifact-live-diagnose-55a4ddd58.json`,
+`artifact-live-diagnose-mobile-55a4ddd58.json`); the 7/7 rows from
+`artifact-live-measure-aa06c630d41b.json` and `write-row-selfcheck.json` on `t_c50646cc`;
+and the driver itself from the repo —
+`apps/farcaster-web/scripts/live-measure-fiddy.mjs`, sha256
+`900b0921fc6e5e4a7fd4cbd198e7542ce1716c2a49bdc993e3a15002ce19fa39`, with its parity note
+beside it. Run it and it prints the whole run, including the revision and the served
+entry chunk's sha it measured.

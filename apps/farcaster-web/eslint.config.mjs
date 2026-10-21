@@ -49,6 +49,10 @@ export default [
         requestAnimationFrame: 'readonly',
         URL: 'readonly',
         window: 'readonly',
+        // Node's own, not the page's: a probe bounds its reads of release.json and
+        // the served chunks with AbortSignal.timeout(ms). Node exports no module
+        // for it, so it is declared here rather than imported.
+        AbortSignal: 'readonly',
       },
     },
     rules: {
