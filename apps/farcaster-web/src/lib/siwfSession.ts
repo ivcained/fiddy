@@ -376,6 +376,99 @@ const buildLocalOnboardingState = ({
   },
 });
 
+/** Where a sign-in leaves its proof for the one thing that needs it after. */
+const SIWF_PROOF_KEY = 'fiddy.siwf.proof';
+
+/** Long enough to finish signing in, short enough that a stale proof ages out. */
+export const SIWF_PROOF_TTL_MS = 30 * 60 * 1000;
+
+export interface SiwfProof {
+  fid: number;
+  message: string;
+  signature: string;
+  at: number;
+}
+
+/**
+ * The proof a sign-in leaves behind.
+ *
+ * A completed SIWF handshake produces a SIWE message and a signature from the
+ * owner's own Farcaster client. That pair is evidence of who signed in — and it
+ * is replayable by anyone who reads it, so it is kept the way it deserves:
+ * `sessionStorage` only (gone when the tab closes), a thirty-minute life, and
+ * consumed once. The one consumer is `~/lib/fiddyAgentAutopair`, which forwards
+ * it to the agent service exactly once and then deletes it.
+ *
+ * It is kept for a real reason rather than convenience: the service that runs
+ * your agent proves ownership by verifying precisely this signature against
+ * Farcaster's own contracts, so asking the owner to sign again — or to paste a
+ * session token — would be asking them to redo work they have already done.
+ * Nothing else in the app reads it, and it grants nothing on its own.
+ */
+export const saveSiwfProof = (
+  {
+    fid,
+    message,
+    signature,
+  }: { fid: number; message: string; signature: string },
+  now = Date.now(),
+): void => {
+  if (!Number.isSafeInteger(fid) || fid <= 0 || !message) {
+    return;
+  }
+  if (!/^0x[\da-fA-F]{130}$/.test(signature)) {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(
+      SIWF_PROOF_KEY,
+      JSON.stringify({ fid, message, signature, at: now }),
+    );
+  } catch {
+    // A browser that refuses storage simply signs in again — never a broken login.
+  }
+};
+
+/** Read the proof back. Never throws; a half-written or stale entry is `null`. */
+export const loadSiwfProof = (now = Date.now()): SiwfProof | null => {
+  try {
+    const raw = window.sessionStorage.getItem(SIWF_PROOF_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<SiwfProof> | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    const fid = Number(parsed.fid);
+    const message = typeof parsed.message === 'string' ? parsed.message : '';
+    const signature =
+      typeof parsed.signature === 'string' ? parsed.signature : '';
+    const at = typeof parsed.at === 'number' ? parsed.at : 0;
+    if (!Number.isSafeInteger(fid) || fid <= 0 || !message || !at) {
+      return null;
+    }
+    if (!/^0x[\da-fA-F]{130}$/.test(signature)) {
+      return null;
+    }
+    if (now - at > SIWF_PROOF_TTL_MS || now < at - 60_000) {
+      return null;
+    }
+    return { fid, message, signature, at };
+  } catch {
+    return null;
+  }
+};
+
+/** Delete the proof. Called the moment it has been spent. */
+export const clearSiwfProof = (): void => {
+  try {
+    window.sessionStorage.removeItem(SIWF_PROOF_KEY);
+  } catch {
+    // nothing to clean up
+  }
+};
+
 export {
   buildLocalAuthToken,
   buildLocalOnboardingState,

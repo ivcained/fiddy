@@ -21,6 +21,7 @@ const webRoot = path.resolve(__dirname, '../../../..');
 const SURFACE_FILES = [
   'src/lib/agentService.ts',
   'src/lib/agentSchedules.ts',
+  'src/lib/fiddyAgentAutopair.ts',
   'src/hooks/agent/useAgentSession.ts',
   'src/components/agent/AgentCard.tsx',
   'src/components/agent/AgentNavItem.tsx',

@@ -20,6 +20,7 @@ import {
   buildLocalAuthToken,
   buildLocalOnboardingState,
   createSiwfChannel,
+  saveSiwfProof,
   SiwfRelayError,
   SiwfTimeoutError,
   verifySiwfCompletion,
@@ -172,6 +173,18 @@ const LoginWithMobileContent: FC<LoginWithMobileContentProps> = memo(
         // Local-only session. SIWF cannot mint a farcaster.xyz API token, so
         // this marks the session as local and the app stops short of claiming
         // any server-side identity it hasn't proven. See `~/lib/siwfSession`.
+        //
+        // The proof itself is kept for the one thing that needs it after: the
+        // agent service proves ownership by verifying this exact signature, so
+        // `/~/agent` can turn the owner's agent on without asking them for a URL
+        // and a token. It lives in sessionStorage, for thirty minutes, and
+        // `~/lib/fiddyAgentAutopair` deletes it once spent.
+        saveSiwfProof({
+          fid: completion.fid,
+          message: completion.message,
+          signature: completion.signature,
+        });
+
         const authToken = buildLocalAuthToken({ fid: completion.fid });
         const onboardingState = buildLocalOnboardingState({
           fid: completion.fid,
