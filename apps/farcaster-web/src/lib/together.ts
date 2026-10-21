@@ -384,6 +384,200 @@ export const readEvents = async (
 ): Promise<{ cursor: number; latest: number; events: TogetherEvent[] }> =>
   request(`/events?since=${Math.max(0, Math.floor(since))}`, { token });
 
+/** The change stream: the path the space service pushes a board's events on. */
+export const TOGETHER_STREAM_PATH = '/spaces/stream';
+
+/**
+ * How often the fallback asks, when the socket is not carrying the board.
+ *
+ * This is the older path, kept deliberately: a client on a network that cannot
+ * open a websocket still converges, just slower. While the socket is live,
+ * nothing here runs.
+ */
+export const TOGETHER_BOARD_POLL_MS = 3_000;
+
+export type TogetherLiveStatus = 'connecting' | 'live' | 'reconnecting' | 'off';
+
+/** How each status reads to a person, on the board's own header. */
+export const TOGETHER_LIVE_LABEL: Record<TogetherLiveStatus, string> = {
+  connecting: 'Connecting',
+  live: 'Live',
+  reconnecting: 'Disconnected — reconnecting',
+  off: 'Not live',
+};
+
+/**
+ * The socket URL for a space's change stream.
+ *
+ * Same origin and the same session token every REST call on this page carries.
+ * A browser cannot set a header on a websocket handshake, so the token travels
+ * in the query string; the service answers one it does not accept with close
+ * 1008 and a sentence, and never subscribes it.
+ */
+export const togetherStreamUrl = (token: string): string => {
+  const here =
+    typeof window === 'undefined' ? 'http://localhost/' : window.location.href;
+  const url = new URL(baseUrl() + TOGETHER_STREAM_PATH, here);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('token', token);
+  return url.toString();
+};
+
+/**
+ * True when this page was opened with `?together-poll=off`.
+ *
+ * The switch is for measurement, not for the product: a probe that asserts "the
+ * board converged because of the socket" has to be able to rule the fallback
+ * out, or a passing check proves nothing. Nothing else reads it, and a page
+ * without the parameter behaves exactly as it always has.
+ */
+export const togetherPollingDisabled = (): boolean =>
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('together-poll') === 'off';
+
+/** How long the stream waits before trying again, first and at its worst. */
+const RETRY_FIRST_MS = 400;
+const RETRY_CEILING_MS = 3_000;
+
+export type TogetherStreamHandlers = {
+  onStatus?: (status: TogetherLiveStatus) => void;
+  /** Subscribed. `cursor` is where REST should start reading. */
+  onReady?: (cursor: number) => void;
+  /** Something changed in this space: ask REST what it is now. */
+  onEvent?: (event: TogetherEvent) => void;
+  /** This socket fell behind and the service dropped its backlog. */
+  onGap?: () => void;
+};
+
+export type TogetherStreamHandle = {
+  status: () => TogetherLiveStatus;
+  close: () => void;
+};
+
+/**
+ * Hold a websocket open on this space, and say what it is doing.
+ *
+ * WHAT THIS IS NOT
+ * It is not the board. A frame says "something changed"; the caller answers by
+ * re-reading `/spaces/state`, which stays the authority. That is why this can
+ * reconnect with no replay, drop a backlog, and stay silent about the frames it
+ * missed: none of them are the truth, all of them are a reason to ask.
+ *
+ * It reconnects by itself, backing off from 400ms to 3s and never giving up,
+ * because a page that is open should come back when the service does. The
+ * status it reports is the page's own honest state, not a guess.
+ */
+export const openTogetherStream = (
+  token: string,
+  handlers: TogetherStreamHandlers = {},
+): TogetherStreamHandle => {
+  let socket: WebSocket | null = null;
+  let retry: number | null = null;
+  let failures = 0;
+  let closed = false;
+  let current: TogetherLiveStatus = 'connecting';
+
+  const announce = (next: TogetherLiveStatus) => {
+    if (next === current) {
+      return;
+    }
+
+    current = next;
+    handlers.onStatus?.(next);
+  };
+
+  const scheduleRetry = () => {
+    if (closed) {
+      return;
+    }
+
+    const wait = Math.min(RETRY_FIRST_MS * 2 ** failures, RETRY_CEILING_MS);
+    failures += 1;
+    announce('reconnecting');
+    retry = window.setTimeout(open, wait);
+  };
+
+  const open = () => {
+    if (closed) {
+      return;
+    }
+
+    announce(failures === 0 ? 'connecting' : 'reconnecting');
+
+    try {
+      socket = new WebSocket(togetherStreamUrl(token));
+    } catch {
+      socket = null;
+      scheduleRetry();
+      return;
+    }
+
+    socket.onopen = () => {
+      failures = 0;
+      announce('live');
+    };
+
+    socket.onmessage = (message) => {
+      let frame: { type?: string; cursor?: number } & Partial<TogetherEvent>;
+
+      try {
+        frame = JSON.parse(String(message.data));
+      } catch {
+        return;
+      }
+
+      if (!frame || typeof frame !== 'object') {
+        return;
+      }
+
+      if (frame.type === 'ready') {
+        failures = 0;
+        announce('live');
+        handlers.onReady?.(Number(frame.cursor ?? 0));
+        return;
+      }
+
+      if (frame.type === 'gap') {
+        handlers.onGap?.();
+        return;
+      }
+
+      if (frame.type === 'event') {
+        handlers.onEvent?.(frame as TogetherEvent);
+      }
+    };
+
+    // An error is always followed by a close, and the close handler is the one
+    // place that decides what happens next — so nothing is retried twice.
+    socket.onerror = () => undefined;
+    socket.onclose = () => {
+      socket = null;
+
+      if (!closed) {
+        scheduleRetry();
+      }
+    };
+  };
+
+  open();
+
+  return {
+    status: () => current,
+    close: () => {
+      closed = true;
+
+      if (retry !== null) {
+        window.clearTimeout(retry);
+      }
+
+      const dying = socket;
+      socket = null;
+      dying?.close();
+      announce('off');
+    },
+  };
+};
+
 export const createCard = async (
   token: string,
   input: { title: string; note?: string },

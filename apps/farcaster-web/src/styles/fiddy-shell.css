@@ -1034,6 +1034,55 @@ html.fiddy-dark-shell body {
   color: var(--fiddy-accent);
 }
 
+/*
+ * The live-stream chip.
+ *
+ * The board's one status light: it says whether this page is being pushed to
+ * over a socket, or is asking the service every few seconds because it cannot
+ * be. It is deliberately a chip and not a spinner — a lost socket is a state a
+ * reader can act on, not a flash they miss.
+ */
+.fiddy-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--fiddy-glass-border);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fiddy-ink-dim);
+  white-space: nowrap;
+}
+
+.fiddy-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.fiddy-live[data-live='live'] {
+  border-color: color-mix(in oklab, var(--fiddy-accent), transparent 40%);
+  color: var(--fiddy-accent);
+}
+
+.fiddy-live[data-live='live']::before {
+  opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--fiddy-accent), transparent 82%);
+}
+
+.fiddy-live[data-live='connecting'],
+.fiddy-live[data-live='reconnecting'] {
+  border-color: color-mix(in oklab, #e8b45a, transparent 45%);
+  color: #e8b45a;
+}
+
 .fiddy-card-line {
   font-size: 12.8px;
   line-height: 1.5;

@@ -15,6 +15,14 @@
  *      and the API from one origin), not to a stubbed fixture that can drift
  *      away from it.
  *
+ *      `ws: true` is what makes that true for the LIVE path too: without it the
+ *      proxy forwards `/spaces/stream` as a plain HTTP request, the upgrade is
+ *      lost, and the page would sit in "reconnecting" while the service is
+ *      perfectly healthy — which is exactly the kind of false negative a probe
+ *      must not produce. A production deploy has to forward the upgrade the
+ *      same way (any reverse proxy in front of fiddy.fun: websocket upgrade on
+ *      the `/spaces` route).
+ *
  *   3. `VITE_TOGETHER_API_URL=''` is set by the probe, which the client reads as
  *      "same origin" — so nothing in the page is cross-origin and no CORS or
  *      mixed-content rules are being worked around.
@@ -44,7 +52,17 @@ export default defineConfig(async (env) => {
       ...(resolved.server ?? {}),
       proxy: {
         ...((resolved.server ?? {}).proxy ?? {}),
-        '/spaces': { target: serviceUrl, changeOrigin: false },
+        '/spaces': { target: serviceUrl, changeOrigin: false, ws: true },
+      },
+    },
+    // The same proxy for `vite preview`, so the probe can also measure the
+    // SHIPPING bundle: a dev server transforms ~1500 modules on the first load,
+    // which on a cold machine is a long wait that says nothing about the page.
+    preview: {
+      ...(resolved.preview ?? {}),
+      proxy: {
+        ...((resolved.preview ?? {}).proxy ?? {}),
+        '/spaces': { target: serviceUrl, changeOrigin: false, ws: true },
       },
     },
   };

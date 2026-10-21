@@ -12,6 +12,7 @@
 
 import { HelmetProvider } from '@dr.pogodin/react-helmet';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -27,6 +28,7 @@ import {
   togetherBaseUrl,
   TogetherError,
   togetherRequest,
+  togetherStreamUrl,
 } from '~/lib/together';
 // A test renders the page component itself: the lazy wrapper in ~/lazy/pages
 // exists to keep the production bundle split, and awaiting it here would test
@@ -667,4 +669,172 @@ describe('Together — talking on a card', () => {
       ).toBe(true),
     );
   });
+});
+
+class FakeSocket {
+  static opened: FakeSocket[] = [];
+
+  url: string;
+  onopen: (() => void) | null = null;
+  onmessage: ((message: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor(url: string) {
+    this.url = url;
+    FakeSocket.opened.push(this);
+  }
+
+  /** The service's half of the handshake: accepted, then subscribed. */
+  open(cursor = 5) {
+    this.onopen?.();
+    this.onmessage?.({
+      data: JSON.stringify({
+        type: 'ready',
+        space_id: 'space-1',
+        fid: 42,
+        cursor,
+      }),
+    });
+  }
+
+  push(frame: unknown) {
+    this.onmessage?.({ data: JSON.stringify(frame) });
+  }
+
+  /** The socket dies: the service went away, or the network did. */
+  die() {
+    this.onclose?.();
+  }
+
+  close() {
+    this.die();
+  }
+}
+
+describe('Together — the live board', () => {
+  /** The socket the page opened. It is created in an effect: wait for it. */
+  const liveSocket = async (): Promise<FakeSocket> => {
+    await waitFor(() => expect(FakeSocket.opened.length).toBeGreaterThan(0));
+    return FakeSocket.opened[FakeSocket.opened.length - 1];
+  };
+
+  /** A board whose verdict on the card can change mid-test, as a push would. */
+  const bootBoard = async () => {
+    stored.set('together-space-session', SESSION);
+    FakeSocket.opened = [];
+    let status = 'todo';
+    respond((url) => {
+      if (url.includes('/spaces/mine')) {
+        return json(200, { fid: 42, space_id: 'space-1', spaces: [SPACE] });
+      }
+
+      if (url.includes('/spaces/state')) {
+        return json(200, statePayload([{ ...CARD, status } as typeof CARD]));
+      }
+
+      if (url.includes('/spaces/events')) {
+        return json(200, { cursor: 5, latest: 5, events: [] });
+      }
+
+      return json(200, {});
+    });
+
+    render(
+      <Shell entries={['/~/together']}>
+        <TogetherPage />
+      </Shell>,
+    );
+    await screen.findByText('Ship the Together surface');
+    return { moved: () => (status = 'done') };
+  };
+
+  it('asks the service on the socket the build points at, with the session it has', () => {
+    // The local alpha's default origin, and the same token REST uses. A browser
+    // cannot set a header on a websocket handshake, so it travels in the query.
+    expect(togetherStreamUrl('session-token')).toBe(
+      'ws://127.0.0.1:8766/spaces/stream?token=session-token',
+    );
+  });
+
+  it('re-reads the board when a frame arrives, and shows the change', async () => {
+    vi.stubGlobal('WebSocket', FakeSocket);
+    const board = await bootBoard();
+    const socket = await liveSocket();
+    expect(FakeSocket.opened).toHaveLength(1);
+    expect(socket.url).toContain('/spaces/stream?token=session-token');
+
+    await act(async () => socket.open());
+    expect(await screen.findByText('Live')).toBeTruthy();
+
+    const readsBefore = calls.filter((call) =>
+      call.url.includes('/spaces/state'),
+    ).length;
+    board.moved();
+    await act(async () => {
+      socket.push({
+        type: 'event',
+        space_id: 'space-1',
+        seq: 6,
+        kind: 'card.moved',
+        actor_fid: 7,
+        actor_name: 'marcus',
+        created_at: 1,
+        card_id: 'card-1',
+        title: 'Ship the Together surface',
+        status: 'done',
+      });
+    });
+
+    // The frame carried "something changed"; the board came from the service.
+    expect(await screen.findByText('Cast it to the channel')).toBeTruthy();
+    expect(
+      calls.filter((call) => call.url.includes('/spaces/state')).length,
+    ).toBeGreaterThan(readsBefore);
+    expect(screen.getByText(/@marcus/)).toBeTruthy();
+  });
+
+  it('says it is disconnected, then falls back to asking', async () => {
+    vi.stubGlobal('WebSocket', FakeSocket);
+    await bootBoard();
+    const socket = await liveSocket();
+    await act(async () => socket.open());
+    expect(await screen.findByText('Live')).toBeTruthy();
+
+    // While the socket is carrying the board, the fallback stays quiet.
+    calls = [];
+    await act(async () => socket.die());
+    expect(await screen.findByText('Disconnected — reconnecting')).toBeTruthy();
+    expect(calls.some((call) => call.url.includes('/spaces/events'))).toBe(false);
+
+    // ...and starts asking, so a client without a socket still converges.
+    await waitFor(
+      () =>
+        expect(
+          calls.some((call) => call.url.includes('/spaces/events')),
+        ).toBe(true),
+      { timeout: 6000 },
+    );
+    // Retrying is visible too: the page keeps trying to get its socket back.
+    expect(FakeSocket.opened.length).toBeGreaterThan(1);
+  }, 15000);
+
+  it('never asks at all when the page was opened with polling switched off', async () => {
+    window.history.replaceState({}, '', '/~/together?together-poll=off');
+    vi.stubGlobal('WebSocket', FakeSocket);
+    await bootBoard();
+    const socket = await liveSocket();
+    await act(async () => socket.open());
+    expect(await screen.findByText('Live')).toBeTruthy();
+
+    await act(async () => socket.die());
+    expect(await screen.findByText('Disconnected — reconnecting')).toBeTruthy();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3500));
+    });
+
+    expect(calls.some((call) => call.url.includes('/spaces/events'))).toBe(false);
+    expect(FakeSocket.opened.length).toBeGreaterThan(1);
+  }, 15000);
 });

@@ -40,6 +40,7 @@ import {
   listSpaces,
   markCardRead,
   openSpace,
+  openTogetherStream,
   pollTogetherSignIn,
   postComment,
   readEvents,
@@ -49,6 +50,8 @@ import {
   sendTyping,
   startTogetherSignIn,
   storeTogetherSession,
+  TOGETHER_BOARD_POLL_MS,
+  TOGETHER_LIVE_LABEL,
   TOGETHER_POLL_INTERVAL_MS,
   TOGETHER_SIGN_IN_TIMEOUT_MS,
   TOGETHER_THREAD_POLL_INTERVAL_MS,
@@ -58,9 +61,11 @@ import {
   TogetherError,
   TogetherEvent,
   TogetherInvite,
+  TogetherLiveStatus,
   TogetherSignInChallenge,
   TogetherSpace,
   TogetherState,
+  togetherPollingDisabled,
   TogetherThread,
   updateCard,
 } from '~/lib/together';
@@ -607,39 +612,107 @@ const BoardPanel = ({
   const [error, setError] = React.useState<string | null>(null);
   const [activity, setActivity] = React.useState<TogetherEvent[]>([]);
   const [refreshedAt, setRefreshedAt] = React.useState<number>(Date.now());
+  const [live, setLive] = React.useState<{
+    status: TogetherLiveStatus;
+    /** When the socket handed this page a change. */
+    pushedAt: number | null;
+    /** When the re-read it caused landed, so push→render is measurable. */
+    renderedAt: number | null;
+  }>({ status: 'connecting', pushedAt: null, renderedAt: null });
 
-  const refresh = React.useCallback(async () => {
+  // `converge` is called by the socket's frames AND after this member's own
+  // writes: one code path, so a push and a click cannot disagree. Reads are
+  // serialised and never dropped — a frame that arrives mid-read asks for one
+  // more read afterwards, so the last word is still the service's.
+  const gate = React.useRef({ busy: false, again: false });
+  const cursorRef = React.useRef(state.cursor);
+  const statusRef = React.useRef<TogetherLiveStatus>('connecting');
+
+  React.useEffect(() => {
+    cursorRef.current = state.cursor;
+  }, [state.cursor]);
+
+  React.useEffect(() => {
+    statusRef.current = live.status;
+  }, [live.status]);
+
+  const converge = React.useCallback(async () => {
+    const reading = gate.current;
+
+    if (reading.busy) {
+      reading.again = true;
+      return;
+    }
+
+    reading.busy = true;
+
     try {
-      onState(await readState(token));
-      setRefreshedAt(Date.now());
+      do {
+        reading.again = false;
+        onState(await readState(token));
+        const at = Date.now();
+        setRefreshedAt(at);
+        setLive((current) => ({ ...current, renderedAt: at }));
+      } while (reading.again);
     } catch (problem) {
       setError(describeError(problem));
+    } finally {
+      reading.busy = false;
     }
   }, [onState, token]);
 
-  // Polling, not websockets. Every tick asks what changed since the cursor we
-  // last saw, and only re-reads the board when something did.
+  // The live path. A frame carries "something changed in this space" — never the
+  // board itself — so every one of them is answered by reading the board back
+  // from the service. Its liveness is shown, not assumed: the header says which
+  // of these two paths the page is on right now.
   React.useEffect(() => {
+    const stream = openTogetherStream(token, {
+      onStatus: (status) => setLive((current) => ({ ...current, status })),
+      onReady: () => void converge(),
+      onGap: () => void converge(),
+      onEvent: (event) => {
+        setLive((current) => ({ ...current, pushedAt: Date.now() }));
+        setActivity((current) => [...current, event].slice(-6));
+        void converge();
+      },
+    });
+
+    return () => stream.close();
+  }, [converge, token]);
+
+  // The fallback, kept on purpose: a client that cannot open a socket (a locked
+  // down network, an old browser) still converges, just slower. It only asks
+  // while the socket is NOT carrying this board, and `?together-poll=off` turns
+  // it off entirely — which is how the browser probe proves the socket, and not
+  // this, is what moved the board.
+  React.useEffect(() => {
+    if (togetherPollingDisabled()) {
+      return undefined;
+    }
+
     let cancelled = false;
     const timer = window.setInterval(async () => {
+      if (cancelled || statusRef.current === 'live') {
+        return;
+      }
+
       try {
-        const update = await readEvents(token, state.cursor);
+        const update = await readEvents(token, cursorRef.current);
 
         if (!cancelled && update.events.length > 0) {
-          setActivity(update.events.slice(-6));
-          onState(await readState(token));
-          setRefreshedAt(Date.now());
+          setActivity((current) => [...current, ...update.events].slice(-6));
+          await converge();
         }
       } catch {
-        // Stay quiet on a failed tick; the next one usually works.
+        // A failed tick is not worth shouting about; the next one may work.
       }
-    }, 3000);
+    }, TOGETHER_BOARD_POLL_MS);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [onState, state.cursor, token]);
+  }, [converge, token]);
 
   const move = async (card: TogetherCard, status: TogetherCardStatus) => {
     setBusyCardId(card.id);
@@ -647,10 +720,10 @@ const BoardPanel = ({
 
     try {
       await updateCard(token, card.id, { status, version: card.version });
-      await refresh();
+      await converge();
     } catch (problem) {
       setError(describeError(problem));
-      await refresh();
+      await converge();
     } finally {
       setBusyCardId(null);
     }
@@ -666,7 +739,7 @@ const BoardPanel = ({
     try {
       await createCard(token, { title: title.trim() });
       setTitle('');
-      await refresh();
+      await converge();
     } catch (problem) {
       setError(describeError(problem));
     }
@@ -699,7 +772,7 @@ const BoardPanel = ({
 
     try {
       await announce(token, { card_id: card.id });
-      await refresh();
+      await converge();
     } catch (problem) {
       setError(describeError(problem));
     } finally {
@@ -713,17 +786,18 @@ const BoardPanel = ({
     async (card: TogetherCard) => {
       try {
         await markCardRead(token, card.id);
-        await refresh();
+        await converge();
       } catch (problem) {
         setError(describeError(problem));
       }
     },
-    [refresh, token],
+    [converge, token],
   );
 
   const unread = state.unread?.cards ?? {};
 
   const mine = state.members.find((member) => member.fid === state.me.fid);
+  const isLive = live.status === 'live';
 
   return (
     <div className="flex flex-col gap-4">
@@ -738,6 +812,21 @@ const BoardPanel = ({
           {state.identity === 'unverified-dev' && (
             <span className="fiddy-tag">offline verifier</span>
           )}
+          {/* Which path this page is on, visible rather than assumed. A board
+              that has lost the socket says so instead of looking merely idle. */}
+          <span
+            className="fiddy-live"
+            data-live={live.status}
+            data-pushed-at={live.pushedAt ?? ''}
+            data-rendered-at={live.renderedAt ?? ''}
+            title={
+              isLive
+                ? 'A change on this board is pushed to this page over a socket.'
+                : 'The socket is not carrying this board, so the page is asking the space service every few seconds.'
+            }
+          >
+            {TOGETHER_LIVE_LABEL[live.status]}
+          </span>
         </div>
         <p className="mt-2 text-[13.5px] leading-relaxed text-[#a8ada2]">
           {state.members.length === 1
@@ -851,7 +940,11 @@ const BoardPanel = ({
         <p className="mt-3 flex items-center gap-2 text-[12px] text-[#8c9187]">
           <Zap aria-hidden="true" className="h-3.5 w-3.5" />
           Each card is worked by whoever picks it up — in their own Hermes, with
-          their own keys. Updated {new Date(refreshedAt).toLocaleTimeString()}.
+          their own keys.{' '}
+          {isLive
+            ? 'Anything that changes here is pushed to every open board over a socket.'
+            : 'Waiting for the socket; the board is asking the space service every few seconds meanwhile.'}{' '}
+          Last read {new Date(refreshedAt).toLocaleTimeString()}.
         </p>
       </section>
 
@@ -1053,11 +1146,14 @@ export const TogetherPage = () => {
         <p className="fiddy-honest-note">
           <Zap aria-hidden="true" />
           <span>
-            Comments, typing indicators and unread markers all arrive the same
-            way the board does: this page asks the space service what changed
-            every few seconds. Websockets are still <strong>soon</strong>.
-            Spaces are an alpha: they hold FIDs, handles, boards, comments and
-            cast intents — never keys, never seed phrases.
+            A board is live: a change on it is pushed to everyone's open page
+            over a websocket, and each page re-reads the board from the space
+            service to stay exact. If a socket cannot be opened, the page falls
+            back to asking every few seconds. A card's thread still polls (2s),
+            which is how comments, typing and unread markers arrive.
+            Notifications that leave the page are <strong>soon</strong>. Spaces
+            are an alpha: they hold FIDs, handles, boards, comments and cast
+            intents — never keys, never seed phrases.
             {spaceCount > 1 ? ` You are in ${spaceCount} spaces.` : ''}
           </span>
         </p>
