@@ -25,8 +25,9 @@
 //
 // WHAT IT ASSERTS
 //   A. without an app id: no doors, no dead buttons, no errors — the Farcaster
-//      path exactly as it was
-//   B. with an app id: both doors, at 390 and 1440
+//      path exactly as it was, and the app says the feature is absent
+//   B. with an app id: both doors, at 390 and 1440, measured once the app says
+//      they are usable (the SDK arrives late and remounts — see ~/providers/PrivyRoot)
 //   C. pressing Google lands on the account screen, and the account it made is
 //      in the device's own book — keyed by the held wallet, named by the email,
 //      with no FID invented
@@ -34,6 +35,8 @@
 //      again when that time passes, and silenced for good by the confirm step
 //   E. signing in with Farcaster from that screen reaches the shell, and the
 //      switcher lists BOTH accounts — the social one joined it
+//   F. a third party that refuses (a provider that throws) does not take the
+//      client with it: the doors say so and the Farcaster way in still stands
 //
 // SAFETY: every non-GET request to anything but the dev servers is aborted and
 // counted, so nothing here can post, register or own anything on a real network.
@@ -114,6 +117,23 @@ export const usePrivy = () => ({
 });
 `;
 
+/**
+ * The same module, refusing — a provider that answers by throwing.
+ *
+ * This is the shape of a third party that will not cooperate: the dashboard does
+ * not know this app id, or its script is blocked, or it is simply broken. What
+ * the client must do about that is measured in stage F, and it must never be
+ * "replace the whole screen with an error".
+ */
+const PRIVY_REFUSING_STUB = `
+export const PrivyProvider = () => {
+  throw new Error('privy refused this app id');
+};
+
+export const useLogin = () => ({ login: () => undefined });
+export const usePrivy = () => ({ authenticated: false, ready: false, exportWallet: async () => undefined });
+`;
+
 const startedAt = Date.now();
 const stage = (step) =>
   console.log(
@@ -151,14 +171,21 @@ const armRoutes = async (page, { server, privy }) => {
   });
 
   await page.route('**/*privy-io*', async (route) => {
-    if (!privy) {
+    const body =
+      privy === false
+        ? undefined
+        : privy === 'refuse'
+          ? PRIVY_REFUSING_STUB
+          : PRIVY_STUB;
+
+    if (body === undefined) {
       return route.continue();
     }
 
     return route.fulfill({
       status: 200,
       headers: { 'content-type': 'application/javascript' },
-      body: PRIVY_STUB,
+      body,
     });
   });
 
@@ -201,17 +228,31 @@ const armRoutes = async (page, { server, privy }) => {
 const dash = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
 
 /** Open the way in, through the door the client already has. */
-const openLoginModal = async (page, server) => {
+const openLoginModal = async (page, server, { beforePress } = {}) => {
   // 'commit', not 'domcontentloaded': in dev the module graph of a cold Vite
   // server holds DOMContentLoaded for as long as its dependency optimisation
   // takes, and waiting on it would measure the bundler rather than the app.
   // Everything that matters is waited for explicitly, below.
   await page.goto(`${server}/welcome/ready`, {
     waitUntil: 'commit',
-    timeout: 60_000,
+    timeout: 180_000,
   });
-  await page.waitForSelector('button', { timeout: 60_000 });
+  // MEASURED 2026-10-22, this box at load ~50, a fresh worktree: the first load
+  // of this screen on a cold Vite server took 89s (no app id) and 67s (with an
+  // app id) — ~2700 module requests, each transformed on demand, none of them
+  // failed and none of them slow on their own. The wait is on the bundler, not
+  // on the app: the same servers paint in ~1.5s once their graph is warm, and
+  // the runs below re-load these routes many times. `verify-account-switching`
+  // waits 180s for the same reason.
+  await page.waitForSelector('button', { timeout: 180_000 });
   await page.waitForTimeout(1_500);
+
+  // Something the app has to settle first — in the app-id runs, the arrival of
+  // Privy's provider, which remounts the subtree and would otherwise take the
+  // modal away from under the press below. See `waitForPrivyState`.
+  if (beforePress) {
+    await beforePress();
+  }
 
   const pressed = await page.evaluate(() => {
     for (const element of document.querySelectorAll('button, a, [role=button]')) {
@@ -232,6 +273,31 @@ const openLoginModal = async (page, server) => {
 
   await page.waitForTimeout(2_500);
 };
+
+/**
+ * The state the app publishes about Privy, and the wait for a settled one.
+ *
+ * The doors are drawn before the SDK arrives — disabled, saying "one moment" —
+ * and when it does arrive the subtree remounts, which closes a modal that was
+ * opened in the meantime. MEASURED (2026-10-22, this box): the SDK's chunk took
+ * ~50s to arrive in dev, so a probe that presses the door the moment it appears
+ * presses a door that is about to be taken away. The app publishes the settled
+ * moment on the document element (`data-fiddy-privy`, see ~/providers/PrivyRoot);
+ * waiting for it is what makes the runs below measure the app rather than the
+ * bundler.
+ */
+const readPrivyState = (page) =>
+  page.evaluate(() =>
+    document.documentElement.getAttribute('data-fiddy-privy'),
+  );
+
+const waitForPrivyState = (page, wanted, timeout = 300_000) =>
+  page.waitForFunction(
+    (expected) =>
+      document.documentElement.getAttribute('data-fiddy-privy') === expected,
+    wanted,
+    { timeout },
+  );
 
 const readAccountBook = (page) =>
   page.evaluate(async () => {
@@ -327,6 +393,7 @@ const runWithoutAppId = async (browser, width) => {
     farcasterPath: /open link on mobile|asking farcaster for a sign-in code|sign in with/i.test(
       document.body.innerText,
     ),
+    privy: document.documentElement.getAttribute('data-fiddy-privy'),
   }));
 
   check(
@@ -338,6 +405,13 @@ const runWithoutAppId = async (browser, width) => {
     `A2 ${width}px: the Farcaster way in is still there`,
     seen.farcasterPath === true,
     JSON.stringify(seen),
+  );
+  // The build says so out loud, so a probe (or a person) never has to guess
+  // whether a missing door is a switch or a fault.
+  check(
+    `A3 ${width}px: the app publishes that the feature is absent`,
+    seen.privy === 'absent',
+    `${seen.privy}`,
   );
 
   await page.screenshot({ path: `${OUT}/social-signup-${width}-no-app-id.png` });
@@ -355,8 +429,52 @@ const runWithAppId = async (browser, width) => {
   const page = await context.newPage();
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 200)));
 
-  await armRoutes(page, { server: SERVER, privy: true });
-  await openLoginModal(page, SERVER);
+  await armRoutes(page, { server: SERVER, privy: 'stub' });
+
+  // The settled moment, not the first one: the app publishes when signing up can
+  // actually be attempted, and that is after Privy's provider has arrived and
+  // the subtree has remounted (`~/providers/PrivyRoot`). Measured here: the
+  // state read right after the setup screen painted, and the one the press
+  // below is made in.
+  let atPaint = null;
+  let settled = null;
+  let attempts = 0;
+  let doorsUsable = false;
+
+  // The app is allowed to re-decide this screen: MEASURED on this box, the setup
+  // screen reloads itself once when the modal's own chunk is fetched for the
+  // first time on a cold dev server, which closes the modal mid-run. That is a
+  // bundler's behaviour, not the app's, so the probe re-opens the way in instead
+  // of asserting on the moment the reload happens — and records how many
+  // attempts it took.
+  for (attempts = 1; attempts <= 3 && !doorsUsable; attempts += 1) {
+    await openLoginModal(page, SERVER, {
+      beforePress: async () => {
+        if (atPaint === null) {
+          atPaint = await readPrivyState(page);
+        }
+
+        await waitForPrivyState(page, 'ready');
+      },
+    });
+
+    settled = await readPrivyState(page);
+
+    doorsUsable = await page
+      .waitForSelector('[data-fiddy="social-sign-up-google"]:not([disabled])', {
+        timeout: 90_000,
+      })
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  check(
+    `B0 ${width}px: the doors are only measured once the app says they are usable ('${atPaint}' → '${settled}', attempt ${attempts - 1})`,
+    (atPaint === 'loading' || atPaint === 'ready' || atPaint === null) &&
+      settled === 'ready' &&
+      doorsUsable,
+    `${atPaint} → ${settled}, usable=${doorsUsable}`,
+  );
 
   const doors = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-fiddy^="social-sign-up-"]')).map(
@@ -600,6 +718,67 @@ const runWithAppId = async (browser, width) => {
   await context.close();
 };
 
+/** ── F. a third party that refuses ───────────────────────────────────────── */
+
+const runRefusingProvider = async (browser) => {
+  stage('F. a refusing provider, at 390px');
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: true,
+    viewport: { width: 390, height: 844 },
+  });
+  const page = await context.newPage();
+  page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 200)));
+
+  // The SDK here is the third party at its worst: a module whose provider
+  // throws. That is what a dashboard that does not know this app id looks like
+  // from inside the client, and MEASURED on 2026-10-22 it used to replace the
+  // whole screen with "We encountered an unexpected error. Try again" — no
+  // doors, and no Farcaster sign-in either.
+  await armRoutes(page, { server: SERVER, privy: 'refuse' });
+  await openLoginModal(page, SERVER);
+  await page.waitForTimeout(3_000);
+
+  const after = await page.evaluate(() => ({
+    privy: document.documentElement.getAttribute('data-fiddy-privy'),
+    body: (document.body.innerText ?? '').replace(/\s+/g, ' ').trim(),
+    usableDoors: Array.from(
+      document.querySelectorAll('[data-fiddy^="social-sign-up-"]'),
+    ).filter((door) => !door.hasAttribute('disabled')).length,
+    note: (
+      document.querySelector('[data-fiddy="social-unavailable"]')?.textContent ?? ''
+    )
+      .replace(/\s+/g, ' ')
+      .trim(),
+    modal: Boolean(document.querySelector('[data-fiddy="login-social"]')),
+  }));
+
+  check(
+    'F1 390px: a refusing SDK does not take the client with it',
+    !/unexpected error/i.test(after.body),
+    after.body.slice(0, 160),
+  );
+  check(
+    'F2 390px: the Farcaster way in is still on screen',
+    /open link on mobile|asking farcaster for a sign-in code|sign in with/i.test(
+      after.body,
+    ),
+    after.body.slice(0, 160),
+  );
+  check(
+    'F3 390px: the doors are either usable or say why they are not',
+    after.usableDoors > 0 || after.note.length > 0,
+    JSON.stringify(after.note),
+  );
+  check(
+    'F4 390px: and the app says, in its own state and in plain words, that the third party refused',
+    after.privy === 'failed' && /still sign in with farcaster/i.test(after.note),
+    `${after.privy} / ${after.note.slice(0, 120)}`,
+  );
+
+  await page.screenshot({ path: `${OUT}/social-signup-390-provider-refused.png` });
+  await context.close();
+};
+
 // The system Chrome, as every other probe in this repo does it: the pinned
 // headless shell is not always on the machine, and this probe is about the app,
 // not about which browser build runs it.
@@ -610,6 +789,7 @@ try {
   await runWithoutAppId(browser, 1440);
   await runWithAppId(browser, 390);
   await runWithAppId(browser, 1440);
+  await runRefusingProvider(browser);
 
   check('the Farcaster relay was stubbed, not the app', true, '');
 
