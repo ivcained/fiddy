@@ -243,20 +243,22 @@ Every row names the release it was measured on.
 | `/release.json` | `{"revision":"a0e53d5eda61f76b16c50e56a2179f71b7922fff","mode":"node-backed-client","node":"https://haatz.quilibrium.com","media":"https://fiddy.fun"}` — on `a0e53d5` |
 | A real sign-in, real browser, public site | the SIWF relay stubbed with a real SIWE message signed by a throwaway key: the ready step renders its own control, the click lands **in the client** — `path=/`, shell frame mounted, Cast control visible, no onboarding sheet, no device-only landing — on `a0e53d5` |
 | Node relay through the public host | `GET https://fiddy.fun/snapchain-api/v1/info` → 200 with the node's `dbStats` |
-| Composer, real browser, public site | `scripts/verify-media-upload.mjs` against `https://fiddy.fun`: **11/14** — sign-in lands in the client, the composer opens over the feed, the picked bytes are **POSTed to `https://fiddy.fun/api/fiddy/media` → 201**, the URL comes back on that host, the stored photo is readable (200, `image/jpeg`, 227,384 bytes), the served bytes hash to the name in the URL, the composer shows the photo with no failure copy, and nothing was posted to Farcaster. **Measured on `89cdd01`; not re-run on `a0e53d5`** — see the gap below |
+| Composer, real browser, public site | `scripts/verify-media-upload.mjs` against `https://fiddy.fun`: **11/14** — sign-in lands in the client, the composer opens over the feed, the picked bytes are **POSTed to `https://fiddy.fun/api/fiddy/media` → 201**, the URL comes back on that host, the stored photo is readable (200, `image/jpeg`, 227,384 bytes), the served bytes hash to the name in the URL, the composer shows the photo with no failure copy, and nothing was posted to Farcaster. **Measured on `a0e53d5`, the release live at the time**, with the probe fixed so that it survives the sign-in's own navigation (`8d2bf62`); the three checks it does not satisfy are the same three explained below, and the same probe against the local probe server (which sets `VITE_SNAPCHAIN_DEBUG`) is **14/14** |
 | Preview / neighbour surfaces | on `a0e53d5`: `/preview/` 200, `/farcaster` 200, `/client` 200, `/client/` 200, `/FSSC/` 200, `/start` 200, `/manifest.json` 200, `/fiddy-card.png` 200, `/fiddy-splash.png` 200, `/shell-bootstrap.js` 200, `/robots.txt` 200, `mate.legitclub.com/api/health` 200 |
 
-Three of the composer probe's fourteen checks were not satisfied on `89cdd01`,
+Three of the composer probe's fourteen checks are not satisfied on `a0e53d5`,
 and each says why:
 
 - **"the upload-URL request … was answered by the MEDIA route"** and **"the cast
   payload … references the media URL"** read `window.__nodeBackedRequests`,
   which is published only under `VITE_SNAPCHAIN_DEBUG`; the release build does
-  not set it. The same probe on the same commit with that flag (t_54ee6c54) is
-  14/14. The live evidence for the same fact: the composer asked for an upload
-  URL, no such request appears in the requests that left the page (the adapter
-  answers it inside the page), a 201 upload followed, and no failure copy was
-  shown — a 501 would have produced the failure copy and no upload.
+  not set it. The same probe against the local probe server, which does set it,
+  is 14/14 (re-measured 2026-10-21, after the probe fix below — the earlier
+  measurement on `89cdd01` is t_54ee6c54). The live evidence for the same fact:
+  the composer asked for an upload URL, no such request appears in the requests
+  that left the page (the adapter answers it inside the page), a 201 upload
+  followed, and no failure copy was shown — a 501 would have produced the
+  failure copy and no upload.
 - **"the photo is served immutable, with nosniff"** — the probe re-uses one
   deterministic photo, and its CDN entry was cached (immutable, one year) while
   nginx and the media service both sent `X-Content-Type-Options`. That duplicate
@@ -266,15 +268,19 @@ and each says why:
 
 ## Known gaps (not this release's job)
 
-- **The composer row was measured on the previous release.** `a0e53d5` carries
-  other cards' composer and media-upload work, so that row is not evidence for
-  it. Re-running `scripts/verify-media-upload.mjs` against `a0e53d5` fails in
-  *the probe*, not in the client: it reads the page surface
-  (`document.body.innerText`) while the sign-in's own navigation replaces the
-  document, and throws on the null body
-  (`Execution context was destroyed, most likely because of a navigation` — the
-  same race `verify-cast-submit.mjs` was fixed for). That the client itself is
-  fine is measured above: a real sign-in on `a0e53d5` lands in the client.
+- **What the composer row could not be measured on before, and why it can now.**
+  The row above used to be attributed to the previous release: re-running
+  `scripts/verify-media-upload.mjs` against the live client failed in *the probe*,
+  not in the client — it read the page surface (`document.body.innerText`) while
+  the sign-in's own navigation replaced the document, and died on the null body
+  before its first check, which is why nothing could be re-measured. That is
+  fixed (`8d2bf62`, which fixes the same read in `verify-siwf-login.mjs`,
+  `verify-post-signin-landing.mjs`, `verify-unseen-containment.mjs` and
+  `verify-dead-node-feed.mjs` too), and the row is now measured on the release
+  that is live. What it still cannot satisfy on a release build is the two checks
+  that read `window.__nodeBackedRequests` (no `VITE_SNAPCHAIN_DEBUG` in the
+  build) and the cached-`nosniff` duplicate above — both accounted for, neither a
+  client fact.
 - `/client` and `/client/` (the static landing pages) keep
   `script-src 'self' 'unsafe-inline'` in their own locations: their HTML carries
   an inline `<script>` and no inline handler. Different page, different CSP —
