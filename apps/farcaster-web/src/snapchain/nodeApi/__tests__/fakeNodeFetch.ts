@@ -14,13 +14,42 @@
  * an account whose log fits in one page.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 type Json = Record<string, unknown>;
 
 const read = (name: string): Json =>
   JSON.parse(readFileSync(join(__dirname, 'fixtures', name), 'utf8')) as Json;
+
+/**
+ * A page recorded for one specific FID, by the fixture-naming convention
+ * (`castsByFid.fid<FID>.json`, `userDataByFid.fid<FID>.json`).
+ *
+ * These are the accounts a recorded cast mentions: a mention's handle is its own
+ * account's user data, so a test that renders mentions has to be able to read
+ * those accounts the way a live node answers for them. Anything not recorded
+ * still falls through to the fid-3 set and then to empty pages, so a test can
+ * never read somebody else's data by accident.
+ */
+const recordedPageFor = (
+  path: string,
+  fid: string | null,
+): Json | undefined => {
+  if (fid === null || !/^\d+$/.test(fid)) {
+    return undefined;
+  }
+  const name =
+    path === '/v1/castsByFid'
+      ? `castsByFid.fid${fid}.json`
+      : path === '/v1/userDataByFid'
+        ? `userDataByFid.fid${fid}.json`
+        : undefined;
+  if (name === undefined || !existsSync(join(__dirname, 'fixtures', name))) {
+    return undefined;
+  }
+  return read(name);
+};
 
 export const TERMINAL_PAGE_TOKEN = 'W251bGwsbnVsbF0=';
 
@@ -71,6 +100,14 @@ export const createFixtureNodeFetch = ({
     // The captured pages are one account's (fid 3). Anything else is answered
     // with an empty page rather than with somebody else's data.
     const fidParam = params.get('fid') ?? params.get('target_fid');
+
+    // ...except a page recorded for that exact FID: the accounts a recorded cast
+    // mentions, so mentions resolve the way they do on a live node.
+    const recorded = recordedPageFor(path, fidParam);
+    if (recorded !== undefined) {
+      return recorded;
+    }
+
     const isRecordedFid = fidParam === '3' || fidParam === '2';
     const fidScoped = [
       '/v1/userDataByFid',
