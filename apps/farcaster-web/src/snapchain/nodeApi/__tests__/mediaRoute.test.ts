@@ -12,6 +12,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { offlineEmbedKinds } from './fakeEmbedKinds';
+
 import {
   classifyHostedRequest,
   createNodeBackedFetch,
@@ -27,6 +29,7 @@ const buildHarness = ({
   const nodeFetch = vi.fn(async () => new Response('{}', { status: 200 }));
   const handle = createNodeBackedFetch({
     nodeBaseUrl: 'http://node.test',
+    embedKinds: offlineEmbedKinds(),
     getSignedInFid: () => 3,
     fetchImpl: nodeFetch as unknown as typeof fetch,
     ...(injected ? { mediaUploadUrl: injected } : {}),

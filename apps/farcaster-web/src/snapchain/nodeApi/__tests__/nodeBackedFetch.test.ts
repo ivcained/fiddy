@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import { createNodeBackedFetch } from '~/snapchain/nodeApi';
 
 import { createFixtureNodeFetch, TERMINAL_PAGE_TOKEN } from './fakeNodeFetch';
+import { offlineEmbedKinds } from './fakeEmbedKinds';
 
 type Json = Record<string, unknown>;
 
@@ -32,6 +33,7 @@ const buildHarness = ({ fid }: { fid?: number } = { fid: 3 }): Harness => {
   const nodeLog: string[] = [];
   const handle = createNodeBackedFetch({
     nodeBaseUrl: 'http://node.test',
+    embedKinds: offlineEmbedKinds(),
     getSignedInFid: () => fid,
     fetchImpl: createFixtureNodeFetch({ log: nodeLog }),
   });
@@ -347,6 +349,7 @@ describe('the node-backed fetch', () => {
 
       const handle = createNodeBackedFetch({
         nodeBaseUrl: '/snapchain-api',
+        embedKinds: offlineEmbedKinds(),
         getSignedInFid: () => 3,
         fetchImpl: strictFetch,
       });
@@ -378,6 +381,7 @@ describe('the node-backed fetch', () => {
     it('answers 502 with how long it waited, instead of leaving the read open', async () => {
       const handle = createNodeBackedFetch({
         nodeBaseUrl: '/snapchain-api',
+        embedKinds: offlineEmbedKinds(),
         getSignedInFid: () => 3,
         fetchImpl: hangingFetch,
         readTimeoutMs: 1_000,
@@ -404,6 +408,7 @@ describe('the node-backed fetch', () => {
       // promise never settled and the feed stayed in its loading state forever.
       const handle = createNodeBackedFetch({
         nodeBaseUrl: '/snapchain-api',
+        embedKinds: offlineEmbedKinds(),
         getSignedInFid: () => 3,
         fetchImpl: hangingFetch,
         readTimeoutMs: 30_000,
@@ -459,6 +464,7 @@ describe('the node-backed fetch', () => {
 
       const handle = createNodeBackedFetch({
         nodeBaseUrl: '/snapchain-api',
+        embedKinds: offlineEmbedKinds(),
         getSignedInFid: () => 3,
         fetchImpl,
       });

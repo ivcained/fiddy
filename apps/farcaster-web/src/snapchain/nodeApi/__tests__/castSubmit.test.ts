@@ -23,6 +23,8 @@ import { LocalDraftStore } from '~/snapchain/nodeApi/localDrafts';
 import { createNodeBackedFetch } from '~/snapchain/nodeApi/nodeBackedFetch';
 import { asSentence } from '~/snapchain/nodeApi/nodeCannotAnswer';
 
+import { offlineEmbedKinds } from './fakeEmbedKinds';
+
 const fakeStorage = (): Storage => {
   const map = new Map<string, string>();
   return {
@@ -47,6 +49,7 @@ const buildHarness = (fid: number | undefined = 3) => {
   const nodeFetch = vi.fn(async () => new Response('{}', { status: 200 }));
   const handle = createNodeBackedFetch({
     nodeBaseUrl: 'http://node.test',
+    embedKinds: offlineEmbedKinds(),
     getSignedInFid: () => fid,
     fetchImpl: nodeFetch as unknown as typeof fetch,
     drafts,
@@ -184,6 +187,7 @@ describe('pressing Cast with the node-backed client', () => {
   it('says a draft could not be kept when this browser allows no storage', async () => {
     const handle = createNodeBackedFetch({
       nodeBaseUrl: 'http://node.test',
+      embedKinds: offlineEmbedKinds(),
       getSignedInFid: () => 3,
       fetchImpl: (async () => new Response('{}')) as unknown as typeof fetch,
       drafts: new LocalDraftStore({ storage: undefined }),
