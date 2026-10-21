@@ -13,13 +13,6 @@ import { cleanup, render, screen } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// A settings surface's own presentational component, not a lazy-loaded page:
-// the rule exists so that pages are code-split, and there is nothing to split.
-// eslint-disable-next-line no-restricted-imports
-import {
-  ProviderListCard,
-  providerStatusWord,
-} from '~/pages/settingsNode/Component/ProviderListCard';
 import {
   farcasterPublicProvider,
   neynarProvider,
@@ -28,6 +21,8 @@ import {
 import type { FailoverState } from '~/snapchain/providers/failover';
 import type { ProviderHealth } from '~/snapchain/providers/health';
 import type { ProviderRuntimeSnapshot } from '~/snapchain/providers/runtime';
+
+import { ProviderListCard, providerStatusWord } from './ProviderListCard';
 
 afterEach(cleanup);
 

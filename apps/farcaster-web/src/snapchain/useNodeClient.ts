@@ -10,7 +10,7 @@
 import { type NodeHealth, SnapchainNodeClient } from 'farcaster-node-client';
 import React, { useCallback, useMemo, useState } from 'react';
 
-import { resolveEffectiveNodeBaseUrl } from './nodeChoice';
+import { resolveBaseUrlForChoice } from './nodeChoice';
 import { useActiveNodeChoice } from './useNodeChoice';
 
 /**
@@ -23,12 +23,9 @@ import { useActiveNodeChoice } from './useNodeChoice';
  */
 export const useNodeClient = (): SnapchainNodeClient | undefined => {
   const choice = useActiveNodeChoice();
-  const baseUrl = useMemo(
-    () => resolveEffectiveNodeBaseUrl(),
-    // The chosen server is the only input that can change under a running tab.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [choice],
-  );
+  // The reader's choice is what the address is resolved from, so it is a real
+  // dependency of this memo — the one input that can change under a running tab.
+  const baseUrl = useMemo(() => resolveBaseUrlForChoice(choice), [choice]);
   return useMemo(() => new SnapchainNodeClient({ baseUrl }), [baseUrl]);
 };
 

@@ -36,8 +36,9 @@ export interface FixtureNodeOptions {
   log?: string[];
 }
 
-const byName = (_params: URLSearchParams): Json =>
-  read('userNameProofByName.dwr.json') as Json;
+// The recording is one name's proof; the fixture answers with it whatever name
+// the client asked for, so it takes no request at all.
+const byName = (): Json => read('userNameProofByName.dwr.json') as Json;
 
 /**
  * A `fetch` that speaks the node's own routes, backed by the recorded pages.
@@ -91,7 +92,7 @@ export const createFixtureNodeFetch = ({
       case '/v1/linksByTargetFid':
         return read('linksByTargetFid.fid3.follow.json');
       case '/v1/userNameProofByName':
-        return byName(params);
+        return byName();
       case '/v1/verificationsByFid':
         return read('verificationsByFid.fid2.json');
       case '/v1/castsByFid':

@@ -137,6 +137,19 @@ export const resolveEffectiveNodeBaseUrl = (
   return chosen ?? resolveNodeBaseUrl(env, pageOrigin);
 };
 
+/**
+ * The address for one choice, taken as an argument.
+ *
+ * The same rule as above — a chosen server wins over the build's own
+ * configuration — with the choice passed in instead of read out of the module
+ * store. That is what lets a React memo depend on exactly the value it
+ * resolves from: `useNodeClient` re-resolves when the reader switches server,
+ * and a dependency it never read would be one the hooks rule is right to
+ * question.
+ */
+export const resolveBaseUrlForChoice = (choice: NodeChoice | null): string =>
+  nodeChoiceBaseUrl(choice) ?? resolveEffectiveNodeBaseUrl();
+
 /** Has this reader named a server at all (either kind)? */
 export const isNodeChosen = (): boolean => activeChoice !== null;
 

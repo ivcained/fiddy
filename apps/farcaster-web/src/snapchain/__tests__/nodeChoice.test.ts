@@ -31,9 +31,11 @@ import {
   isNodeConfigured,
   loadActiveNodeChoice,
   nodeAddressProblem,
+  type NodeChoice,
   nodeChoiceBaseUrl,
   PUBLIC_READ_NODES,
   resetNodeChoice,
+  resolveBaseUrlForChoice,
   resolveEffectiveNodeBaseUrl,
   subscribeToNodeChoice,
 } from '~/snapchain/nodeChoice';
@@ -162,6 +164,28 @@ describe('the active choice', () => {
       'https://haatz.quilibrium.com',
     );
     expect(nodeChoiceBaseUrl(null)).toBeNull();
+  });
+
+  it('resolves the same address from the choice a memo depends on', async () => {
+    const env = { VITE_SNAPCHAIN_HTTP_URL: 'http://34.101.47.167:3381' };
+
+    // Nothing chosen: the address is the build's own configuration, whether it
+    // is read out of the store or resolved from a choice of null.
+    expect(resolveBaseUrlForChoice(null)).toBe(resolveEffectiveNodeBaseUrl());
+
+    const chosen: NodeChoice = {
+      kind: 'public',
+      url: 'https://haatz.quilibrium.com/',
+    };
+    await chooseNode(9, chosen);
+    // What a memo resolves from the choice it was handed is what the active
+    // choice resolves to — the dependency is the value, not a nudge to re-run.
+    expect(resolveBaseUrlForChoice(chosen)).toBe(
+      'https://haatz.quilibrium.com',
+    );
+    expect(resolveBaseUrlForChoice(chosen)).toBe(
+      resolveEffectiveNodeBaseUrl(env, 'https://localhost:5173'),
+    );
   });
 });
 
