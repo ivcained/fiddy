@@ -42,6 +42,7 @@
 
 import { type FetchLike, SnapchainNodeClient } from 'farcaster-node-client';
 
+import { type EmbedKindResolver } from './embedKinds';
 import { classifyHostedRequest, type HostedRouteMatch } from './hostedRoutes';
 import { answerLocalDraftRequest, LocalDraftStore } from './localDrafts';
 import { mediaUploadUrl } from './mediaUpload';
@@ -64,6 +65,13 @@ export interface NodeBackedFetchOptions {
   reads?: NodeBackedReads;
   /** Cap on paged counts. */
   countCap?: number;
+  /**
+   * How each embed URL's media type is decided (see `embedKinds.ts`), so a
+   * photo renders as a photo instead of a link card. Defaults to the real
+   * thing — bounded probes of the URLs themselves, cached per session.
+   * Injectable so a test can answer without a network.
+   */
+  embedKinds?: EmbedKindResolver;
   /** How long one read to the node may take. Defaults to NODE_READ_TIMEOUT_MS. */
   readTimeoutMs?: number;
   /**
@@ -361,6 +369,7 @@ export const createNodeBackedFetch = ({
   fetchImpl,
   reads,
   countCap,
+  embedKinds,
   readTimeoutMs = NODE_READ_TIMEOUT_MS,
   mediaUploadUrl: mediaUploadUrlOption,
   drafts: draftsOption,
@@ -423,6 +432,7 @@ export const createNodeBackedFetch = ({
       fetchImpl: readFetch,
       getSignedInFid,
       ...(countCap ? { countCap } : {}),
+      ...(embedKinds ? { embedKinds } : {}),
     });
 
   const log: RequestLogEntry[] = logOption ?? [];

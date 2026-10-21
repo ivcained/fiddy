@@ -24,6 +24,7 @@
  */
 
 export * from './fromNode';
+export * from './embedKinds';
 export * from './hostedRoutes';
 export * from './localDrafts';
 export * from './mediaUpload';

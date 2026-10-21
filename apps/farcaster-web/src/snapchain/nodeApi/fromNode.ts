@@ -12,6 +12,11 @@
  *
  * - Text, timestamps, embeds, mentions, the author's handle / display name /
  *   avatar / bio and the reply graph are protocol messages: exact.
+ * - Which bucket an embed lands in is *measured*, not exact: the protocol sends
+ *   a bare URL, so the URL's own media type is asked for over the network
+ *   (`embedKinds.ts`, one bounded probe per URL, cached). A URL nothing can
+ *   answer for stays a link card — the floor here is "a link", never "an image
+ *   we hoped for".
  * - Engagement counts (`reactions`, `recasts`) and link counts (followers,
  *   following) are counted by paging the node, capped (see `reads.ts`). A count
  *   is therefore exact while it is under the cap and a floor above it. The cap
@@ -31,6 +36,7 @@ import {
   ApiCastImageEmbed,
   ApiCastUnknownEmbed,
   ApiCastUrlEmbed,
+  ApiCastVideoEmbed,
   ApiChannelMinimal,
   ApiQuoteCastEmbed,
   ApiUser,
@@ -40,6 +46,8 @@ import type {
   NodeMessage,
   NodeUserDataBody,
 } from 'farcaster-node-client';
+
+import { embedKindFromExtension, type EmbedKindAnswer } from './embedKinds';
 
 /** Zero-safe count with the caveat that produced it. */
 export interface NodeCount {
@@ -56,8 +64,6 @@ export const floorCount = (value: number): NodeCount => ({
   value,
   isFloor: true,
 });
-
-const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|avif|bmp)(\?.*)?$/i;
 
 const userDataValue = (
   messages: NodeMessage[],
@@ -178,20 +184,32 @@ export interface CastEmbedsFromNodeResult {
 }
 
 /**
- * Embeds as the fork's `ApiCastEmbeds`. URLs that are plainly images go to
- * `images`; every other URL goes to `urls` with the URL itself as its
- * open-graph identity (no scraping happens here — an open-graph lookup is a
- * fetch of somebody's page, and this client does not make those).
+ * Embeds as the fork's `ApiCastEmbeds`. A URL that is known to be an image goes
+ * to `images` (that is the bucket the renderer draws as a photo), one known to
+ * be a video goes to `videos`, and everything else goes to `urls` with the URL
+ * itself as its open-graph identity (no scraping happens here — an open-graph
+ * lookup is a fetch of somebody's page, and this client does not make those).
+ *
+ * `embedKind` is how a caller hands in what it learned elsewhere: the node
+ * adapter resolves each URL's media type ahead of time (`embedKinds.ts`, one
+ * bounded probe per URL, cached) and passes the lookup in here. This function
+ * stays synchronous and pure so it can be reasoned about — with no lookup the
+ * file extension is all it has, and a URL that names no media type stays a
+ * link card rather than being guessed into one.
  */
 export const castEmbedsFromNode = ({
   body,
   quotedCasts = [],
+  embedKind,
 }: {
   body: NodeCastAddBody;
   /** Casts already resolved for `body.embeds` quote targets, by `fid:hash`. */
   quotedCasts?: ApiQuoteCastEmbed[];
+  /** What a caller has already learned about a URL's media type. */
+  embedKind?: (url: string) => EmbedKindAnswer | undefined;
 }): CastEmbedsFromNodeResult => {
   const images: ApiCastImageEmbed[] = [];
+  const videos: ApiCastVideoEmbed[] = [];
   const urls: ApiCastUrlEmbed[] = [];
   const quotes: ApiQuoteCastEmbed[] = [];
   const unknowns: ApiCastUnknownEmbed[] = [];
@@ -203,12 +221,19 @@ export const castEmbedsFromNode = ({
 
   for (const embed of body.embeds) {
     if ('url' in embed && typeof embed.url === 'string' && embed.url !== '') {
-      if (IMAGE_EXTENSIONS.test(embed.url)) {
+      const kind = embedKind?.(embed.url) ?? embedKindFromExtension(embed.url);
+      if (kind === 'image') {
         images.push({
           type: 'image',
           url: embed.url,
           sourceUrl: embed.url,
           alt: '',
+        });
+      } else if (kind === 'video') {
+        videos.push({
+          type: 'video',
+          url: embed.url,
+          sourceUrl: embed.url,
         });
       } else {
         urls.push({ type: 'url', openGraph: { url: embed.url } });
@@ -237,6 +262,7 @@ export const castEmbedsFromNode = ({
     embeds: {
       images,
       urls,
+      ...(videos.length > 0 ? { videos } : {}),
       ...(quotes.length > 0 ? { casts: quotes } : {}),
       unknowns,
     },
@@ -257,6 +283,8 @@ export interface ApiCastFromNodeOptions {
   recasts?: NodeCount;
   quotedCasts?: ApiQuoteCastEmbed[];
   viewerContext?: ApiCast['viewerContext'];
+  /** What the caller has already learned about embed URLs (see embedKinds). */
+  embedKind?: (url: string) => EmbedKindAnswer | undefined;
 }
 
 /**
@@ -277,8 +305,9 @@ export const apiCastFromNode = ({
   recasts,
   quotedCasts,
   viewerContext,
+  embedKind,
 }: ApiCastFromNodeOptions): ApiCast => {
-  const { embeds } = castEmbedsFromNode({ body, quotedCasts });
+  const { embeds } = castEmbedsFromNode({ body, quotedCasts, embedKind });
 
   const cast: ApiCast = {
     hash: message.hash,

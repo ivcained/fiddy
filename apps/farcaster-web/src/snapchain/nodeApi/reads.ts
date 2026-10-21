@@ -44,6 +44,7 @@ import {
   fetchFollowing,
   isTerminalPageToken,
   mapWithConcurrency,
+  type NodeCastAddBody,
   type NodeMessage,
   SnapchainNodeClient,
 } from 'farcaster-node-client';
@@ -57,6 +58,11 @@ import {
   floorCount,
   NodeCount,
 } from './fromNode';
+import {
+  createEmbedKindResolver,
+  type EmbedKindAnswer,
+  type EmbedKindResolver,
+} from './embedKinds';
 
 /** Raised when the node genuinely cannot answer a request the app made. */
 export class NodeCannotAnswerError extends Error {
@@ -116,6 +122,25 @@ const SEEN_STORAGE_PREFIX = 'fiddy:node-seen';
 const fcTimestampToMs = (timestamp: number): number =>
   timestamp * 1000 + 1609459200000;
 
+/**
+ * The embed URLs a cast body carries, in the order it carries them.
+ *
+ * Only `url` embeds: a quote addresses another cast and is resolved by hash,
+ * not by fetching anything here.
+ */
+const embedUrlsOf = (body: NodeCastAddBody | undefined): string[] => {
+  if (!body?.embeds) {
+    return [];
+  }
+  const urls: string[] = [];
+  for (const embed of body.embeds) {
+    if ('url' in embed && typeof embed.url === 'string' && embed.url !== '') {
+      urls.push(embed.url);
+    }
+  }
+  return urls;
+};
+
 const seenStore = (): Storage | undefined => {
   try {
     return typeof window === 'undefined' ? undefined : window.localStorage;
@@ -134,6 +159,13 @@ export interface NodeBackedReadsOptions {
   getSignedInFid: () => number | undefined;
   /** Above this, a paged count is reported as a floor. */
   countCap?: number;
+  /**
+   * What each embed URL's media type is (image / video / link), so a photo is
+   * rendered as a photo rather than as a link card. Defaults to the real thing:
+   * one bounded, cached probe per URL (`embedKinds.ts`). Injectable so a test
+   * can answer without a network.
+   */
+  embedKinds?: EmbedKindResolver;
 }
 
 interface CacheEntry<T> {
@@ -176,6 +208,7 @@ export class NodeBackedReads {
   private readonly fetchImpl: typeof fetch;
   private readonly getSignedInFid: () => number | undefined;
   private readonly countCap: number;
+  private readonly embedKinds: EmbedKindResolver;
 
   private readonly userCache = new Map<number, CacheEntry<ApiUser>>();
   private readonly userPromiseCache = new Map<number, Promise<ApiUser>>();
@@ -188,12 +221,38 @@ export class NodeBackedReads {
     fetchImpl,
     getSignedInFid,
     countCap = DEFAULT_COUNT_CAP,
+    embedKinds = createEmbedKindResolver(),
   }: NodeBackedReadsOptions) {
     this.node = node;
     this.nodeBaseUrl = nodeBaseUrl.replace(/\/$/, '');
     this.fetchImpl = fetchImpl;
     this.getSignedInFid = getSignedInFid;
     this.countCap = countCap;
+    this.embedKinds = embedKinds;
+  }
+
+  /**
+   * What a URL is, as far as anything has been able to establish. Passed to the
+   * cast translator, which is the only other place that decides which bucket an
+   * embed lands in.
+   */
+  private readonly embedKindLookup = (
+    url: string,
+  ): EmbedKindAnswer | undefined => this.embedKinds.kindOf(url);
+
+  /**
+   * Ask what this page's embed URLs are, together, before any cast is built.
+   *
+   * One batch per page rather than per cast: the probes share one concurrency
+   * pool and one deadline, and the answer is cached, so the per-cast call in
+   * `buildCast` is a lookup rather than a second round of network.
+   */
+  private async classifyEmbeds(messages: NodeMessage[]): Promise<void> {
+    const urls = messages.flatMap((message) => embedUrlsOf(message.castAdd));
+    if (urls.length === 0) {
+      return;
+    }
+    await this.embedKinds.classify(urls);
   }
 
   /** The account every signed-in read is relative to. */
@@ -517,6 +576,7 @@ export class NodeBackedReads {
     ancestors,
     replies,
     withCounts = true,
+    embedsAsked = false,
   }: {
     message: NodeMessage;
     likedHashes?: Set<string>;
@@ -526,10 +586,27 @@ export class NodeBackedReads {
     ancestors?: { count: number; casts?: ApiCast[] };
     replies?: { count: number; casts?: ApiCast[] };
     withCounts?: boolean;
+    /**
+     * True when the caller already asked about this page's embed URLs as one
+     * batch (`classifyEmbeds`), so this cast only looks the answers up. One
+     * wait per read, not one per cast.
+     */
+    embedsAsked?: boolean;
   }): Promise<ApiCast | undefined> {
     const body = message.castAdd;
     if (!body) {
       return undefined;
+    }
+
+    // Which of this cast's URLs are media. The page's own batch already asked
+    // when this cast came out of a feed; a cast read on its own (a thread root
+    // by hash, say) asks here, so a photo is a photo on the first paint either
+    // way. Either way it is one bounded wait, never two.
+    if (!embedsAsked) {
+      const embedUrls = embedUrlsOf(body);
+      if (embedUrls.length > 0) {
+        await this.embedKinds.classify(embedUrls);
+      }
     }
 
     const [author, reactions, recasts] = await Promise.all([
@@ -591,6 +668,7 @@ export class NodeBackedReads {
       reactions,
       recasts,
       quotedCasts: quoted.filter((cast) => cast !== undefined),
+      embedKind: this.embedKindLookup,
       ...(viewerContext && Object.keys(viewerContext).length > 0
         ? { viewerContext }
         : {}),
@@ -606,6 +684,9 @@ export class NodeBackedReads {
     }: { withCounts?: boolean; withViewer?: boolean } = {},
   ): Promise<ApiCast[]> {
     this.rememberCasts(messages);
+    // The page's embed URLs are asked about together, before any cast is built:
+    // a photo is drawn as a photo on the first paint rather than after a reload.
+    await this.classifyEmbeds(messages);
     const [likedHashes, recastHashes] = withViewer
       ? await Promise.all([
           this.viewerReactionHashes('Like'),
@@ -622,6 +703,7 @@ export class NodeBackedReads {
           likedHashes,
           recastHashes,
           withCounts,
+          embedsAsked: true,
         }),
     );
 
