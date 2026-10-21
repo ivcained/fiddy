@@ -35,12 +35,25 @@
 #   scripts/release-client.sh [sha]            # build, upload, cut over
 #   scripts/release-client.sh [sha] --no-cutover
 #   scripts/release-client.sh --rollback       # point current at the previous release
+#
+# The stage is a per-run directory ($STAGE_ROOT/fiddy-client-release-<sha>.XXXXXX).
+# It used to be one fixed path whose first act was `rm -rf`, so two concurrent
+# releases shared it and whichever started second deleted the other run's frozen
+# tree, dist/, release/, tarball and served-gate artifacts mid-flight — a silent
+# mix in which one tree's bytes are extracted/verified under another tree's sha
+# (measured 2026-10-21: cards t_49d63304 and t_000ea7a9). KEEP FIDDY_RELEASE_STAGE
+# for callers that want a pinned path, but a pinned path is shared by definition:
+# pin it only when one release runs at a time. The chosen stage is printed as the
+# first line of the run and again at the end.
 set -euo pipefail
 
 HOST=${FIDDY_HOST:-root@100.111.203.78}
 RELEASES=${FIDDY_RELEASES:-/var/www/fiddy.fun/releases}
 CURRENT=${FIDDY_CURRENT:-/var/www/fiddy.fun/current}
-STAGE=${FIDDY_RELEASE_STAGE:-$HOME/.hermes/cache/scratch/fiddy-client-release}
+STAGE_ROOT=${FIDDY_RELEASE_STAGE_ROOT:-$HOME/.hermes/cache/scratch}
+# A pinned path (FIDDY_RELEASE_STAGE set) is honoured as-is; the default is
+# created per run, below, once the sha under release is known.
+STAGE_PINNED=${FIDDY_RELEASE_STAGE:-}
 NODE_URL=${FIDDY_BUILD_NODE_URL:-https://haatz.quilibrium.com}
 MEDIA_URL=${FIDDY_BUILD_MEDIA_URL:-https://fiddy.fun}
 # Strings only this client build has (the adapter's sentence and our media path).
@@ -64,9 +77,25 @@ SHA=${1:-$(git -C "$REPO" rev-parse origin/main)}
 NO_CUTOVER=${2:-}
 SHORT=${SHA:0:9}
 git -C "$REPO" cat-file -e "$SHA^{commit}" || { echo "no such commit: $SHA" >&2; exit 1; }
-say "release $SHA ($(git -C "$REPO" log -1 --format=%s "$SHA"))"
 
-rm -rf "$STAGE"; mkdir -p "$STAGE/base" "$STAGE/release"
+# The stage is created HERE, after the sha is known, so a default run gets a
+# directory of its own and can never be the run that deletes another run's tree.
+if [ -n "$STAGE_PINNED" ]; then
+  STAGE=$STAGE_PINNED
+  say "stage (pinned by FIDDY_RELEASE_STAGE, shared by any concurrent run): $STAGE"
+  rm -rf "$STAGE"
+  mkdir -p "$STAGE"
+else
+  mkdir -p "$STAGE_ROOT"
+  STAGE=$(mktemp -d "$STAGE_ROOT/fiddy-client-release-$SHORT.XXXXXX")
+  say "stage (per run): $STAGE"
+fi
+mkdir -p "$STAGE/base" "$STAGE/release"
+# Which run owns this stage — the first question asked of a stage after the fact.
+printf '{"sha":"%s","short":"%s","pid":%s,"host":"%s","started":"%s"}\n' \
+  "$SHA" "$SHORT" "$$" "$(hostname)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAGE/run.json"
+
+say "release $SHA ($(git -C "$REPO" log -1 --format=%s "$SHA"))"
 say "1/8 frozen tree at $SHA"
 git -C "$REPO" archive "$SHA" | tar -x -C "$STAGE/base"
 ln -s "$REPO/node_modules" "$STAGE/base/node_modules"
@@ -139,6 +168,7 @@ ssh_ "set -e
 
 if [ "$NO_CUTOVER" = "--no-cutover" ]; then
   say "staged at $RELEASES/$SHA (not cut over)"
+  echo "  stage (kept for this run only): $STAGE"
   exit 0
 fi
 
@@ -183,3 +213,4 @@ echo "  the bytes fiddy.fun serves ARE the bytes this build produced"
 set -e
 echo
 echo "release live: https://fiddy.fun  (release $SHA)"
+echo "stage (this run's own): $STAGE"
