@@ -40,8 +40,14 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { createSiweMessage } from 'viem/siwe';
 
 const OUT = process.env.POST_SIGNIN_SHOT_DIR ?? os.tmpdir();
-const READY_URL = 'https://localhost:5173/welcome/ready';
-const DOMAIN = 'localhost:5173';
+// The client under test. The default is the dev server the other probes use;
+// the override exists so this can be pointed at a server that carries a
+// particular revision (a worktree, a second port) instead of whichever client
+// happens to be running on 5173. The SIWE domain follows the origin, because
+// that is what the app's own verifier compares the message against.
+const ORIGIN = process.env.POST_SIGNIN_ORIGIN ?? 'https://localhost:5173';
+const READY_URL = `${ORIGIN}/welcome/ready`;
+const DOMAIN = new URL(ORIGIN).host;
 const NONCE = 'c'.repeat(128);
 const CHANNEL_TOKEN = 'TESTTOK1';
 

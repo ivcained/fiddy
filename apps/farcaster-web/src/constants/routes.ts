@@ -930,9 +930,14 @@ const routes = {
     family: family('default'),
     Component: FiddyAppsPage,
   },
-  /* The setup flow. One route per screen: a step can be linked, reloaded and
-     re-entered, and the front door (`routes.homeFeed` signed out) renders the
-     first one. */
+  /* The way in: a greeting, one screen that does the naming and the brain, and
+     "ready" — two numbered steps. Each is still a route, so a step can be
+     linked, reloaded and re-entered, and the front door (`routes.homeFeed`
+     signed out) renders the first one. `fiddyWelcomeBrain` is a second address
+     for step 1 (where the older links and docs point); `fiddyWelcomeApps` is
+     no longer a step and redirects to `fiddyWelcomeReady` — connecting apps is
+     `fiddyApps` above, inside the client. */
+
   fiddyWelcome: {
     path: '/welcome',
     params: {},

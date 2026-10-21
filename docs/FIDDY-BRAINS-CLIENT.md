@@ -5,8 +5,17 @@ cannot say one thing on the way in and another afterwards:
 
 | where | route |
 | --- | --- |
-| the pick-a-brain step of the setup flow | `/welcome/brain` (`fiddyWelcomeBrain`) |
+| step 1 of the setup flow (with the agent's name, on one screen) | `/welcome/name` (`fiddyWelcomeName`) and `/welcome/brain` (`fiddyWelcomeBrain`) |
 | the Agent screen's own page | `/brains` (`fiddyBrains`) |
+
+The setup flow is two steps: the greeting (no number), **step 1 of 2** — the
+name and this sheet on one screen, with Fiddy's built-in brain already picked so
+the step can be finished in one press — and **step 2 of 2**, the ready screen.
+`/welcome/name` and `/welcome/brain` are two addresses for that one step, so an
+older link to the brain half still lands on the picker rather than on a screen
+that no longer exists. The apps step that used to sit between them is gone:
+`/welcome/apps` redirects to the last step, and connecting apps lives at
+`/~/agent/apps` inside the shell, where a channel can actually start working.
 
 Both are reachable signed out as well as inside the shell, because choosing a
 brain needs no account.
@@ -78,6 +87,7 @@ publishes no model list says so and says it may still work.
 | the setup file keeps a choice and refuses to keep a credential; older answers carry forward | `src/lib/__tests__/fiddySetup.test.ts` |
 | the two service calls, with and without a pairing | `src/lib/__tests__/agentService.test.ts` |
 | the sheet in a real browser, on the real route | `apps/farcaster-web/scripts/verify-fiddy-brains.mjs` |
+| the way in as a two-step walk, in a real browser: name + brain on one screen, one press to the last step, no apps sheet, and the two old step addresses still resolving | `apps/farcaster-web/scripts/verify-onboarding-two-step.mjs` |
 
 The browser harness is a probe, not a CI gate (the same rule as the other
 `scripts/verify-*.mjs` files — they need a running client). It stubs the answer

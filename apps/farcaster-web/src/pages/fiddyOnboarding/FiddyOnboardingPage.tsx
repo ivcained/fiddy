@@ -8,10 +8,21 @@
  * anyone meets. Posting to Farcaster is the opt-in "Go social" action, not the
  * price of entry.
  *
- * One idea per screen, Muse-style: say hi, name your agent, give it a brain,
- * connect the apps you already use, then go. Every step is a real route, so a
- * step can be linked, reloaded and re-entered, and "skip for now" is honest
- * because the answers are kept in `~/lib/fiddySetup`.
+ * TWO STEPS, AND WHY IT IS TWO
+ * Say hi, then one screen that names your agent and picks what thinks for it,
+ * then "ready" — that is the whole way in (the greeting is not a numbered step).
+ * It used to be four numbered steps: naming and the brain were separate
+ * screens, and a third one asked an unauthenticated visitor to allow six apps
+ * of which five were dead "soon" switches. That screen asked for a decision
+ * nobody could act on yet, before they had seen the app or said one word to
+ * their agent, so it is not part of the way in any more: connecting apps lives
+ * inside the client (`/~/agent/apps`), where the channels can actually work.
+ *
+ * Naming and brain-picking share one screen because they are one decision —
+ * "who is this, and what thinks for it" — and because Fiddy's own brain is
+ * already picked, so the step can be finished with a single press. Every screen
+ * is still a real route, so a step can be linked, reloaded and re-entered, and
+ * the answers are kept in `~/lib/fiddySetup`.
  *
  * Voice: no infrastructure words on any of these screens. No node, no protocol,
  * no keys, no scopes. If a sentence needs one of those to be true, the sentence
@@ -22,26 +33,32 @@ import { KeyRound, MessageCircle, Plug, ShieldCheck } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
-import { AppsSheet, CHANNEL_ROWS } from '~/components/fiddy/AppsSheet';
 import { BrainSheet, brainSummary } from '~/components/fiddy/BrainSheet';
 import { FiddySheet } from '~/components/fiddy/FiddySheet';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
 import { Link } from '~/components/links/Link';
 import { LoginModal } from '~/components/modals/LoginModal';
 import { Page } from '~/components/page/Page';
-import { defaultRoute } from '~/constants/routes';
+import { defaultRoute, routes } from '~/constants/routes';
 import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
 import { useNavigate } from '~/hooks/navigation/useNavigate';
 import {
-  allowedChannelCount,
   DEFAULT_AGENT_NAME,
   saveFiddySetup,
   useFiddySetup,
 } from '~/lib/fiddySetup';
 
-export type OnboardingStep = 'hi' | 'name' | 'brain' | 'apps' | 'ready';
+/**
+ * The screens this flow renders.
+ *
+ *   hi     the front door: one sentence and one press, no step number
+ *   setup  step 1 of 2 — name your agent, pick what thinks for it
+ *   apps   step 3 of the four-step flow this used to be: redirected, see below
+ *   ready  step 2 of 2 — "… is ready", and the one sign-in we cannot skip
+ */
+export type OnboardingStep = 'hi' | 'setup' | 'apps' | 'ready';
 
-/** The five route names this flow walks through. */
+/** The route names this flow walks through. Each of them is still a route. */
 export type OnboardingRouteName =
   | 'fiddyWelcome'
   | 'fiddyWelcomeName'
@@ -53,17 +70,16 @@ export interface FiddyOnboardingPageProps {
   step: OnboardingStep;
 }
 
-/** One plain sentence for the brain, for summary lines. */
-const stepPosition = (step: OnboardingStep): 1 | 2 | 3 | 4 | null => {
+/** How many steps the way in has, for "Step 1 of 2". */
+const TOTAL_STEPS = 2;
+
+/** Where a screen sits in the flow. The front door and the redirect do not. */
+const stepPosition = (step: OnboardingStep): 1 | typeof TOTAL_STEPS | null => {
   switch (step) {
-    case 'name':
+    case 'setup':
       return 1;
-    case 'brain':
-      return 2;
-    case 'apps':
-      return 3;
     case 'ready':
-      return 4;
+      return TOTAL_STEPS;
     default:
       return null;
   }
@@ -95,7 +111,7 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
   }, [step, setup.completedAt]);
 
   const position = stepPosition(step);
-  const stepMeta = position ? { index: position, total: 4 } : null;
+  const stepMeta = position ? { index: position, total: TOTAL_STEPS } : null;
   const go = (to: OnboardingRouteName) =>
     navigate({ to, params: {}, searchParams: {} });
 
@@ -113,26 +129,34 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
     return <Navigate to={defaultRoute.path} replace />;
   }
 
-  const commitName = () => {
+  // `/welcome/apps` used to be step 3. It is not a step any more, and it is not
+  // a dead address either: a link to it lands on the last step of the flow this
+  // flow really has. Connecting apps is a real screen inside the client
+  // (`/~/agent/apps`), which is where a channel can actually start working.
+  if (step === 'apps') {
+    return <Navigate to={routes.fiddyWelcomeReady.path} replace />;
+  }
+
+  const commitSetup = () => {
     const name = draftName.trim().slice(0, 24) || DEFAULT_AGENT_NAME;
     saveFiddySetup({ agentName: name });
     setDraftName(name);
-    go('fiddyWelcomeBrain');
+    go('fiddyWelcomeReady');
   };
 
   const renderStep = () => {
     switch (step) {
-      case 'name':
+      case 'setup':
         return (
           <FiddySheet
-            name="name"
+            name="setup"
             step={stepMeta}
-            egg="small"
-            title="What should we call your agent?"
-            sub="A name you will recognise when it answers you."
-            primary={{ label: 'Continue', onClick: commitName }}
+            wide
+            title="Name your agent, and pick a brain."
+            sub="Two small choices, and nothing to buy. You can change either of them whenever you like."
+            primary={{ label: 'Continue', onClick: commitSetup }}
             quiet={{ label: 'Back', onClick: () => go('fiddyWelcome') }}
-            note="You can rename it any time."
+            note="Fiddy's own brain is already picked, so you can go straight on — or pick a service you already pay for, or bring your own."
             titleRef={titleRef}
           >
             <label className="fiddy-field">
@@ -148,57 +172,13 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
                 onChange={(event) => setDraftName(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
-                    commitName();
+                    commitSetup();
                   }
                 }}
               />
             </label>
-          </FiddySheet>
-        );
 
-      case 'brain':
-        return (
-          <FiddySheet
-            name="brain"
-            step={stepMeta}
-            wide
-            title="Give it a brain."
-            sub={`Pick what thinks for ${setup.agentName}. You can change this whenever you like.`}
-            primary={{
-              label: 'Continue',
-              onClick: () => go('fiddyWelcomeApps'),
-            }}
-            quiet={{
-              label: 'Skip for now',
-              onClick: () => go('fiddyWelcomeApps'),
-            }}
-            note="Nothing to buy here. Pick what you already have — or bring your own."
-            titleRef={titleRef}
-          >
             <BrainSheet />
-          </FiddySheet>
-        );
-
-      case 'apps':
-        return (
-          <FiddySheet
-            name="apps"
-            step={stepMeta}
-            wide
-            title="Connect the apps you already use."
-            sub="Turn on what you want your agent to help with. It always asks before it posts."
-            primary={{
-              label: 'Looks good',
-              onClick: () => go('fiddyWelcomeReady'),
-            }}
-            quiet={{
-              label: 'Skip for now',
-              onClick: () => go('fiddyWelcomeReady'),
-            }}
-            note="You can change any of this later, from the Agent screen."
-            titleRef={titleRef}
-          >
-            <AppsSheet />
           </FiddySheet>
         );
 
@@ -239,14 +219,10 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
               <li>
                 <KeyRound aria-hidden="true" />
                 <span>
-                  <b>
-                    {allowedChannelCount(setup)} of {CHANNEL_ROWS.length} apps
-                    allowed
-                  </b>
+                  <b>Apps come after sign-in</b>
                   <small>
-                    {setup.channels.farcaster
-                      ? 'Farcaster on, the rest marked soon'
-                      : 'nothing allowed yet'}
+                    Only Farcaster is ready today. You will switch the rest on
+                    from the Agent screen once you are in.
                   </small>
                 </span>
               </li>

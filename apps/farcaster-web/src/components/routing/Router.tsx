@@ -652,14 +652,20 @@ const Router: React.FC = () => {
               path={routes.fiddyWelcome.path}
               element={<FiddyOnboardingPage step="hi" />}
             />
+            {/* Step 1 of 2. Two addresses, one screen: `/welcome/name` starts at
+                the name, `/welcome/brain` is where the pick-a-brain links of
+                older builds (and the docs) point — both land on the one screen
+                that does both, never on a screen that no longer exists. */}
             <Route
               path={routes.fiddyWelcomeName.path}
-              element={<FiddyOnboardingPage step="name" />}
+              element={<FiddyOnboardingPage step="setup" />}
             />
             <Route
               path={routes.fiddyWelcomeBrain.path}
-              element={<FiddyOnboardingPage step="brain" />}
+              element={<FiddyOnboardingPage step="setup" />}
             />
+            {/* Kept as a route so an old link is not a 404; the page itself
+                redirects it to the last step (see FiddyOnboardingPage). */}
             <Route
               path={routes.fiddyWelcomeApps.path}
               element={<FiddyOnboardingPage step="apps" />}

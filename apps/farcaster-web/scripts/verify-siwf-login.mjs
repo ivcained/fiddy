@@ -38,7 +38,11 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { createSiweMessage } from 'viem/siwe';
 
 const OUT = process.env.SIWF_SHOT_DIR ?? os.tmpdir();
-const DOMAIN = 'localhost:5173';
+// Same override, same reason as the post-sign-in probe: the SIWE domain is
+// derived from the origin under test, so the app's verifier sees a message
+// that names the host it is actually running on.
+const ORIGIN = process.env.SIWF_ORIGIN ?? 'https://localhost:5173';
+const DOMAIN = new URL(ORIGIN).host;
 const NONCE = 'c'.repeat(128);
 const CHANNEL_TOKEN = 'TESTTOK1';
 
@@ -98,7 +102,7 @@ const run = async ({ label, mockApi }) => {
       : { state: 'completed', nonce: NONCE, message, signature, fid: 4242, username: 'fiddy', displayName: 'Fiddy', bio: 'your agent, living in your pocket', pfpUrl: 'https://example.com/pfp.png' }) });
   });
 
-  await page.goto('https://localhost:5173/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await page.goto(`${ORIGIN}/`, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.waitForFunction(() => (document.body?.innerText ?? '').trim().length > 60, { timeout: 60000 });
 
   for (const el of await page.$$('button, a, [role=button]')) {
@@ -175,7 +179,7 @@ const run = async ({ label, mockApi }) => {
     const brains = await readSurface();
     await page.screenshot({ path: `${OUT}/device-only-brains-${label}.png` });
 
-    await page.goto('https://localhost:5173/~/agent/apps', {
+    await page.goto(`${ORIGIN}/~/agent/apps`, {
       waitUntil: 'domcontentloaded',
       timeout: 45000,
     });
