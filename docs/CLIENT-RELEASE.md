@@ -280,7 +280,7 @@ and each says why:
   an inline `<script>` and no inline handler. Different page, different CSP —
   tightening it means moving that script out, which is not the client's shell.
 - ~~The client still makes a few hosted calls the public origin cannot serve~~
-  **Closed by `481ac9c`/`48e1566`** (2026-10-21): `api.farcaster.xyz/v1/**` and
+  **Closed by `f562e17`/`6313040`** (2026-10-21): `api.farcaster.xyz/v1/**` and
   `/v2/**` and `ph.neynar.com` are no longer asked at all by a page. Two halves:
   the provider seam refuses a request for Farcaster's own public server in place,
   in the words of that request's own classification
