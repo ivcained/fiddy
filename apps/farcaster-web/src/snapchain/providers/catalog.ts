@@ -6,14 +6,23 @@
  *
  *   1. the server the reader chose in the node picker, if they chose one —
  *      their own node, or a public one they picked
- *   2. then anything else in their stored list, in the order they put it
- *   3. then Fiddy's public relay (the node this client reads from today)
- *   4. always last: `api.farcaster.xyz`, the safety net. It is read-only here
+ *   2. with nothing chosen: **Neynar first, when this build holds the reader's
+ *      own API key** — that key is the one server here that both reads and
+ *      writes (`capabilities.ts`), and it is where the signed-in client is meant
+ *      to start (reader's direction, 2026-10-21)
+ *   3. then anything else in their stored list, in the order they put it, and
+ *      Neynar as well when a key exists but they never arranged it
+ *   4. then Fiddy's public relay (the node this client reads from today) — a
+ *      full node, and the server the seam sends the reads Neynar's index does
+ *      not have (the follow-graph feed, unseen counts, notifications)
+ *   5. always last: `api.farcaster.xyz`, the safety net. It is read-only here
  *      and cannot report how far behind it is, so it is never a first choice.
  *
- * Neynar sits where the reader puts it: it needs their key, and it is a
- * different kind of server (an index, not a node), so it is only ever in the
- * list when they turned it on.
+ * The order says which server is *preferred*; which server can answer a given
+ * request is a separate, honest question — see `capabilities.ts` and the seam
+ * (`providerFetch.ts`). A write always goes to the preferred server, and is
+ * refused there if that server cannot carry it; it is never moved to another
+ * machine behind the reader's back.
  */
 
 import { PUBLIC_READ_NODES } from '~/snapchain/nodeChoice';
@@ -37,6 +46,24 @@ export const FARCASTER_PUBLIC_BASE_URL = 'https://api.farcaster.xyz';
 
 /** Neynar's hosted index. Reads need the reader's own API key. */
 export const NEYNAR_BASE_URL = 'https://api.neynar.com';
+
+/**
+ * Neynar's *own* Snapchain node — the half of Neynar that takes writes.
+ *
+ * Neynar is not one server but two, and this client needs both halves of it:
+ * the index above answers profiles, an account's casts and threads, and this
+ * node is where a message this device signed is handed over. MEASURED
+ * (2026-10-21, live, with this build's key):
+ *
+ *   GET  https://snapchain-api.neynar.com/v1/info   → 200, 2 shards, v0.14.2
+ *   POST https://snapchain-api.neynar.com/v1/submitMessage  → carries a signed
+ *        message exactly as a node does (and refuses a bad signer exactly as a
+ *        node does: `bad_request.validation_failure/invalid signer`)
+ *
+ * `hub-api.neynar.com` answers the same way; the `snapchain-api` address is the
+ * one Neynar documents for this API.
+ */
+export const NEYNAR_NODE_BASE_URL = 'https://snapchain-api.neynar.com';
 
 /**
  * The public relay this client reads from today, as a provider.
@@ -87,7 +114,7 @@ export const neynarProvider = (): NodeProvider => ({
   source: 'builtin',
   label: 'Neynar (needs your key)',
   detail:
-    'A hosted index with its own limits and its own bill. Reads only for now; your key stays on this device.',
+    'A hosted index with its own limits and its own bill: reads for profiles, threads and one account’s casts, and writes handed to Neynar’s own node. Your key stays on this device.',
   baseUrl: NEYNAR_BASE_URL,
   readOnly: false,
 });
@@ -103,9 +130,33 @@ export const farcasterPublicProvider = (): NodeProvider => ({
   readOnly: true,
 });
 
-/** The list a reader starts with: our relay, then the safety net. */
-export const defaultProviderOrder = (): NodeProvider[] => {
+/**
+ * The list a reader starts with, before they arrange anything.
+ *
+ * ORDER, AND WHY IT IS THIS ORDER (the reader's own direction, 2026-10-21):
+ *
+ *   1. Neynar, when this build has the reader's own API key — that key both
+ *      reads and writes, and the key is the one thing the reader has already
+ *      handed over, so the signed-in client starts on a server that can carry a
+ *      like as well as answer a profile.
+ *   2. Fiddy's public relay (the node this client reads from today) — a full
+ *      node, which is also where the reads Neynar's index does not have come
+ *      from: the follow-graph feed, the unseen counts, notifications.
+ *   3. Farcaster's own public server, always last: it is read-only and cannot
+ *      say how far behind it is, so it is a safety net and never a first choice.
+ *
+ * An explicit choice in the picker still takes the first place — see
+ * `resolveProviderOrder`; this is only what a reader who has not chosen gets.
+ */
+export const defaultProviderOrder = ({
+  neynarConfigured = false,
+}: {
+  neynarConfigured?: boolean;
+} = {}): NodeProvider[] => {
   const order: NodeProvider[] = [];
+  if (neynarConfigured) {
+    order.push(neynarProvider());
+  }
   const relay = defaultPublicRelay();
   if (relay) {
     order.push(relay);
@@ -175,6 +226,14 @@ export const resolveProviderOrder = ({
         ? ownNodeProvider(chosen.url)
         : publicNodeProvider(chosen.url),
     );
+  } else if (neynarConfigured) {
+    // DEFAULT: a reader who has chosen nothing starts on Neynar, because the key
+    // they already gave this build is the one server on the list that both reads
+    // AND writes (see `capabilities.ts`). It is first, not only: Neynar's index
+    // does not have the follow-graph feed, unseen counts or notifications, and
+    // the seam sends those to the node behind it rather than pretending they are
+    // there.
+    push(neynarProvider());
   }
 
   for (const id of storedIds) {
@@ -193,6 +252,14 @@ export const resolveProviderOrder = ({
     if (url) {
       push(publicNodeProvider(url));
     }
+  }
+
+  // A Neynar key the reader has not arranged anywhere still belongs on the list:
+  // it is the server the signed-in client is meant to start on, and without it
+  // here a reader who picked a node once would silently lose every write the key
+  // could carry.
+  if (neynarConfigured) {
+    push(neynarProvider());
   }
 
   if (order.length === 0) {

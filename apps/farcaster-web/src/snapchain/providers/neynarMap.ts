@@ -346,6 +346,62 @@ const readJson = async (response: Response): Promise<unknown | null> => {
 };
 
 /**
+ * The author of one cast, looked up by hash alone.
+ *
+ * A node cannot answer this — it addresses a cast by *author and hash*, and the
+ * hash on its own is not an index it keeps. Neynar's index can, and this is the
+ * one read a write needs it for: a reaction and a reply are messages about a
+ * cast, and the protocol message needs the target's author FID. Without this, a
+ * like pressed on a cast that this client had not already read through a node
+ * would have nothing to address itself to.
+ *
+ * Returns undefined for a hash Neynar does not know, and never guesses a FID.
+ */
+export const castAuthorFromNeynar = (payload: unknown): number | undefined => {
+  const cast = (payload as { cast?: { author?: NeynarUser } } | null)?.cast;
+  const fid = asNumber(cast?.author?.fid, Number.NaN);
+  return Number.isFinite(fid) ? fid : undefined;
+};
+
+export const fetchCastAuthorFromNeynar = async ({
+  hash,
+  apiKey,
+  fetchImpl = fetch,
+  baseUrl = NEYNAR_BASE_URL,
+  timeoutMs = 8_000,
+}: {
+  hash: string;
+  apiKey: string;
+  fetchImpl?: typeof fetch;
+  baseUrl?: string;
+  timeoutMs?: number;
+}): Promise<number | undefined> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(
+      `${baseUrl}/v2/farcaster/cast?identifier=${encodeURIComponent(hash)}&type=hash`,
+      {
+        method: 'GET',
+        headers: { 'x-api-key': apiKey },
+        signal: controller.signal,
+        credentials: 'omit',
+      },
+    );
+    if (!response.ok) {
+      return undefined;
+    }
+    return castAuthorFromNeynar(await readJson(response));
+  } catch {
+    // A lookup that could not be made is not an answer: the caller says what is
+    // missing rather than inventing a FID.
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
  * Make the call and shape the answer.
  *
  * The key travels in the `x-api-key` header and never in a URL: a key in a

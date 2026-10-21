@@ -121,6 +121,38 @@ describe('resolveProviderOrder', () => {
   });
 });
 
+describe('the default order, with the reader’s own Neynar key', () => {
+  it('starts on Neynar when a key exists, and on the relay when it does not', () => {
+    // The reader's direction (2026-10-21): the server that both reads and writes
+    // is the one the signed-in client starts on.
+    expect(
+      resolveProviderOrder({
+        chosen: null,
+        storedIds: [],
+        neynarConfigured: true,
+      })[0]?.kind,
+    ).toBe('neynar');
+    expect(
+      resolveProviderOrder({
+        chosen: null,
+        storedIds: [],
+        neynarConfigured: false,
+      })[0]?.kind,
+    ).toBe('snapchain');
+  });
+
+  it('still lets an explicit choice keep the first place, with Neynar behind it', () => {
+    const order = resolveProviderOrder({
+      chosen: { kind: 'own', url: 'https://mine.example' },
+      storedIds: [],
+      neynarConfigured: true,
+    });
+    expect(order[0]?.id).toBe('snapchain:https://mine.example');
+    expect(order.map((provider) => provider.id)).toContain('neynar');
+    expect(order.at(-1)?.id).toBe('farcaster-public');
+  });
+});
+
 describe('defaultProviderOrder', () => {
   it('is the relay we read from today, then the safety net', () => {
     const order = defaultProviderOrder();

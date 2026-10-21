@@ -40,6 +40,11 @@ import {
   startProviderWatch,
 } from '~/snapchain/providers/runtime';
 
+// These tests describe a build WITHOUT a Neynar key: `catalog.ts` puts Neynar
+// first when one exists, so without this the developer's own `.env.local` would
+// decide what "the reader's first choice" means in the assertions below.
+vi.stubEnv('VITE_NEYNAR_API_KEY', '');
+
 const FID = 4242;
 const DEAD = 'snapchain:https://dead.example';
 /** Fiddy's own relay: the full node that rides behind whatever the reader chose. */
