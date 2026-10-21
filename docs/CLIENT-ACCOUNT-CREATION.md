@@ -1,11 +1,11 @@
 # Making an account, holding more than one, and what leaves the device
 
-Status: **implemented on branch `t_bb61fcf8-quilcast-adopt`** (pushed; `main`
-untouched — see "Why a branch" at the end). This file is the design record: what
+Status: **landed on `main`** as merge `824a20c` (branch head `a8496ad` merged
+into `cfdd902`; released to fiddy.fun — §7). This file is the design record: what
 was built, what was deliberately not built, how it reconciles with the control
 plane's onboarding design, and what a miniapp embed actually hits in this client
 today. §6 records what the first review round found and what changed because of
-it.
+it; §7 records what the merge and the release measured.
 
 Everything below marked MEASURED was read off a live network, a live contract, a
 live node, a real browser run against the dev server, or the committed source at
@@ -161,11 +161,18 @@ records per account, before and after the switch:
 | a write attempt, as this account | recorded, not asserted (below) | recorded | — |
 
 The write attempt is the one thing the probe measures rather than asserts, and it
-says why in its own report: pressing the client's write entry point ("Cast")
-opened no composer and issued **no write request** on this branch — node-backed
-writes are the `t_aa93f0c5` branch, not this one. When that lands, the same row
-records the request and which session it left from; asserting a write here today
-would be a green void.
+says why in its own report. **Re-measured after the merge (§7): the row did not
+change the way this section expected it to.** Pressing the client's write entry
+point ("Cast") still opened no composer and issued **no write request** in that
+run, on a merged tree that does carry node-backed writes — so the sentence the
+probe prints ("this build has no node-backed write path") is now wrong about the
+build, and right only about what that run observed. The likeliest reading, and it
+is a reading rather than a measurement: the composer is opened lazily and the
+probe allows 6 s after the click, which was not enough on a machine at load ~50
+(the separate `verify-cast-submit.mjs` run on the same merged tree *did* open the
+composer and take typed text — §7). What is measured, and what matters here, is
+that the never-a-write-left-the-machine safety property holds in every run: 0
+aborted writes, both times, in both sessions.
 
 The phrase is still stored where §1.1 says it is (this device's localforage,
 unencrypted), which is the trade the design made — stated here and at the
@@ -356,3 +363,69 @@ Still open, named here rather than quietly absorbed: the **recovery address**
 (§1.1 — this path sets `recovery = custody`, the control plane wants a dedicated
 one). It is control-plane-shaped and belongs there, and a card is filed for it
 when this branch lands (see the completion note on `t_bb61fcf8`).
+---
+
+## 7. When it landed: the merge, the gates, the release
+
+### 7.1 The merge, and the one file the landing card did not name
+
+Branch head `a8496ad` went into `origin/main` at `cfdd902` as merge **`824a20c`**
+(a real merge commit, not a fast-forward: the branch was 21+ commits behind, with
+the writes, the provider layer, the feed-read fix, the Together surface and the
+two-step onboarding all landed while it waited).
+
+One file conflicted, and it was **not** one of the two the landing card warned
+about:
+
+| file | what happened |
+| --- | --- |
+| `src/pages/fiddyOnboarding/FiddyOnboardingPage.tsx` | **conflicted.** `t_9a4759b7` (on main as `56c97b2`) rewrote this flow from four numbered steps into two, deleting the `apps` step and the `brain` screen this branch had added its "New to Farcaster? Make an account" entry and its note lines to. Resolution: main's two-step structure kept; this branch's entry button and note kept on the screens that survive (the front door and the `ready` step); the now-dead `AppsSheet, CHANNEL_ROWS` import dropped (nothing else in the file uses them, and lint would refuse it) |
+| `src/index.css` | auto-merged: this branch's one `@import './styles/fiddy-accounts.css'`, on main's tail |
+| `src/layouts/AuthedLeftSideBar.tsx` | auto-merged: `t_c9861884`'s rewrite is intact and this branch adds one import and one `<AccountSwitcherEntry className="fiddy-account-entry" />` — verified by diffing the merge against main: `+8 −0`, no line of main's version lost |
+| `src/components/modals/LoginModal.tsx`, `src/layouts/MobileHeader.tsx` | auto-merged, both sides kept |
+
+The conflict was textual, and the resolution is the one both cards' intent implies
+(main's flow, this branch's door), so it was resolved directly rather than with an
+arbiter.
+
+### 7.2 The gates, on the merged tree, on the pinned node
+
+Measured with **node 20.19.5** — the version `.node-version` pins and CI installs,
+and the one this Mac did not have until this run — after `pnpm build:packages`
+(a *stale workspace `dist`* is what makes `tsc` fail here with
+`isMissingOnNode`/`linkById`: the app reads the packages' built `.d.ts`, so the
+packages must be built from the same tree before typecheck means anything).
+
+| gate | result |
+| --- | --- |
+| `tsc -p tsconfig.json --noEmit` | 0 errors |
+| `eslint --quiet --max-warnings 1080` | clean |
+| `vitest run` | 116 files, **1244 passed**, 2 skipped, 0 failed — at `--maxWorkers=4` |
+| `vite build` | exit 0 |
+| CI (`39641016670` on `824a20c`) | typecheck 1m22s, test 1m59s, lint 1m42s — **all green** |
+
+The `--maxWorkers=4` is the one caveat, and it is stated rather than papered over:
+at vitest's default parallelism this box (6-16 concurrent cards, load 50-110, swap
+exhausted) fails one to four **unrelated** UI files per run on their own 5-second
+timeouts, a different set each time, and the same files pass in isolation. The
+clean-runner CI run is what settles it: the full suite is green on the merge.
+
+### 7.3 The branch's own probes, re-run after the merge
+
+- `verify-account-switching.mjs` against a dev server serving the merged tree:
+  **18/18, exit 0** — the §1.2 table reproduces (session `3 → 4242 → 3`, labels
+  and stored selection follow, both keys stay on the device). The write-attempt row
+  did **not** change the way §1.2 predicted; what that row says now, and why, is in
+  §1.2 itself.
+- `verify-cast-submit.mjs` on the same merged tree: **11/12**. The composer opens
+  and takes typed text, `POST /v2/casts` is classified `write` and reaches the
+  node writer, and a session with no posting key on the device is refused `501` in
+  that path's own words — which the probe then finds **rendered to the person**
+  ("The cast didn't post. This device has no key it may sign for you with yet…").
+  The one red is the probe's own stale expectation from before the writes landed
+  (it asserts the old adapter sentence); the merge touches no write-path file, so
+  that expectation is stale on `main` too, and this card did not rewrite a probe to
+  make a number green.
+
+### 7.4 The release, and what the live client shows
+
