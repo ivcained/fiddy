@@ -10,20 +10,66 @@ Everything below is one of three things, and each line says which: **measured**
 source says), or **not verified** (this is what follows from the other two, and
 it has not been watched happen).
 
+## In plain words
+
+A cast in your feed that links to a mini app now shows the app's own picture and
+a button with the app's name on it. It does **not** show the words the app's page
+asked for ("Beep @topp-airdrop"), and nothing from that page runs inside Fiddy: no
+iframe is created, at either width. The picture and the button come from an index
+that has already read the app's page, because a web page is not allowed to read
+another site's page directly — the browser refuses, and the refusal is in the
+evidence below. Nothing is broken about mini apps in the feed; they render, from
+the second of the two sources.
+
+---
+
+## 0. Provenance: which head served the run
+
+A measurement without its head is not a measurement, so this comes first. Every
+number in §2 is from **one complete run** of
+`apps/farcaster-web/scripts/verify-miniapp-in-feed.mjs`, whose report is attached
+to this card verbatim as `miniapp-in-feed.txt`.
+
+| | |
+| --- | --- |
+| the run | 2026-10-22, 02:11–02:26 IST (first screenshot to written report), both viewports — `── checks ──` reached twice and the report written: `5/9 checks passed`, and the four failures are §2's two negative results at each width, not a crash |
+| the tree the probe itself lives in | `b3bdd7c` (this branch: `55a4ddd` + the probe's files) |
+| the tree the **dev server served** | the same worktree, `b3bdd7c`, at `https://localhost:5183` — the probe could not serve it, so the head is env-stated (`MINIAPP_SERVED_HEAD`) and echoed in the report's first block |
+| `main` at the time | `63bc576`. `git diff --stat main..b3bdd7c -- apps/farcaster-web/src/snapchain/` is **empty**, so every miniapp read and write path measured here is byte-identical between the head served and `main` |
+| read node | `https://haatz.quilibrium.com` (stated in the report) |
+| signed in as | fid 259576 (`ogmaro`), a real SIWE sign-in — only `relay.farcaster.xyz` is stubbed, which is the same stub the sibling probes use |
+| budgets the run used | sign-in 480 s · feed 480 s · surface 240 s · warm-up 240 s · screenshot 30 s then 240 s (all stated in the report's first block; MEASURED: this machine ran at load average 74–114 on 10 cores during the run, which is why the budgets are large and why the probe logs them) |
+
+**One difference between the committed probe and the probe that ran**, stated
+because the probe's own text is part of the evidence: the run printed one check
+label as `the card carries an image from the app's own host (undefined)` — the
+interpolation read `FIXTURE.host`, a field the fixture object does not carry.
+That label is fixed in the committed probe and **nothing else changed**: same
+predicates, same thresholds, same assertions, same report. A reviewer can confirm
+it with `git diff` — it is a string inside one template literal.
+
+The probe's request table now has three slices — **arrival** (the client arriving:
+bundler plus the feed's warm-up render), **feed** (the measured pass) and
+**detail** — because in the first complete run of this probe, before that marker
+existed, the requests that BUILD the fixture's card fell between the slices and
+the table could not say where the card came from. §2 leans on the arrival slice,
+and it is the reason §2 can answer "from which source" at all.
+
 ---
 
 ## 1. The fixture, found by reading, not by guessing
 
 The card asked for a cast found **through the node** whose embed URL answers
-`fc:miniapp`. Finding one is not a search a read node can do — a node keeps no
-search index, which is one of the three endpoints this repo refuses in writing
+`fc:miniapp`, and one recent enough to be inside the window a feed renders.
+Finding one is not a search a read node can do — a node keeps no search index,
+which is one of the three endpoints this repo refuses in writing
 (`snapchain/nodeApi/hostedRoutes.ts`). So it was read out:
 
 1. Neynar's frame catalog listed 50 miniapp hosts (`GET /v2/farcaster/frame/catalog`).
-2. Each host's author FID was read **on the node** (`GET /v1/castsByFid`), every
-   embed URL those authors had posted was fetched and grepped for `fc:miniapp`.
-   That gave 19 frame/miniapp casts — all **326–536 days old**. The catalog's
-   authors are not the people posting miniapps this week.
+2. Each host's author FID was read **on the node** (`GET /v1/castsByFid`), and
+   every embed URL those authors had posted was fetched and grepped for
+   `fc:miniapp`. That gave 19 frame/miniapp casts — all **326–536 days old**. The
+   catalog's authors are not the people posting miniapps this week.
 3. So the search was inverted — recent casts embedding a known miniapp URL, each
    confirmed back **on the node** with `GET /v1/castById` before use.
 
@@ -31,112 +77,162 @@ The fixture, measured on `https://haatz.quilibrium.com`:
 
 | | |
 | --- | --- |
-| cast | `0x8b3019a85bdbd946bab5f1105f62f7b926746ace`, fid 1062481, **top-level** (a reply never reaches a home feed), 4 hours old at the time of the run |
+| cast | `0x8b3019a85bdbd946bab5f1105f62f7b926746ace`, fid 1062481, **top-level** (a reply never reaches a home feed), 6 hours old at the time of the run |
 | text | `ask me anything for $0.05` |
 | embed | `https://beep.works/send/cmi8mtgn500afiolnh4qelc53` |
-| that page says | `<meta name="fc:miniapp" content='{"version":"1","imageUrl":".../opengraph-image","button":{"title":"Beep @topp-airdrop","action":{"type":"launch_miniapp", …}}}'>` |
 | why this account | a home feed is the newest casts of **your follows**, so the probe signs in as fid 259576 (`ogmaro`, 151 follows), who follows the cast's author — `/v1/linksByTargetFid?target_fid=1062481` returned them. fid 3 (`dwr`) does not follow that author at all. |
+| what the page declares (**measured**, curl, 2026-10-22) | `<meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://beep.works/send/cmi8mtgn500afiolnh4qelc53/opengraph-image","button":{"title":"Beep @topp-airdrop","action":{"type":"launch_miniapp", …}}}'>` — and separately `og:title` = `Send a Beep to Wish me luck 🧬 (@topp-airdrop)`, `og:image` = the same `…/opengraph-image` |
 
-A second, aged fixture was measured alongside (fid 17, `thefirm.biz/employees/17`,
-a genuine `fc:miniapp` cast inside `dwr`'s follow graph, 326 days old). It is in
-the follow graph but past the end of the feed the client renders — which is why
-the assertions use the fresh one.
+A second, **aged** fixture is reported alongside and never asserted: fid 17
+(`sds`), `0xac298f3555e453c7b7e0a9338bb9ba065339418b`, embedding
+`https://thefirm.biz/employees/17`, whose page declares `button.title` =
+`Inspect e-ID` and `imageUrl` = `https://thefirm.biz/api/employees/17/og-image`.
+It is a genuine `fc:miniapp` cast in `dwr`'s follow graph, 326 days old, so it is
+inside the follow graph but past the end of the newest-first feed the client
+renders. Its value here is that it is a second real `fc:miniapp` cast from a
+different host, so the cast-page reading is not a one-off property of one site.
 
 Probes: `apps/farcaster-web/scripts/verify-miniapp-in-feed.mjs` and
 `scripts/probe-miniapp-embed-cors.mjs`.
 
 ```
-SNAPCHAIN_HTTP_URL=https://<node> npx vite --port 5180
-MINIAPP_SERVER=https://localhost:5180 node scripts/verify-miniapp-in-feed.mjs
+SNAPCHAIN_HTTP_URL=https://<node> npx vite --port 5183
+MINIAPP_SERVER=https://localhost:5183 \
+MINIAPP_SERVED_HEAD=<sha of the tree the server serves> \
+MINIAPP_NODE=https://<node> \
+  node scripts/verify-miniapp-in-feed.mjs
 ```
+
+---
 
 ## 2. What actually rendered
 
-**Measured** (2026-10-21, signed in through a real SIWE sign-in — only the
-`relay.farcaster.xyz` SIWF relay is stubbed, so the client reaches its real
-signed-in shell):
+**Measured**, one complete run, both viewports, signed in, on the heads named in
+§0. The cast, the card, the reads behind it and the refusals, in the client's own
+words:
 
 | surface | what the client did |
 | --- | --- |
-| `/` — the default **Home** tab | refuses by name, in its own console: `getExploreFeed 501 - explore is a ranking, and ranking is an indexer's job`. The ranked feed is not served, and the column sits on a spinner until the reader presses **Following**. |
-| `/` — the **Following** tab | **the fixture cast is in the column** — its text and its hash `0x8b3019a85b…` are both present in the feed's cast list, and every read behind it is the node's: `castsByFid` ×124, `linksByTargetFid` ×50, `linksByFid` ×78, `castsByParent`, `reactionsByCast`, `userDataByFid` — all `200` from `haatz.quilibrium.com`. |
-| the fixture cast's card | **no mini-app card.** No image from `beep.works`, no `Beep @topp-airdrop` button, no launch affordance, no iframe. The card's own text box carries the URL and nothing more. |
-| the cast page for both fixtures | the cast and its thread render (text present, replies read via `castsByParent`/`reactionsByCast`), and the **same absence**: no mini-app image, no mini-app button, no iframe. |
-| the embed URL itself | the browser **tried** and was refused: `GET https://beep.works/send/… → failed`, with the client's own console line — `Access to fetch at 'https://beep.works/…' from origin 'https://localhost:5180' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.` The same refusal appears for `warpletbox.xyz/embed`, `brnd-v2-backend-production.up.railway.app/embeds/podium/…`, and a Neynar-hosted miniapp. |
+| `/` — the default **Home** tab | refuses by name, in its own console: `HandledFetchError: getExploreFeed 501 - explore is a ranking, and ranking is an indexer's job`. The ranked feed is not served, and the column sits on a spinner until the reader presses **Following** (the desktop column carried the same sentence as its own text, verbatim). |
+| `/` — the **Following** tab | **the fixture cast is in the column at both viewports** — its text and its hash `0x8b3019a85b…` are both in the feed's cast list (`fixtureTextOnScreen=true`, `mobile-390` and `desktop-1440`). |
+| the fixture cast's card in the feed | **a mini-app card DOES render**, at both viewports, identically: one image, `https://beep.works/images/beeper-og-0326.png`, and one control named **`Open Beeper`**. No iframe (`iframes=0`). |
+| — but not the page's own words | the card does **not** carry the page's declared art (`…/send/cmi8…/opengraph-image`) nor the page's declared button (`Beep @topp-airdrop`). Both checks fail at both viewports, with the offending sources printed next to them. |
+| the cast's own page, fresh fixture | the card there carries the page's **own** descriptor: image `https://beep.works/send/cmi8mtgn500afiolnh4qelc53/opengraph-image` and button `Beep @topp-airdrop` — both exactly the page's `fc:miniapp` values (§1). No iframe. |
+| the aged fixture's page | the card carries that page's declared image (`thefirm.biz/api/employees/17/og-image`), and a control reading **`Join The Firm`** — which is neither the page's declared button (`Inspect e-ID`) nor its `og:title` (`@sds is Performing Business at The Firm`). Where that word comes from is **not verified** (§2.3). |
+| the embed URL itself | the browser **tried to read the page and was refused**: `GET https://beep.works/send/cmi8… → failed` — 8 times in the arrival window and 4 more in the measured feed window, with the client's own console line: `Access to fetch at 'https://beep.works/…' from origin 'https://localhost:5183' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.` The same refusal appears in the same run for `warpletbox.xyz/embed`, a railway-hosted podium embed and a Neynar-hosted miniapp. |
 
-**Measured separately** (curl, from a `https://fiddy.fun` origin): neither real
-miniapp page sends `Access-Control-Allow-Origin` at all — `beep.works` and
-`thefirm.biz` both answer `200 text/html` with no CORS header.
+### 2.1 Where the in-feed card's data actually came from — measured, from the arrival slice
 
-So the honest answer to "does an in-feed miniapp card render?" on the build this
-was measured against is: **the cast reaches the feed, the card does not, and the
-reason is that the page's descriptor cannot be read from the browser.**
+This is the whole answer to "should we render it, or refuse it by name", and it is
+two requests, both in the run's own table:
 
-### What this measurement does NOT establish
+```
+8× arrival · GET /send/cmi8mtgn500afiolnh4qelc53 @ beep.works → failed   ← the page read, refused
+42× arrival · GET /v2/farcaster/frame/search/ @ api.neynar.com → 200      ← the index, answering
+             (8 more of the same route answered 400 and were not used)
+```
 
-Two things moved while this probe ran, and both are visible in the record:
+and one request that explains the second one, fetched separately
+(**measured**, 2026-10-22):
 
-- **The tree moved under it.** Four commits landed on `main` at 22:54:31–32 —
-  `5d90216` (mini apps from Neynar's catalog), `ecc6127` (a cast's mini app
-  renders as its card), `9cd530e` (the card's data comes from Neynar's own read
-  of the page), `55a4ddd` (the sibling card's own probe). The `run 3` feed
-  measurement above is from that window; the desktop pass and the cast-page
-  numbers are from `run 2`, minutes earlier, on the pre-landing tree.
-- **The setup flow gained a step.** `/welcome/ready` now sits on a "Step 2 of 2"
-  screen with a trial message to the agent before sign-in, and a probe that does
-  not walk it measures an onboarding screen instead of the client (runs 5 and 6
-  did exactly that, and say so in their own logs).
+```
+GET https://api.neynar.com/v2/farcaster/frame/search/?q=beep&limit=20
+  → an app named "Beeper", home_url https://beep.works,
+    image_url https://beep.works/images/beeper-og-0326.png
+```
 
-**Screenshots on disk** (in this card's attachments) are therefore labelled by
-run, and they are weaker evidence than the log:
+That is the card on screen, field for field: the image is the index's
+`image_url` for `beep.works`, and the control is the client's own
+`Open ${app.name}` — which is why it reads **`Open Beeper`** and not the
+`[ ! ] BEEP` button the app's manifest carries, and not the page's
+`Beep @topp-airdrop` either.
 
-- `mobile-390-2-feed.png`, `desktop-1440-2-feed.png` — the feed column **loading**
-  (Home tab, spinner, the "Let Fiddy post as you?" prompt). They are not the
-  fixture in the column; the fixture's presence is the `run 3` log line, not a
-  picture.
-- `mobile-390-3-cast-detail.png`, `desktop-1440-3-cast-detail.png`,
-  `*-4-aged-fixture-detail.png` — the two cast pages, rendered, with no mini-app
-  card.
-- A clean 390/1440 screenshot pair **on one fixed head, walking the current
-  onboarding** is not claimed here and is the first thing the next run of this
-  probe should produce.
+**Why the cast page differs** (read, from the source, and consistent with the same
+run's own table): the cast-detail surface asks Neynar for the conversation
+(`2× detail · GET /v2/farcaster/cast/conversation @ api.neynar.com → 200`), and
+Neynar's cast payload carries the page's own tags — which is exactly the
+`openGraphFromNeynarEmbed` path that landed in `ecc6127`/`9cd530e`. The feed, by
+contrast, reads its casts from **the node** (`castsByFid`, `castsByParent`, …),
+and a node's cast carries a bare URL, so the descriptor has to come from the page
+read (refused) or from the index (which answered).
+
+### 2.2 The reads behind the feed, attributed — and a correction
+
+The previous revision of this doc said "every read behind it is the node's". That
+was wrong, and the run that said it was not the run the doc claimed. Measured, per
+slice, for the fixture's feed:
+
+| slice | node reads (`haatz.quilibrium.com`, all `200`) | index reads (`api.neynar.com`) |
+| --- | --- | --- |
+| arrival | `castsByFid` ×126, `linksByFid` ×258, `linksByTargetFid` ×176, `reactionsByCast` ×140, `userDataByFid` ×108, `castsByParent` ×40, `castsByMention` ×28, `info` ×12, `reactionsByFid` ×4 | `frame/search/` ×42 `200` + ×8 `400`, `frame/relevant/` ×8, `feed/channels` ×12, `user/bulk` ×12, `by_username` ×4, `cast/conversation` ×2 |
+| feed (measured) | `castsByFid` ×124, `linksByFid` ×170, `linksByTargetFid` ×114, `reactionsByCast` ×120, `userDataByFid` ×70, `castsByParent` ×20, `castsByMention` ×4, `info` ×2, `reactionsByFid` ×4 — and `GET /send/cmi8… @ beep.works → failed` ×4, the refused page read retried in this window | `frame/relevant/` ×4, `feed/channels` ×2, `user/bulk` ×6, `by_username` ×2 — **and no `frame/search/` at all**, because the arrival window had already answered and the resolver caches per URL |
+
+The two halves are both load-bearing: the node serves the feed, the index serves
+the *card*, and the feed slice on its own cannot see the second — which is why the
+arrival slice exists.
+
+### 2.3 What this measurement does NOT establish
+
+- **The launch itself.** No card put an iframe on screen and no launch button was
+  pressed in this run: what is measured is that the card renders and carries a
+  control named by the app. Whether pressing it opens the app is `t_93fa5c59`'s
+  measurement (it pressed its own fixture's button and watched the mini-app host
+  open), not this card's.
+- **The camera/microphone deduction** in §4 item 3 is derived from two measured
+  values (`Permissions-Policy` and the iframe's `allow=`), not watched in a
+  browser.
+- **The aged fixture's `Join The Firm`** — the word is measured on screen; which
+  source supplies it is not.
+- **The no-index case.** `VITE_NEYNAR_API_KEY` is configured in this tree's
+  `.env.local`, so the index answered. What a reader sees with no key at all is
+  read from the code (the page read alone — refused — so the embed stays a link),
+  not measured.
+- **The client's own two surfaces that list apps** (`/miniapps`, "your apps"):
+  this card measured the feed's own card. The catalog/relevant reads are visible
+  in the same report (`frame/relevant/` ×8 in the arrival window) but their
+  surfaces are not part of this card's question.
+
+---
 
 ## 3. The decision, in three parts
 
 The card offered (a) render the descriptor from the cast's own embed metadata
 client-side, (b) refuse it by name, (c) a node-backed equivalent for the three
-refused endpoints. Measured against the evidence above:
+refused endpoints. Measured against §2:
 
-### (a) — yes, but not "client-side" as written: the browser is not allowed to read these pages
+### (a) — yes, and it is *already* the landed shape: two sources, in order
 
 The literal (a) — fetch the page in the browser and parse `fc:miniapp` — is
 **measured impossible for real miniapps**: no `Access-Control-Allow-Origin`, so
-the read is refused before any parsing happens. That is not a bug to fix; it is
-what cross-origin means. Quilcast's unfurl is a **server module**
-(`server/unfurl.mjs`) for exactly this reason — the meta-tag shapes in its
-`src/compose.tsx` are the shapes this client already parses, from a server-side
-unfurl.
+the read is refused before any parsing happens (8 refusals in the arrival window
+alone). That is not a bug to fix; it is what cross-origin means. Quilcast's unfurl
+is a **server module** (`server/unfurl.mjs`) for exactly this reason.
 
-The landed implementation (`src/snapchain/nodeApi/embedCards.ts`, `ecc6127` +
-`9cd530e`) is the shape that works, and it is worth naming precisely because it
-is **two sources, in order**:
+What the client actually does, and what §2 watched happen
+(`src/snapchain/nodeApi/embedCards.ts`, `ecc6127` + `9cd530e`):
 
 1. **one bounded `GET` of the page** — `<head>` only, `text/html` only, 192 KB
-   cap, 4 s per read, concurrency 3, `credentials: 'omit'`, cached per URL for
-   the session and persisted for the next one. This is what answers for the
-   pages that *do* allow a cross-origin read (many do).
-2. **only when that read could not be made or said nothing about an app**, an
-   index that has already read the page — this client's is Neynar's app catalog.
+   cap, 4 s per read, concurrency 3, `credentials: 'omit'`, cached per URL for the
+   session and persisted for the next one. This is what answers for the pages that
+   *do* allow a cross-origin read.
+2. **only when that read was refused or said nothing about an app**, an index that
+   has already read the page — this client's is Neynar's frame search. **Measured:
+   this is the source of the in-feed card**, and it produces an app-level card
+   (the app's art, and a button the client names `Open <app>`) rather than the
+   page's own descriptor.
 
-That is (a), honestly sourced: never a card invented from a hunch, never a
-button the page did not declare, and never a guess when both sources are silent —
-a read refused by CORS is *no answer*, and no answer leaves the embed as a link.
+So (a) is honest and it works, with one product consequence now measured rather
+than assumed: **the in-feed card's button is not the button the app declared**.
+A page's `fc:miniapp` button title only appears where the descriptor comes from a
+read that carries the page's own tags — the cast-detail surface, in this client.
+Whether the feed should say `Open Beeper` or `Beep @topp-airdrop` is a product
+decision, not a bug, and it is recorded here as open rather than settled.
 
 ### (b) — kept for what neither source can answer
 
 The refusal is not removed where it is still the truth, and the copy exists
-already: the ranked **Home** feed answers `explore is a ranking, and ranking is
-an indexer's job` (measured in the console), and a surface with no reader answers
+already: the ranked **Home** feed answers `explore is a ranking, and ranking is an
+indexer's job` (measured, in the console), and a surface with no reader answers
 `This page isn't on your node` / `no node-backed reader has been written for this
 endpoint yet`. When no index key is configured, `embedCards` degrades to the
 browser read alone and a CORS-refused page stays a plain link — silence, not an
@@ -154,15 +250,18 @@ empty card.
   Nothing is blocked locally, and a blocklist is local state; the truthful answer
   is "nothing is blocked", which is what a local answer is.
 
-There is no route in the table for the descriptor the fork's own renderer asks
-for (`GET /v1/frame`, `FarcasterApiClient.getFrameDetails`) — which is exactly
-why the descriptor is now built from the page instead of requested from a server.
+There is no route in the table for the descriptor the fork's own renderer asks for
+(`GET /v1/frame`, `FarcasterApiClient.getFrameDetails`) — which is exactly why the
+descriptor is built from what the page (or the index) says instead of requested
+from a server that does not exist.
+
+---
 
 ## 4. The policy, before anyone frames a miniapp
 
-The card's own words: launching somebody else's miniapp inside our shell needs
-its own origin, a sandboxed iframe and a CSP, and **the policy is written down
-first**. Here it is, with what the shipped build does today next to it.
+The card's own words: launching somebody else's miniapp inside our shell needs its
+own origin, a sandboxed iframe and a CSP, and **the policy is written down first**.
+Here it is, with what the shipped build does today next to it.
 
 **Measured, the shipped client** (`curl -sSI https://fiddy.fun/`, 2026-10-21):
 
@@ -182,7 +281,7 @@ permissions-policy: camera=(), microphone=(), geolocation=()
 />
 ```
 
-The policy this client should hold, and the reasons:
+The policy this client holds, and the reasons:
 
 1. **A miniapp's content never runs on our origin.** It is framed from its own
    origin, always. Nothing proxies a miniapp's HTML through `fiddy.fun` — the
@@ -196,15 +295,27 @@ The policy this client should hold, and the reasons:
    `allow-popups-to-escape-sandbox`, `allow-top-navigation`, `allow-modals` or
    `allow-downloads`. `allow-same-origin` is safe here *only* because the frame is
    cross-origin; it must never be used to frame same-origin content.
-3. **Camera and microphone are contradictory today, and it must be decided.**
-   The iframe asks for `microphone; camera`, and the document's own
-   `Permissions-Policy` denies both (`camera=(), microphone=()`). Per the
-   Permissions-Policy spec a child frame cannot be granted a feature the parent
-   denies, so **the miniapp's camera request cannot succeed on the shipped
-   build**. *(Not verified in a browser — spec-derived from the two measured
-   headers/attributes above.)* Decide one way and write it in the settings copy:
-   either keep them denied and let the app be told "no", or delegate them with
-   `allow=` **and** a visible, per-launch consent.
+3. **Camera and microphone: DECIDED — both stay denied.** This was open, and the
+   card asked for one answer rather than a list of options. The answer is *denied*,
+   for three reasons, in order of weight:
+   - the shell's own document denies both for everything on `fiddy.fun`
+     (`permissions-policy: camera=(), microphone=()`), and per the
+     Permissions-Policy spec **a child frame cannot be granted a feature its
+     parent denies** — so no miniapp can have them today without changing the
+     whole client's document policy, not one launch *(spec-derived from the two
+     measured values above; not watched in a browser)*;
+   - a miniapp is somebody else's page, unenumerated and unaudited, and media
+     access is a live-room capability, not a card capability. Nothing in the
+     miniapp surface this client implements (wallet, signer, compose,
+     notifications) needs media;
+   - and the loop is closeable honestly: the iframe's `allow="microphone; camera;
+     …"` is a **dead grant** today — it asks for what the parent already refuses.
+     A follow-up card (`t_*`, filed from this card) removes `microphone; camera`
+     from that attribute, keeping `clipboard-write` (copy buttons need it), and
+     puts the sentence in the settings copy: *"Mini apps run on their own site, in
+     a sandbox. They cannot use your camera or microphone, and they cannot see
+     your Fiddy session."* The copy is the part that matters: a capability that is
+     denied should say so where a reader can find it.
 4. **Everything that touches identity is mediated and confirmed.** Wallet,
    signer, compose and notifications are shell capabilities reached over
    `postMessage`; every request is untrusted input, and none of it happens
@@ -212,26 +323,32 @@ The policy this client should hold, and the reasons:
    miniapp, and its scopes stay the protocol minimum (the repo's `KEY_ADD` asks
    cast/reaction/link/user-data scopes for 90 sliding days — a miniapp must not be
    able to spend those on its own).
-5. **The unfurl read is a privacy surface, and it is the honest price of (a).**
+5. **The unfurl read is a privacy surface, and its second half is now LANDED.**
    Reading a page from the reader's browser tells that page's host the reader's
-   IP and that they are looking at this cast. It is bounded and
-   credential-free (`credentials: 'omit'`), and it should also carry
-   `referrerPolicy: 'no-referrer'` — **not yet set, a one-line follow-up.**
-   Where an index key exists, the index answer costs the reader nothing extra;
-   where it does not, the browser read is what remains. Either way the settings
-   should say that a link in your feed may be read for its card.
+   IP, and with a referrer it would also tell them *which cast the reader was
+   looking at*. `credentials: 'omit'` was already set; **`referrerPolicy:
+   'no-referrer'` is now set too** (`embedCards.ts`, with its own test —
+   `22/22` in `embedCards.test.ts`). Where an index key exists, the index answer
+   costs the reader nothing extra; where it does not, the browser read is what
+   remains, and it now carries no referrer and no credentials. The settings copy
+   should still say that a link in your feed may be read for its card.
+
+---
 
 ## 5. Scope, and what this card did not do
 
-- **Not duplicated:** the build (catalog reads via Neynar, in-feed card, launch)
-  is card `t_93fa5c59`'s, and it landed on `main` at 22:54 (`5d90216`,
-  `ecc6127`, `9cd530e`, `55a4ddd`). This card measures it, decides the shape and
-  writes the policy — it does not re-implement any of it.
+- **Not duplicated:** the build (catalog reads via Neynar, the in-feed card, the
+  launch) is card `t_93fa5c59`'s, on `main` at 22:54 (`5d90216`, `ecc6127`,
+  `9cd530e`, `55a4ddd`). This card measures it, decides the shape and writes the
+  policy — it does not re-implement any of it.
 - **Not touched:** `docs/CLIENT-PARITY.md`. Card `t_08e02638` owns that file and
   its miniapp row; the row is left exactly as it is (`re-measure`) so that card
-  can be the one that closes it.
-- **Not verified, and said so above:** a screenshot pair on one fixed head; the
-  desktop pass on the landed tree; the Permissions-Policy deduction in a real
-  browser; whether the launch itself succeeds end to end (the button that opens a
-  miniapp window is not reachable until a card renders, and no card rendered in
-  the window this probe had).
+  can be the one that closes it. This doc deliberately does not edit it, not even
+  to point at this measurement.
+- **Filed from this card:** the iframe-grant + settings-copy follow-up of §4 item
+  3 (removing the dead `microphone; camera` grant and saying in the copy that
+  miniapps cannot use them).
+- **Not verified, and said so above:** the launch itself; the Permissions-Policy
+  deduction in a real browser; the aged fixture's `Join The Firm` source; the
+  no-index-key case; and the button-words difference between the feed and the cast
+  page, which is recorded as an open product question rather than a defect.
