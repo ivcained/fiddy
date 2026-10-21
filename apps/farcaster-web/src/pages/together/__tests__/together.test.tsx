@@ -473,7 +473,10 @@ describe('Together — talking on a card', () => {
       }
 
       if (url.includes('/spaces/state')) {
-        const counts = cardRead ? {} : unread;
+        // Typed, not inferred: `{} | { 'card-1': number }` widens the values to
+        // `unknown` and `Object.values(...).reduce` then fails the typecheck
+        // gate CI runs. Main carried that error; this line is the fix.
+        const counts: Record<string, number> = cardRead ? {} : unread;
         return json(200, {
           ...statePayload(),
           members: [MEMBER, MEMBER_FROM_ELSEWHERE],
