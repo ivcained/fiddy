@@ -58,6 +58,17 @@ export interface ProviderCapability {
   reads: boolean;
   /** Can it carry a message this device signed? */
   writes: boolean;
+  /**
+   * Can it answer a route the table classifies `node` — a read a node assembles
+   * out of protocol messages (a profile, a thread, the follow-graph feed, the
+   * unseen counts, the notifications tally)?
+   *
+   * This is a separate question from `reads`, and the gap between them is where
+   * a real failure lived: Farcaster's own public server answers the reads it
+   * documents (`reads: true`) and cannot assemble a single one of these, so
+   * "reads: true" alone let it be chosen for the home feed — see the seam.
+   */
+  nodeReads: boolean;
   /** Plain words for a picker row: "reads + posts" or "reads only". */
   label: string;
   /** One honest sentence about what a write through it really is. */
@@ -69,6 +80,7 @@ export interface ProviderCapability {
 const SNAPCHAIN: ProviderCapability = {
   reads: true,
   writes: true,
+  nodeReads: true,
   label: 'reads + posts',
   writeDetail:
     'Writes are signed on this device and handed to the node, which passes them to the network.',
@@ -78,6 +90,7 @@ const SNAPCHAIN: ProviderCapability = {
 const NEYNAR: ProviderCapability = {
   reads: true,
   writes: true,
+  nodeReads: true,
   label: 'reads + posts',
   writeDetail:
     'Reads come from Neynar’s index; writes are signed on this device with your own key and handed to Neynar’s node.',
@@ -88,10 +101,12 @@ const NEYNAR: ProviderCapability = {
 const FARCASTER_PUBLIC: ProviderCapability = {
   reads: true,
   writes: false,
+  nodeReads: false,
   label: 'reads only',
   writeDetail:
     'It takes no writes at all: liking, posting and following cannot go through it.',
-  limit: 'Read-only, and it cannot say how far behind the network it is.',
+  limit:
+    'Read-only, it keeps no protocol messages of its own, and it cannot say how far behind the network it is. The reads a node assembles — the feed, unseen counts, notifications — are read from a node here instead.',
 };
 
 /** The capability of one server, in plain words. */
@@ -115,7 +130,10 @@ export const capabilitiesOf = (provider: NodeProvider): ProviderCapability => {
  * `POST /v2/feed-items` (a read with a body), so "POST means write" would have
  * sent the signed-in feed to Neynar's index, which has no feed at all. The
  * classification in `~/snapchain/nodeApi/hostedRoutes` is the one place that
- * knows what a request *is*; this matrix reads it.
+ * knows what a request *is*; this matrix reads it. And the rule runs both ways:
+ * a route the table calls `node` is a read from a node whatever method the fork
+ * spells it with, so no non-node server is ever chosen to answer it, and its
+ * own refusal can never stand in for the home column.
  */
 export type ServeableRouteKind =
   | 'write'
@@ -157,6 +175,29 @@ export const providerCanServe = ({
       can: false,
       why: `${provider.label} is read-only: ${capability.writeDetail}`,
     };
+  }
+
+  // A route the table classifies `node` is a read a node assembles — whatever
+  // HTTP method the fork spells it with. `POST /v2/feed-items` is the one that
+  // spells a read as a write (a read with a body), and judging *that* by its
+  // method is the defect this branch exists to close: a server that merely
+  // "reads" is not a server that can assemble a follow graph, so
+  // `farcaster-public` must not be chosen for it, and Neynar must only be chosen
+  // for the paths its index really keeps (`NEYNAR_READ_PATHS` below).
+  if (kind === 'node') {
+    if (!capability.nodeReads) {
+      return {
+        can: false,
+        why: `${provider.label} does not assemble ${path}: it is read from a node, out of the protocol messages that node keeps.`,
+      };
+    }
+    if (provider.kind === 'neynar' && !NEYNAR_READ_PATHS.includes(path)) {
+      return {
+        can: false,
+        why: `Neynar’s index does not serve ${path} for this client.`,
+      };
+    }
+    return { can: true };
   }
 
   if (provider.kind === 'neynar' && !NEYNAR_READ_PATHS.includes(path)) {
