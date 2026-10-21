@@ -133,20 +133,25 @@ APP="$STAGE/base/apps/farcaster-web/dist"
 grep -rqs "$GATE_ADAPTER" "$APP/assets" || { echo "MISSING adapter sentence in the build" >&2; exit 1; }
 grep -rqs "$GATE_MEDIA" "$APP/assets" || { echo "MISSING media path in the build" >&2; exit 1; }
 grep -rqs "$NODE_URL" "$APP/assets" || { echo "MISSING the configured node in the build" >&2; exit 1; }
-grep -rqs "$GATE_TOGETHER" "$APP/assets" || { echo "MISSING the Together route in the build" >&2; exit 1; }
+# `--include='*.js'`: vite writes a sourcemap per chunk and a sourcemap carries
+# the ORIGINAL source text, so a plain `grep -r` over assets finds strings the
+# shipped JavaScript does not contain (measured 2026-10-21: the fallback below in
+# `together-*.js.map` only, while the chunk itself had folded it away). Check
+# the code that ships, not the code the map remembers.
+grep -rqs --include='*.js' "$GATE_TOGETHER" "$APP/assets" || { echo "MISSING the Together route in the build" >&2; exit 1; }
 # The Together surface ships itself: /~/together is reachable signed out, and
 # the page asks the collaboration service for a board. `src/lib/together.ts`
 # answers http://127.0.0.1:8766 when VITE_TOGETHER_API_URL is UNDEFINED, which in
 # a visitor's browser means their own laptop — the page renders and every call
 # fails. That is a shipping bug, so refuse it here rather than measure it live.
-if grep -rqs "$GATE_TOGETHER_FALLBACK" "$APP/assets"; then
-  echo "REFUSING to ship: the bundle carries $GATE_TOGETHER_FALLBACK, so VITE_TOGETHER_API_URL was never set" >&2
+if grep -rqs --include='*.js' "$GATE_TOGETHER_FALLBACK" "$APP/assets"; then
+  echo "REFUSING to ship: the built JavaScript carries $GATE_TOGETHER_FALLBACK, so VITE_TOGETHER_API_URL was never set" >&2
   exit 1
 fi
 echo "  adapter  ok"
 echo "  media    ok"
 echo "  node     ok ($NODE_URL)"
-echo "  together ok (route literal; no laptop fallback, api = '${TOGETHER_URL}' same origin)"
+echo "  together ok (route literal; no laptop fallback in the chunks, api = '${TOGETHER_URL}' same origin)"
 # The shell the host serves runs under script-src 'self'. An inline <script> in
 # index.html (the theme bootstrap used to be one) or an inline on*= handler (the
 # font sheet used to have one) is inline script, and that CSP refuses it — in
@@ -192,8 +197,8 @@ ssh_ "set -e
   grep -rqs '$GATE_ADAPTER' $RELEASES/$SHA/web/assets
   grep -rqs '$GATE_MEDIA' $RELEASES/$SHA/web/assets
   grep -rqs '$NODE_URL' $RELEASES/$SHA/web
-  grep -rqs '$GATE_TOGETHER' $RELEASES/$SHA/web/assets
-  if grep -rqs '$GATE_TOGETHER_FALLBACK' $RELEASES/$SHA/web/assets; then
+  grep -rqs --include='*.js' '$GATE_TOGETHER' $RELEASES/$SHA/web/assets
+  if grep -rqs --include='*.js' '$GATE_TOGETHER_FALLBACK' $RELEASES/$SHA/web/assets; then
     echo 'the extracted bundle carries the laptop fallback'; exit 1
   fi
   test -f $RELEASES/$SHA/web/preview/index.html
