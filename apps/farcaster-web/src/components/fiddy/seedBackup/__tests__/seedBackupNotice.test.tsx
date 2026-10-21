@@ -10,7 +10,13 @@
  * up as a backup.
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -172,6 +178,176 @@ describe('the asking can be put off', () => {
 
     expect(asked.status).toBe('unseen');
     expect(typeof asked.lastShownAt).toBe('number');
+  });
+});
+
+/**
+ * A screen that is created more than once inside one page load.
+ *
+ * MEASURED 2026-10-22 in a real Chrome: the account screen is built again ~40 to
+ * 160ms after it first paints — Privy's provider arrives late and replaces its
+ * subtree — and before this was pinned, the second creation read back the
+ * "asked just now" record the first one had written and hid the notice. 5 of 8
+ * runs at 390px and 1440px, and with StrictMode patched out of the served module
+ * as well, so it is not a development-mode artefact. These two tests are the
+ * pair that says what the notice promises: a remount is not an answer, and a
+ * reload is not a fresh ask.
+ */
+describe('a screen that is built again inside one page load', () => {
+  /**
+   * An account of its own for each test here: the in-page record is keyed by
+   * account id and lives for the life of this module, so a shared account would
+   * let one test's unanswered ask answer for the next one.
+   */
+  const remountAccount: LocalAccount = {
+    ...heldAccount,
+    id: '0x9a1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c',
+    custodyAddress: '0x9a1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c',
+  };
+  const reloadAccount: LocalAccount = {
+    ...heldAccount,
+    id: '0x9b2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d',
+    custodyAddress: '0x9b2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d',
+  };
+
+  it('keeps the ask on screen, and does not re-record it', async () => {
+    const first = render(<SeedBackupNotice account={remountAccount} />);
+
+    expect(await screen.findByText('Back up your account')).toBeTruthy();
+
+    const key = seedBackupKeyFor(remountAccount.id);
+    const recorded = (store.get(key) as { lastShownAt: number }).lastShownAt;
+
+    expect(typeof recorded).toBe('number');
+
+    // The same page load, a second instance: what the app does when the
+    // provider arrives and its subtree is replaced.
+    first.unmount();
+    render(<SeedBackupNotice account={remountAccount} />);
+
+    expect(await screen.findByText('Back up your account')).toBeTruthy();
+    // And the gap still measures from the first ask, not from this one.
+    expect((store.get(key) as { lastShownAt: number }).lastShownAt).toBe(
+      recorded,
+    );
+  });
+
+  it('comes back when its own moment passes, even if the screen is built again', async () => {
+    const cameBackAccount: LocalAccount = {
+      ...heldAccount,
+      id: '0x9d4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f',
+      custodyAddress: '0x9d4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f',
+    };
+    const key = seedBackupKeyFor(cameBackAccount.id);
+
+    // The person put it off days ago and that moment has since passed, so the ask
+    // that is due now is a fresh one. The record it writes *as it asks* must not
+    // be mistaken for an answer when the screen is created again — MEASURED
+    // 2026-10-22 in a real Chrome at 390px, where it was: the notice recorded the
+    // ask, the second creation read that record back as "asked just now", and the
+    // reminder that should have come back did not.
+    store.set(key, {
+      status: 'deferred',
+      reminders: 1,
+      lastShownAt: Date.now() - 4 * 24 * 60 * 60 * 1000,
+      remindAfter: Date.now() - 1_000,
+    });
+
+    const first = render(<SeedBackupNotice account={cameBackAccount} />);
+
+    expect(await screen.findByText('Back up your account')).toBeTruthy();
+
+    const recorded = (store.get(key) as { lastShownAt: number }).lastShownAt;
+
+    expect(recorded).toBeGreaterThan(Date.now() - 60_000);
+
+    first.unmount();
+    render(<SeedBackupNotice account={cameBackAccount} />);
+
+    expect(await screen.findByText('Back up your account')).toBeTruthy();
+    // And the gap still measures from the first ask of this page load.
+    expect((store.get(key) as { lastShownAt: number }).lastShownAt).toBe(
+      recorded,
+    );
+  });
+
+  it("honours the person's own answer, whichever instance is on screen", async () => {
+    const first = render(<SeedBackupNotice account={deviceAccount} />);
+
+    fireEvent.click(await screen.findByText('Show me my backup words'));
+    fireEvent.click(screen.getByText('I have written them down'));
+
+    expect(
+      await screen.findByText(/Saved\. Your account is written down/),
+    ).toBeTruthy();
+
+    first.unmount();
+    render(<SeedBackupNotice account={deviceAccount} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-fiddy="seed-backup"]')).toBeNull();
+    });
+  });
+
+  it('stays away when the person put it off, even if the screen is built again', async () => {
+    const deferAccount: LocalAccount = {
+      ...heldAccount,
+      id: '0x9c3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3',
+      custodyAddress: '0x9c3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3',
+    };
+    const key = seedBackupKeyFor(deferAccount.id);
+    const first = render(<SeedBackupNotice account={deferAccount} />);
+
+    fireEvent.click(await screen.findByText('Not now'));
+
+    await waitFor(() =>
+      expect(store.get(key)).toMatchObject({ status: 'deferred' }),
+    );
+
+    first.unmount();
+    render(<SeedBackupNotice account={deferAccount} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-fiddy="seed-backup"]')).toBeNull();
+    });
+  });
+
+  it('does not ask again on a new page load, because the ask is recorded', async () => {
+    const first = render(<SeedBackupNotice account={reloadAccount} />);
+
+    expect(await screen.findByText('Back up your account')).toBeTruthy();
+    expect(
+      typeof (
+        store.get(seedBackupKeyFor(reloadAccount.id)) as {
+          lastShownAt?: number;
+        }
+      ).lastShownAt,
+    ).toBe('number');
+    first.unmount();
+
+    // A new page load, as a test can model one: the module registry is emptied,
+    // so the in-page record of the ask is gone and only the device's own storage
+    // is left to decide. (This is the half of the promise that must not change:
+    // a reload is not a fresh ask.)
+    vi.resetModules();
+
+    const reloaded =
+      await import('~/components/fiddy/seedBackup/SeedBackupNotice');
+
+    render(
+      React.createElement(reloaded.SeedBackupNotice, {
+        account: reloadAccount,
+      }),
+    );
+
+    // The notice's decision is an async read of the device's own storage; the
+    // effect is flushed here, inside act, so the absence below is the app's
+    // decision rather than the test racing it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(document.querySelector('[data-fiddy="seed-backup"]')).toBeNull();
   });
 });
 
