@@ -511,12 +511,32 @@ cast and reading the state back is the write layer, which this card did not
 touch. It does not delete the composer's refusal copy, which still names
 Advanced; the offer makes that sentence rare rather than wrong.
 
-*Measurement hygiene for the two live numbers above.* The acceptance run
-(12/12, `scripts/verify-node-backed-client.mjs`) was taken on the shared tree at
-`d00b7a7` **while the write layer's card had its edits in flight**; the offer run
-(7/7) was taken at `88cf2ba`, after those landed, with this change in the tree.
-Both are recorded with their logs and screenshots on card `t_c9861884` rather
-than restated as one number.
+*Measurement hygiene for the live numbers above.* Three runs, each recorded with
+its log and screenshots on card `t_c9861884`:
+
+* **acceptance 12/12** — `scripts/verify-node-backed-client.mjs`, on a dev server
+  started minutes before the run (`:5201` → `https://haatz.quilibrium.com`), with
+  the app at `4262059` (which carries this change and the write layer's). Every
+  read attributed to that node: the feed's 152 cast reads (two lenses), a cast
+  detail's 12 thread reads, a profile's 3, a channel's 12, notifications' 22, and
+  the reload's 62 with 46 casts back on screen.
+* **the offer 7/7** — `scripts/verify-post-for-you.mjs`, same server and revision.
+* **the earlier 11/12, and the probe fix it caused** (`b09f8c0`): on the first
+  run of that revision the only red was the reload row —
+  *"no castsByFid read answered by a node after the reload | casts back on screen:
+  69"* — with the feed full and the client's own pill naming **Neynar** as the
+  server answering. The provider ladder picks a named provider first when the
+  build holds a key for it, and this dev `.env.local` carries
+  `VITE_NEYNAR_API_KEY`, so the row was demanding a node from a chain that had
+  answered from a provider — the same "measuring its own expectation" family the
+  re-point above fixed. It now counts a read server (node, relay, or a named
+  provider), says which one answered, and keeps the clause that fails when the
+  client is broken: cast text on screen, which a client showing "Home isn't on
+  your node" cannot produce.
+
+The acceptance run before this card's change (12/12 at `d00b7a7`, the write
+layer's edits still in flight) and the offer run at `88cf2ba` are on the same card
+rather than restated here as one number.
 
 ## Fix order for Phase 2 (posting loop first)
 
