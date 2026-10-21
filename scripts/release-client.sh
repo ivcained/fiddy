@@ -234,7 +234,16 @@ set +e
 # Download first, grep second: a pipe with `grep -q` closes early, and with
 # `set -o pipefail` that SIGPIPE reads as a failed check even when the string is
 # there.
-curl -fsS https://fiddy.fun/ -o "$STAGE/served-index.html"
+#
+# `?release=<sha>` on BOTH fetches: a CDN in front of the host caches what it
+# fetched, including a 404 for a chunk URL — measured 2026-10-21 on a release
+# whose verification ran while another release cut over: the origin answered 404
+# for a chunk this release owns, Cloudflare cached that 404 for four hours, and
+# the gate then failed a release that was in fact live and correct. The query
+# string sends both fetches to the origin, which is what this gate is about (does
+# the host serve the bytes we built); what the edge then does with a URL is
+# measured in a browser, not here.
+curl -fsS "https://fiddy.fun/?release=$SHORT" -o "$STAGE/served-index.html"
 # The served shell is what the browser runs, so check THAT file and not the one
 # the build produced: an inline <script> or an inline on*= handler in it is
 # refused by the host's script-src 'self'.
@@ -242,7 +251,7 @@ node "$CHECK_SHELL" "$STAGE/served-index.html" \
   || { rollback_on_failure; exit 1; }
 ASSET=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$STAGE/served-index.html" | head -1)
 echo "  index.html names $ASSET"
-curl -fsS "https://fiddy.fun$ASSET" -o "$STAGE/served-$SHORT.js"
+curl -fsS "https://fiddy.fun$ASSET?release=$SHORT" -o "$STAGE/served-$SHORT.js"
 grep -q "$GATE_ADAPTER" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
 grep -q "$GATE_MEDIA" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
 grep -q "$NODE_URL" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
