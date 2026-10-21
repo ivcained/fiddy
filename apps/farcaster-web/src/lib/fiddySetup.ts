@@ -47,7 +47,12 @@ export const BRAIN_IDS: BrainId[] = [
 ];
 
 export type ChannelId =
-  'farcaster' | 'whatsapp' | 'discord' | 'telegram' | 'imessage' | 'email';
+  | 'farcaster'
+  | 'whatsapp'
+  | 'discord'
+  | 'telegram'
+  | 'imessage'
+  | 'email';
 
 export interface FiddySetup {
   /** What the owner called their agent. */

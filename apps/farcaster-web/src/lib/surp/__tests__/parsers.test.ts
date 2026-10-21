@@ -9,17 +9,18 @@
 
 import { describe, expect, it } from 'vitest';
 
-import chat402 from './fixtures/chat-402.json';
-import keyBalance from './fixtures/key-balance.json';
-import keyCreated from './fixtures/key-created.json';
-import priceBoard from './fixtures/price-board.json';
-import { parsePriceBoard, parseRequestQuote } from '~/lib/surp/pricing';
 import {
   looksLikeSurpKey,
   parseCreatedKey,
   parseKeyBalance,
   surpKeyMask,
 } from '~/lib/surp/keys';
+import { parsePriceBoard, parseRequestQuote } from '~/lib/surp/pricing';
+
+import chat402 from './fixtures/chat-402.json';
+import keyBalance from './fixtures/key-balance.json';
+import keyCreated from './fixtures/key-created.json';
+import priceBoard from './fixtures/price-board.json';
 
 describe('the price board', () => {
   it('reads every model Surp listed', () => {

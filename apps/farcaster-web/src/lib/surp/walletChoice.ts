@@ -134,7 +134,9 @@ export const describeWalletHome = ({
   }
 
   const name = evm.walletName ?? null;
-  const who = name ? `${name} (${shortAddress(address as string)})` : shortAddress(address as string);
+  const who = name
+    ? `${name} (${shortAddress(address as string)})`
+    : shortAddress(address as string);
 
   if (!onRightChain) {
     return {

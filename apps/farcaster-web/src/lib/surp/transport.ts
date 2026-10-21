@@ -90,9 +90,7 @@ export const timeoutSignal = (ms: number): AbortSignal | undefined =>
     : undefined;
 
 /** The three shape checks every parser in this folder shares. */
-export const asRecord = (
-  value: unknown,
-): Record<string, unknown> | null =>
+export const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null
     ? (value as Record<string, unknown>)
     : null;

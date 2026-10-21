@@ -14,8 +14,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import keyCreated from './fixtures/key-created.json';
-import keyBalance from './fixtures/key-balance.json';
 import { installFakeStorage } from '~/lib/__tests__/fakeStorage';
 import { loadFiddySetup, saveFiddySetup } from '~/lib/fiddySetup';
 import {
@@ -26,6 +24,9 @@ import {
   readSurpKeyBalance,
   SURP_KEY_STORAGE,
 } from '~/lib/surp/keys';
+
+import keyBalance from './fixtures/key-balance.json';
+import keyCreated from './fixtures/key-created.json';
 
 const KEY = keyCreated.key as string;
 

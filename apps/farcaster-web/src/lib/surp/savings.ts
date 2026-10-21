@@ -27,7 +27,7 @@
  * cheapest route of any kind.
  */
 
-import type { SurpPriceBoard, SurpModelPrice } from './pricing';
+import type { SurpModelPrice, SurpPriceBoard } from './pricing';
 
 /**
  * A subscription somebody is paying for, carried with where the number came
@@ -98,7 +98,9 @@ export const cheapestRouteFor = (
   const matches = board.models.filter((model) =>
     wanted.some((hint) => model.model.toLowerCase() === hint),
   );
-  if (matches.length === 0) return null;
+  if (matches.length === 0) {
+    return null;
+  }
   return matches.reduce((best, next) =>
     next.usdPerMillion < best.usdPerMillion ? next : best,
   );
@@ -137,7 +139,9 @@ export const compareToPlan = (
   usage: UsageGuess,
   perRequestUsd: number,
 ): SavingsComparison | null => {
-  if (!Number.isFinite(perRequestUsd) || perRequestUsd <= 0) return null;
+  if (!Number.isFinite(perRequestUsd) || perRequestUsd <= 0) {
+    return null;
+  }
   const route = cheapestRouteFor(board, plan);
   const requests = requestsPerMonth(usage);
   const surpMonthlyUsd = perRequestUsd * requests;

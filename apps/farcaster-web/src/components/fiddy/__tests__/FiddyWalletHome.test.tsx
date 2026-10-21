@@ -9,15 +9,23 @@
  * so rather than to throw.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import chat402 from '~/lib/surp/__tests__/fixtures/chat-402.json';
 import { FiddyWalletHome } from '~/components/fiddy/FiddyWalletHome';
+import chat402 from '~/lib/surp/__tests__/fixtures/chat-402.json';
 import type { PreparedPayment } from '~/lib/surp/x402';
-import { EMPTY_WALLET_CONNECTIONS } from '~/utils/walletFamily';
-import type { WalletConnections } from '~/utils/walletFamily';
+import {
+  EMPTY_WALLET_CONNECTIONS,
+  type WalletConnections,
+} from '~/utils/walletFamily';
 
 const BASE = '0x1111111111111111111111111111111111111111';
 const SIGNATURE = `0x${'cd'.repeat(65)}` as const;
@@ -57,7 +65,9 @@ describe('the wallet choice', () => {
     );
     expect(screen.getByText('Bring your Farcaster wallet')).toBeTruthy();
     expect(screen.getByText('Create a fresh wallet for me')).toBeTruthy();
-    expect(screen.getByText(/Your Fiddy account makes that wallet/)).toBeTruthy();
+    expect(
+      screen.getByText(/Your Fiddy account makes that wallet/),
+    ).toBeTruthy();
   });
 
   it('records the choice the owner makes', () => {
@@ -70,7 +80,9 @@ describe('the wallet choice', () => {
       />,
     );
     fireEvent.click(
-      document.querySelector('[data-fiddy-wallet-choice="fresh"]') as HTMLElement,
+      document.querySelector(
+        '[data-fiddy-wallet-choice="fresh"]',
+      ) as HTMLElement,
     );
     expect(onChoose).toHaveBeenCalledWith('fresh');
   });
@@ -99,9 +111,9 @@ describe('the wallet choice', () => {
       />,
     );
     expect(
-      document.querySelector('[data-fiddy-wallet-summary]')?.getAttribute(
-        'data-fiddy-wallet-summary',
-      ),
+      document
+        .querySelector('[data-fiddy-wallet-summary]')
+        ?.getAttribute('data-fiddy-wallet-summary'),
     ).toBe('cannot-pay');
   });
 });
@@ -118,9 +130,13 @@ describe('paying, without paying', () => {
         onSignTypedData={vi.fn(async () => SIGNATURE)}
       />,
     );
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement,
+    );
     const notice = await screen.findByText(/Pay \$0.01 from your wallet/);
-    expect(notice.textContent).toContain('Your wallet will ask you to approve it');
+    expect(notice.textContent).toContain(
+      'Your wallet will ask you to approve it',
+    );
   });
 
   it('signs with the owner’s wallet and stops there', async () => {
@@ -138,9 +154,13 @@ describe('paying, without paying', () => {
       />,
     );
 
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement,
+    );
     await screen.findByText(/Pay \$0.01 from your wallet/);
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-pay"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-pay"]') as HTMLElement,
+    );
 
     await waitFor(() => {
       expect(onSignTypedData).toHaveBeenCalledTimes(1);
@@ -185,9 +205,13 @@ describe('paying, without paying', () => {
         }}
       />,
     );
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement,
+    );
     await screen.findByText(/Pay \$0.01 from your wallet/);
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-pay"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-pay"]') as HTMLElement,
+    );
     await screen.findByText(/That was not approved, so nothing was paid/);
     expect(document.querySelector('[data-fiddy="wallet-signed"]')).toBeNull();
   });
@@ -203,9 +227,13 @@ describe('paying, without paying', () => {
         onSignTypedData={onSignTypedData}
       />,
     );
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement,
+    );
     await screen.findByText(/Pay \$0.01 from your wallet/);
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-pay"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-pay"]') as HTMLElement,
+    );
     await screen.findByText(/Connect the wallet you want to pay from first/);
     expect(onSignTypedData).not.toHaveBeenCalled();
   });
@@ -219,9 +247,13 @@ describe('paying, without paying', () => {
         onChoose={() => {}}
       />,
     );
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-ask-price"]') as HTMLElement,
+    );
     await screen.findByText(/Pay \$0.01 from your wallet/);
-    fireEvent.click(document.querySelector('[data-fiddy="wallet-pay"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector('[data-fiddy="wallet-pay"]') as HTMLElement,
+    );
     await screen.findByText(/This screen cannot reach a wallet/);
     // Nothing was signed, so nothing can have been spent.
     expect(document.querySelector('[data-fiddy="wallet-signed"]')).toBeNull();

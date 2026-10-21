@@ -60,10 +60,14 @@ export interface SurpRequestQuote {
 
 const parseModel = (entry: unknown): SurpModelPrice | null => {
   const row = asRecord(entry);
-  if (!row) return null;
+  if (!row) {
+    return null;
+  }
   const model = str(row.model);
   const usdPerMillion = num(row.surp_usd_per_1m);
-  if (!model || usdPerMillion === null) return null;
+  if (!model || usdPerMillion === null) {
+    return null;
+  }
   const cheaper = str(row.cheaper);
   return {
     model,
@@ -86,11 +90,15 @@ export const parsePriceBoard = (
 ): SurpPriceBoard | null => {
   const body = asRecord(payload);
   const rows = body?.models;
-  if (!body || !Array.isArray(rows)) return null;
+  if (!body || !Array.isArray(rows)) {
+    return null;
+  }
   const models = rows
     .map(parseModel)
     .filter((model): model is SurpModelPrice => model !== null);
-  if (models.length === 0) return null;
+  if (models.length === 0) {
+    return null;
+  }
   return {
     generatedAt: str(body.generated_at) ?? '',
     sourceAgeSeconds: num(body.source_age_seconds) ?? 0,
@@ -150,11 +158,14 @@ export const parseRequestQuote = (
   payload: unknown,
 ): SurpRequestQuote | null => {
   const body = asRecord(payload);
-  if (!body) return null;
+  if (!body) {
+    return null;
+  }
   const accepts = Array.isArray(body.accepts) ? body.accepts : [];
   const first = asRecord(accepts[0]);
   const rawAmount = str(first?.amount);
-  const atomic = rawAmount && /^\d+$/.test(rawAmount) ? BigInt(rawAmount) : null;
+  const atomic =
+    rawAmount && /^\d+$/.test(rawAmount) ? BigInt(rawAmount) : null;
   const priceText = str(body.price_usd); // Surp states it as "$0.0100"
   const priceUsd =
     atomic !== null

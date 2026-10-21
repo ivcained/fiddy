@@ -50,7 +50,9 @@ export const looksLikeSurpKey = (value: string): boolean =>
 /** A mask for screens and for support: never the whole key. */
 export const surpKeyMask = (key: string): string => {
   const trimmed = key.trim();
-  if (trimmed.length <= 12) return '••••';
+  if (trimmed.length <= 12) {
+    return '••••';
+  }
   return `${trimmed.slice(0, 8)}…${trimmed.slice(-4)}`;
 };
 
@@ -60,7 +62,9 @@ export const parseCreatedKey = (
 ): SurpKeyRecord | null => {
   const body = asRecord(payload);
   const key = body ? str(body.key) : null;
-  if (!body || !key || !looksLikeSurpKey(key)) return null;
+  if (!body || !key || !looksLikeSurpKey(key)) {
+    return null;
+  }
   return {
     key: key.trim(),
     label: str(body.label) ?? 'fiddy',
@@ -72,11 +76,17 @@ export const parseCreatedKey = (
 export const readSurpKey = (): SurpKeyRecord | null => {
   try {
     const raw = window.localStorage.getItem(SURP_KEY_STORAGE);
-    if (!raw) return null;
+    if (!raw) {
+      return null;
+    }
     const parsed = JSON.parse(raw) as Partial<SurpKeyRecord> | null;
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
     const key = typeof parsed.key === 'string' ? parsed.key : null;
-    if (!key || !looksLikeSurpKey(key)) return null;
+    if (!key || !looksLikeSurpKey(key)) {
+      return null;
+    }
     return {
       key,
       label: typeof parsed.label === 'string' ? parsed.label : 'fiddy',
@@ -130,7 +140,9 @@ export const parseKeyBalance = (payload: unknown): SurpKeyBalance | null => {
   const body = asRecord(payload);
   const label = body ? str(body.label) : null;
   const balanceUsdCents = body ? num(body.balance_usd_cents) : null;
-  if (!body || label === null || balanceUsdCents === null) return null;
+  if (!body || label === null || balanceUsdCents === null) {
+    return null;
+  }
   return {
     label,
     balanceUsdCents,

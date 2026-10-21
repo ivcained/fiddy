@@ -35,8 +35,8 @@ import {
   createSurpKey,
   readSurpKey,
   readSurpKeyBalance,
-  surpKeyMask,
   type SurpKeyBalance,
+  surpKeyMask,
   type SurpKeyRecord,
 } from '~/lib/surp/keys';
 import {
@@ -49,10 +49,10 @@ import {
   compareToPlan,
   DEFAULT_USAGE_GUESS,
   PLAN_REFERENCES,
-  savingsProvenance,
-  savingsSentence,
   type PlanReference,
   type SavingsComparison,
+  savingsProvenance,
+  savingsSentence,
   type UsageGuess,
 } from '~/lib/surp/savings';
 import { SurpUnreachableError } from '~/lib/surp/transport';
@@ -128,9 +128,13 @@ export const SurpBrainPanel = memo(
             deps.loadBoard(),
             deps.loadQuote(guess.tokensPerMessage),
           ]);
-          if (alive) setPricing({ status: 'live', board, quote });
+          if (alive) {
+            setPricing({ status: 'live', board, quote });
+          }
         } catch (caught) {
-          if (!alive) return;
+          if (!alive) {
+            return;
+          }
           setPricing(
             caught instanceof SurpUnreachableError &&
               caught.code === 'CROSS_ORIGIN'
@@ -153,7 +157,9 @@ export const SurpBrainPanel = memo(
       PLAN_REFERENCES[0];
 
     const comparison: SavingsComparison | null = useMemo(() => {
-      if (pricing.status !== 'live') return null;
+      if (pricing.status !== 'live') {
+        return null;
+      }
       return compareToPlan(plan, pricing.board, guess, pricing.quote.priceUsd);
     }, [pricing, plan, guess]);
 
@@ -175,7 +181,9 @@ export const SurpBrainPanel = memo(
     }, []);
 
     const checkBalance = useCallback(async () => {
-      if (!key) return;
+      if (!key) {
+        return;
+      }
       setKeyBusy(true);
       try {
         setBalance(await readSurpKeyBalance(key.key));

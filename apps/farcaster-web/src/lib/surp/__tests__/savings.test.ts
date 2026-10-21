@@ -18,19 +18,20 @@
 
 import { describe, expect, it } from 'vitest';
 
-import chat402 from './fixtures/chat-402.json';
-import priceBoard from './fixtures/price-board.json';
+import { parsePriceBoard, parseRequestQuote } from '~/lib/surp/pricing';
 import {
   cheapestRouteFor,
   compareToPlan,
   DEFAULT_USAGE_GUESS,
   PLAN_REFERENCES,
   requestsPerMonth,
+  type SavingsComparison,
   savingsSentence,
   tokensPerMonth,
-  type SavingsComparison,
 } from '~/lib/surp/savings';
-import { parsePriceBoard, parseRequestQuote } from '~/lib/surp/pricing';
+
+import chat402 from './fixtures/chat-402.json';
+import priceBoard from './fixtures/price-board.json';
 
 const board = parsePriceBoard(priceBoard, 0.7);
 const quote = parseRequestQuote(chat402);
@@ -127,7 +128,9 @@ describe('the arithmetic the owner reads', () => {
       quote!.priceUsd,
     )!;
     const line = savingsSentence(comparison);
-    expect(line).toContain('Claude Pro is $20.00 a month whether you use it or not');
+    expect(line).toContain(
+      'Claude Pro is $20.00 a month whether you use it or not',
+    );
     expect(line).toContain('about $6.00 on Surp');
     expect(line).toContain('about 20 messages a day');
   });
@@ -135,13 +138,21 @@ describe('the arithmetic the owner reads', () => {
   it('has no floor of its own to write down', () => {
     // Whatever the service charges is what a month costs. If this module held a
     // $0.01 assumption, these two months would come out equal.
-    const cheap = compareToPlan(claudePro, board!, DEFAULT_USAGE_GUESS, 0.0001)!;
+    const cheap = compareToPlan(
+      claudePro,
+      board!,
+      DEFAULT_USAGE_GUESS,
+      0.0001,
+    )!;
     const dear = compareToPlan(claudePro, board!, DEFAULT_USAGE_GUESS, 0.01)!;
     expect(cheap.perRequestUsd).toBe(0.0001);
     expect(dear.surpMonthlyUsd / cheap.surpMonthlyUsd).toBeCloseTo(100, 6);
     // ...and the floor the live service really charges is where the quote says
     // it is: the 402's atomic amount, read into dollars.
-    expect(quote!.priceUsd).toBeCloseTo(Number(quote!.amountAtomicUsdc!) / 1e6, 9);
+    expect(quote!.priceUsd).toBeCloseTo(
+      Number(quote!.amountAtomicUsdc!) / 1e6,
+      9,
+    );
     expect(quote!.priceUsd).toBe(0.01);
   });
 

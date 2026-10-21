@@ -31,15 +31,15 @@ import {
   WALLET_OPTIONS,
   type WalletChoiceId,
 } from '~/lib/surp/walletChoice';
-import type { WalletConnections } from '~/utils/walletFamily';
 import {
   encodePaymentHeader,
   fetchPaymentOffer,
-  preparePayment,
   type PreparedPayment,
+  preparePayment,
   type X402Challenge,
   type X402Offer,
 } from '~/lib/surp/x402';
+import type { WalletConnections } from '~/utils/walletFamily';
 
 export interface FiddyWalletHomeProps {
   choice: WalletChoiceId;
@@ -104,7 +104,9 @@ export const FiddyWalletHome = memo(
     }, [home.address, requestTokens]);
 
     const payOnce = useCallback(async () => {
-      if (!offer) return;
+      if (!offer) {
+        return;
+      }
       // Two different nothings, said differently: no wallet wired into this
       // screen at all, versus a screen that can sign but nobody to sign with.
       if (!onSignTypedData) {
@@ -125,7 +127,9 @@ export const FiddyWalletHome = memo(
       });
       if (!prepared) {
         setPay({ status: 'idle' });
-        setNotice('Surp asked to be paid in something this wallet cannot sign.');
+        setNotice(
+          'Surp asked to be paid in something this wallet cannot sign.',
+        );
         return;
       }
       try {

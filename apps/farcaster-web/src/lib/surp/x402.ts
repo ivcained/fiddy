@@ -70,18 +70,24 @@ const hexAddress = (value: unknown): `0x${string}` | null =>
 /** Parse a 402 body. Anything unrecognised is refused, never guessed at. */
 export const parseX402Challenge = (payload: unknown): X402Challenge | null => {
   const body = asRecord(payload);
-  if (!body) return null;
+  if (!body) {
+    return null;
+  }
   const rows = Array.isArray(body.accepts) ? body.accepts : [];
   const offers: X402Offer[] = [];
   for (const row of rows) {
     const offer = asRecord(row);
-    if (!offer) continue;
+    if (!offer) {
+      continue;
+    }
     const network = str(offer.network);
     const asset = hexAddress(offer.asset);
     const amount = str(offer.amount);
     const payTo = hexAddress(offer.payTo);
     const scheme = str(offer.scheme);
-    if (!network || !asset || !amount || !payTo || !scheme) continue;
+    if (!network || !asset || !amount || !payTo || !scheme) {
+      continue;
+    }
     const extra = asRecord(offer.extra) ?? {};
     offers.push({
       scheme,
@@ -94,7 +100,9 @@ export const parseX402Challenge = (payload: unknown): X402Challenge | null => {
       description: str(extra.description),
     });
   }
-  if (offers.length === 0) return null;
+  if (offers.length === 0) {
+    return null;
+  }
   return {
     x402Version: num(body.x402Version) ?? 0,
     resource: str(body.resource),
@@ -103,9 +111,7 @@ export const parseX402Challenge = (payload: unknown): X402Challenge | null => {
 };
 
 /** The offer this client can actually satisfy: an exact USDC amount on Base. */
-export const selectBaseOffer = (
-  challenge: X402Challenge,
-): X402Offer | null =>
+export const selectBaseOffer = (challenge: X402Challenge): X402Offer | null =>
   challenge.offers.find(
     (offer) =>
       offer.scheme === 'exact' &&
@@ -195,9 +201,13 @@ export const preparePayment = ({
   nonce = freshNonce(),
 }: PreparePaymentInput): PreparedPayment | null => {
   const chainId = chainIdFrom(offer.network);
-  if (chainId === null) return null;
+  if (chainId === null) {
+    return null;
+  }
   const usd = atomicToUsd(offer.amount);
-  if (!Number.isFinite(usd) || usd <= 0) return null;
+  if (!Number.isFinite(usd) || usd <= 0) {
+    return null;
+  }
   // The offer's own timeout decides how long the authorization stands; a
   // missing or absurd value falls back to the ten minutes the live service
   // quotes rather than to something open-ended.
@@ -279,7 +289,9 @@ export const encodePaymentHeader = ({
   const json = JSON.stringify(payload);
   const bytes = new TextEncoder().encode(json);
   let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
   return btoa(binary);
 };
 
@@ -310,7 +322,9 @@ export const fetchPaymentOffer = async (
     { allow402: true },
   );
   const challenge = parseX402Challenge(payload);
-  if (!challenge) return null;
+  if (!challenge) {
+    return null;
+  }
   const offer = selectBaseOffer(challenge);
   return offer ? { challenge, offer } : null;
 };

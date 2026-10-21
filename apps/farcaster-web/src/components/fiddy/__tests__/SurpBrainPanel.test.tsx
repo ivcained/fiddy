@@ -19,11 +19,11 @@ import {
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import chat402 from '~/lib/surp/__tests__/fixtures/chat-402.json';
-import priceBoard from '~/lib/surp/__tests__/fixtures/price-board.json';
-import keyCreated from '~/lib/surp/__tests__/fixtures/key-created.json';
 import { SurpBrainPanel } from '~/components/fiddy/SurpBrainPanel';
 import { installFakeStorage } from '~/lib/__tests__/fakeStorage';
+import chat402 from '~/lib/surp/__tests__/fixtures/chat-402.json';
+import keyCreated from '~/lib/surp/__tests__/fixtures/key-created.json';
+import priceBoard from '~/lib/surp/__tests__/fixtures/price-board.json';
 import { parsePriceBoard, parseRequestQuote } from '~/lib/surp/pricing';
 import { SurpUnreachableError } from '~/lib/surp/transport';
 

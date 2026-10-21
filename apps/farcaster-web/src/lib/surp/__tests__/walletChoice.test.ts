@@ -16,8 +16,10 @@ import {
   shortAddress,
   WALLET_OPTIONS,
 } from '~/lib/surp/walletChoice';
-import { EMPTY_WALLET_CONNECTIONS } from '~/utils/walletFamily';
-import type { WalletConnections } from '~/utils/walletFamily';
+import {
+  EMPTY_WALLET_CONNECTIONS,
+  type WalletConnections,
+} from '~/utils/walletFamily';
 
 const BASE = '0x1111111111111111111111111111111111111111';
 
@@ -85,7 +87,11 @@ describe('the wallet home', () => {
       choice: 'farcaster',
       connections: {
         ...EMPTY_WALLET_CONNECTIONS,
-        solana: { status: 'connected', address: 'So1anaAddr', walletName: 'Phantom' },
+        solana: {
+          status: 'connected',
+          address: 'So1anaAddr',
+          walletName: 'Phantom',
+        },
       },
     });
     expect(home.canPay).toBe(false);

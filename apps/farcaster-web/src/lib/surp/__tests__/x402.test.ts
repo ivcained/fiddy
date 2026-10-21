@@ -14,19 +14,20 @@
 
 import { describe, expect, it } from 'vitest';
 
-import chat402 from './fixtures/chat-402.json';
 import {
   atomicToUsd,
   BASE_CAIP2,
   encodePaymentHeader,
   freshNonce,
   parseX402Challenge,
-  preparePayment,
   PAYMENT_HEADERS,
+  preparePayment,
   selectBaseOffer,
   USDC_BASE_ADDRESS,
   USDC_BASE_DOMAIN,
 } from '~/lib/surp/x402';
+
+import chat402 from './fixtures/chat-402.json';
 
 const challenge = parseX402Challenge(chat402)!;
 const offer = selectBaseOffer(challenge)!;
@@ -48,7 +49,10 @@ describe('reading the live offer', () => {
       x402Version: 2,
       accepts: [
         { ...chat402.accepts[0], network: 'eip155:84532' },
-        { ...chat402.accepts[0], asset: '0x0000000000000000000000000000000000000001' },
+        {
+          ...chat402.accepts[0],
+          asset: '0x0000000000000000000000000000000000000001',
+        },
       ],
     })!;
     expect(selectBaseOffer(other)).toBeNull();
@@ -96,7 +100,10 @@ describe('preparing the payment the owner signs', () => {
 
   it('takes the token name from the offer when the offer carries it', () => {
     const named = preparePayment({
-      offer: { ...offer, extra: { ...offer.extra, name: 'Bridged USDC', version: '1' } },
+      offer: {
+        ...offer,
+        extra: { ...offer.extra, name: 'Bridged USDC', version: '1' },
+      },
       from: FROM,
       nowSeconds: 1_800_000_000,
     })!;
@@ -111,9 +118,7 @@ describe('preparing the payment the owner signs', () => {
   });
 
   it('uses a fresh nonce every time, because EIP-3009 forbids reuse', () => {
-    const nonces = new Set(
-      Array.from({ length: 8 }, () => freshNonce()),
-    );
+    const nonces = new Set(Array.from({ length: 8 }, () => freshNonce()));
     expect(nonces.size).toBe(8);
     for (const nonce of nonces) {
       expect(nonce).toMatch(/^0x[0-9a-f]{64}$/);
@@ -139,10 +144,18 @@ describe('preparing the payment the owner signs', () => {
       }),
     ).toBeNull();
     expect(
-      preparePayment({ offer: { ...offer, amount: '0' }, from: FROM, nowSeconds: 0 }),
+      preparePayment({
+        offer: { ...offer, amount: '0' },
+        from: FROM,
+        nowSeconds: 0,
+      }),
     ).toBeNull();
     expect(
-      preparePayment({ offer: { ...offer, amount: 'free' }, from: FROM, nowSeconds: 0 }),
+      preparePayment({
+        offer: { ...offer, amount: 'free' },
+        from: FROM,
+        nowSeconds: 0,
+      }),
     ).toBeNull();
   });
 
@@ -172,9 +185,7 @@ describe('the request header, once the owner has signed', () => {
       prepared,
       signature,
     });
-    const decoded = JSON.parse(
-      Buffer.from(header, 'base64').toString('utf8'),
-    );
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'));
     expect(decoded.x402Version).toBe(2);
     expect(decoded.accepted.network).toBe(offer.network);
     expect(decoded.accepted.amount).toBe(offer.amount);
