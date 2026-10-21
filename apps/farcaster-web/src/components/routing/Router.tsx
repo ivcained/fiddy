@@ -411,6 +411,12 @@ const Router: React.FC = () => {
                 path={routes.sealed.path}
                 element={<routes.sealed.Component />}
               />
+              {/* Connecting an account that already exists. Signed out on
+                  purpose: the approval happens in Farcaster, not here. */}
+              <Route
+                path={routes.fiddyConnect.path}
+                element={<routes.fiddyConnect.Component />}
+              />
               {/* Unauthed Routes */}
               <Route
                 path={routes.news.path}

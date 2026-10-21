@@ -47,7 +47,11 @@ import { type EmbedKindResolver } from './embedKinds';
 import { classifyHostedRequest, type HostedRouteMatch } from './hostedRoutes';
 import { answerLocalDraftRequest, LocalDraftStore } from './localDrafts';
 import { mediaUploadUrl } from './mediaUpload';
-import { NodeBackedWrites, type WriteEvidence } from './nodeWrites';
+import {
+  type ManagedPoster,
+  NodeBackedWrites,
+  type WriteEvidence,
+} from './nodeWrites';
 import {
   castAuthorOf,
   channelParentUrlFor,
@@ -101,6 +105,14 @@ export interface NodeBackedFetchOptions {
    * without a browser.
    */
   getAppKeyHex?: (fid: number) => Promise<string | null>;
+  /**
+   * The posting key the person granted Fiddy in their own Farcaster app
+   * (`~/snapchain/accounts/managedConnect`), used *before* this device's own
+   * key. Defaults to that module; `null` turns the granted-key path off (a
+   * probe that must exercise the device key), and a fake is injectable so a
+   * test can drive a granted-key write without a network.
+   */
+  managedPoster?: ManagedPoster | null;
   /**
    * The server's plain name, used by the sentences a write's failures are
    * phrased in ("your node would not accept this like: …").
@@ -220,6 +232,31 @@ const jsonResponse = (payload: unknown, status = 200): Response =>
 const appKeyFromThisDevice = async (fid: number): Promise<string | null> => {
   const { loadAppKey } = await import('~/snapchain/appKeyStorage');
   return loadAppKey(fid);
+};
+
+/**
+ * The granted posting key, when this account has one: `~/snapchain/accounts/
+ * managedConnect`, imported on the same terms as the app key store above (only
+ * when a write actually happens). If that module cannot be loaded at all, the
+ * answer is "no granted key" — so the write falls back to this device's own key
+ * rather than failing, which is exactly what a build without the accounts
+ * surface should do.
+ */
+const grantedPosterFromThisDevice: ManagedPoster = {
+  available: async (fid: number): Promise<boolean> => {
+    try {
+      const { canWriteThroughConnect } =
+        await import('~/snapchain/accounts/managedConnect');
+      return await canWriteThroughConnect(fid);
+    } catch {
+      return false;
+    }
+  },
+  post: async (write) => {
+    const { writeThroughConnect } =
+      await import('~/snapchain/accounts/managedConnect');
+    return writeThroughConnect(write);
+  },
 };
 
 /**
@@ -396,6 +433,7 @@ export const createNodeBackedFetch = ({
   mediaUploadUrl: mediaUploadUrlOption,
   drafts: draftsOption,
   getAppKeyHex: getAppKeyHexOption,
+  managedPoster: managedPosterOption,
   nodeLabel = 'your node',
   onWriteEvidence,
   log: logOption,
@@ -491,6 +529,11 @@ export const createNodeBackedFetch = ({
       // get its answer.
       fetchImpl: boundFetch,
       getAppKeyHex: getAppKeyHexOption ?? appKeyFromThisDevice,
+      ...(managedPosterOption === null
+        ? {}
+        : {
+            managedPoster: managedPosterOption ?? grantedPosterFromThisDevice,
+          }),
       castAuthor: castAuthorOf,
       channelParentUrl: channelParentUrlFor,
       apiCastFor: (message) => reader.apiCastFor(message),

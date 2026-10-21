@@ -229,6 +229,43 @@ export interface WriteEvidence {
   refusal?: string;
 }
 
+/**
+ * The other way a write can be carried: by the posting key the person granted
+ * Fiddy in their own Farcaster app ("Connect your Farcaster account").
+ *
+ * When that exists, this device holds no key at all — the service that does
+ * holds it — and this interface is the whole of what this file knows about it:
+ * whether a connection exists *for this account*, and how to hand over one
+ * write. It is defined here, rather than imported from the accounts surface, so
+ * this module depends on nothing but the shape (and a test can pass three lines
+ * of fake).
+ */
+export interface ManagedWrite {
+  kind: 'cast' | 'reaction' | 'link';
+  text?: string;
+  /** The cast a reaction is about, by hash. */
+  castHash?: string;
+  reaction?: 'like' | 'recast';
+  /** `add` is a like/recast/follow; false undoes it. */
+  add?: boolean;
+  targetFid?: number;
+  parentHash?: string;
+  parentUrl?: string;
+  embeds?: string[];
+}
+
+export interface ManagedPoster {
+  /** Is there a granted posting key for *this* account, right now? */
+  available: (fid: number) => Promise<boolean>;
+  /** Hand one write over. A cast's hash comes back; other writes have none. */
+  post: (
+    write: ManagedWrite,
+  ) => Promise<
+    | { ok: true; hash: string | null }
+    | { ok: false; status: number; message: string }
+  >;
+}
+
 export interface NodeBackedWritesOptions {
   /** The node that will carry the message — the live provider's own address. */
   nodeBaseUrl: string;
@@ -264,6 +301,13 @@ export interface NodeBackedWritesOptions {
   sleep?: (ms: number) => Promise<void>;
   /** Where evidence of the write is recorded (the adapter's request log). */
   onEvidence?: (evidence: WriteEvidence) => void;
+  /**
+   * The granted posting key, when this account has one. Checked *before* the
+   * device's own key, because a person who connected their account never had to
+   * make one — and the sentence they would otherwise read ("issue an app key in
+   * Advanced") would be about a step they do not need.
+   */
+  managedPoster?: ManagedPoster;
 }
 
 /** Default deadline for one write, end to end (submit + read-back). */
@@ -309,6 +353,14 @@ export const NO_APP_KEY =
 /** The sentence for a write whose target's author this client has never seen. */
 export const UNKNOWN_CAST_AUTHOR =
   'A node addresses a cast by its author and its hash, and this client has not read who wrote this one. Open the cast from your feed or a profile first, then try again.';
+
+/**
+ * How a write carried by a *granted* posting key is named, in the evidence log
+ * and in the sentences a person reads. It is named as what it is to them — the
+ * thing they switched on — rather than as the endpoint it happens to be.
+ */
+const MANAGED_LABEL = 'The posting key you granted Fiddy';
+const MANAGED_BASE_URL = '/api/fiddy/connect/write';
 
 export class NodeBackedWrites {
   private readonly node: SnapchainNodeClient;
@@ -363,6 +415,13 @@ export class NodeBackedWrites {
       );
     }
 
+    // A granted posting key first: a person who connected their account holds no
+    // key here, and never needs to.
+    const managed = this.options.managedPoster;
+    if (managed !== undefined && (await managed.available(fid))) {
+      return this.viaManaged({ intent, fid, managed });
+    }
+
     const appKeyHex = await this.appKeyFor(fid);
     if (appKeyHex === null || appKeyHex.length === 0) {
       return errorResponse(501, NO_APP_KEY);
@@ -381,6 +440,306 @@ export class NodeBackedWrites {
     } catch (error) {
       return this.failureResponse(intent, error);
     }
+  }
+
+  // ------------------------------------------------------------- the writes
+
+  /**
+   * A write carried by the granted posting key.
+   *
+   * The three intents keep the same shapes, the same refusals and — the part
+   * that matters — the same read-back: after the service says the network took
+   * it, this client still asks the *node* whether the account's own state shows
+   * it, and says "accepted, not showing it yet" rather than "posted" when it
+   * does not. The one thing that changes is who signs: this device does not.
+   */
+  private async viaManaged({
+    intent,
+    fid,
+    managed,
+  }: {
+    intent: WriteIntent;
+    fid: number;
+    managed: ManagedPoster;
+  }): Promise<Response> {
+    try {
+      switch (intent.kind) {
+        case 'reaction':
+          return await this.reactionViaManaged({ intent, fid, managed });
+        case 'link':
+          return await this.linkViaManaged({ intent, fid, managed });
+        case 'cast':
+          return await this.castViaManaged({ intent, fid, managed });
+      }
+    } catch (error) {
+      const refusal = error instanceof Error ? error.message : String(error);
+      this.evidence({
+        node: MANAGED_LABEL,
+        nodeBaseUrl: MANAGED_BASE_URL,
+        accepted: false,
+        landed: null,
+        refusal,
+      });
+      return errorResponse(
+        502,
+        `${MANAGED_LABEL} failed on this write: ${refusal}`,
+      );
+    }
+  }
+
+  // -------------------------------------------------- writes: through the key
+  //                                                     the person granted us
+
+  private async reactionViaManaged({
+    intent,
+    fid,
+    managed,
+  }: {
+    intent: Extract<WriteIntent, { kind: 'reaction' }>;
+    fid: number;
+    managed: ManagedPoster;
+  }): Promise<Response> {
+    // The service addresses a cast by its hash alone, but the read-back below
+    // does not: a node addresses a cast by its author and its hash. So the
+    // author is still resolved *before* the write — never posted and then found
+    // unverifiable.
+    const targetFid = await this.authorOf(intent.castHash);
+    if (targetFid === undefined) {
+      return errorResponse(501, UNKNOWN_CAST_AUTHOR);
+    }
+
+    const answer = await managed.post({
+      kind: 'reaction',
+      castHash: intent.castHash,
+      reaction: intent.reaction,
+      add: intent.add,
+    });
+    if (!answer.ok) {
+      this.evidence({
+        node: MANAGED_LABEL,
+        nodeBaseUrl: MANAGED_BASE_URL,
+        accepted: false,
+        landed: null,
+        refusal: answer.message,
+      });
+      return errorResponse(answer.status, answer.message);
+    }
+
+    const readbackPath = '/v1/reactionsByCast';
+    const landed = await this.readBack(async () => {
+      const state = await this.reactionState({
+        targetFid,
+        castHash: intent.castHash,
+        reaction: intent.reaction,
+        fid,
+      });
+      if (state === 'unknown') {
+        return false;
+      }
+      return intent.add ? state === 'shown' : state === 'absent';
+    });
+
+    this.evidence({
+      node: MANAGED_LABEL,
+      nodeBaseUrl: MANAGED_BASE_URL,
+      messageType: intent.add
+        ? 'MESSAGE_TYPE_REACTION_ADD'
+        : 'MESSAGE_TYPE_REACTION_REMOVE',
+      accepted: true,
+      landed,
+      readbackPath,
+    });
+
+    if (!landed) {
+      return errorResponse(
+        502,
+        `${MANAGED_LABEL} took ${intent.add ? 'this' : 'the undo of this'} ${intent.reaction}, but a node is not showing it on that cast yet — so this client cannot say it landed.`,
+      );
+    }
+
+    if (!intent.add) {
+      return jsonResponse({ result: { success: true } });
+    }
+
+    return jsonResponse({
+      result: {
+        like: {
+          type: intent.reaction,
+          reactor: await this.reactorShape(fid),
+          timestamp: Date.now(),
+          castHash: intent.castHash,
+        },
+      },
+    });
+  }
+
+  private async linkViaManaged({
+    intent,
+    fid,
+    managed,
+  }: {
+    intent: Extract<WriteIntent, { kind: 'link' }>;
+    fid: number;
+    managed: ManagedPoster;
+  }): Promise<Response> {
+    const answer = await managed.post({
+      kind: 'link',
+      targetFid: intent.targetFid,
+      add: intent.add,
+    });
+    if (!answer.ok) {
+      this.evidence({
+        node: MANAGED_LABEL,
+        nodeBaseUrl: MANAGED_BASE_URL,
+        accepted: false,
+        landed: null,
+        refusal: answer.message,
+      });
+      return errorResponse(answer.status, answer.message);
+    }
+
+    const readbackPath = '/v1/linkById';
+    const landed = await this.readBack(async () => {
+      try {
+        await this.node.linkById({
+          fid,
+          targetFid: intent.targetFid,
+          linkType: 'follow',
+        });
+        return intent.add;
+      } catch (error) {
+        if (isMissingOnNode(error)) {
+          return !intent.add;
+        }
+        throw error;
+      }
+    });
+
+    this.evidence({
+      node: MANAGED_LABEL,
+      nodeBaseUrl: MANAGED_BASE_URL,
+      messageType: intent.add
+        ? 'MESSAGE_TYPE_LINK_ADD'
+        : 'MESSAGE_TYPE_LINK_REMOVE',
+      accepted: true,
+      landed,
+      readbackPath,
+    });
+
+    if (!landed) {
+      return errorResponse(
+        502,
+        `${MANAGED_LABEL} took ${intent.add ? 'this follow' : 'this unfollow'}, but a node is not showing it yet — so this client cannot say it landed.`,
+      );
+    }
+
+    return jsonResponse({
+      result: { success: true, userAppContext: { canAddLinks: true } },
+    });
+  }
+
+  private async castViaManaged({
+    intent,
+    fid,
+    managed,
+  }: {
+    intent: Extract<WriteIntent, { kind: 'cast' }>;
+    fid: number;
+    managed: ManagedPoster;
+  }): Promise<Response> {
+    if (intent.text.trim().length === 0) {
+      return errorResponse(400, 'A cast needs some text.');
+    }
+
+    let parentUrl = intent.parentUrl;
+    if (parentUrl === undefined && intent.channelKey !== undefined) {
+      parentUrl = this.options.channelParentUrl?.(intent.channelKey);
+      if (parentUrl === undefined) {
+        return errorResponse(
+          501,
+          `This build cannot work out which channel “${intent.channelKey}” is, so it did not post a cast to it. Posting it without the channel would put it somewhere else.`,
+        );
+      }
+    }
+
+    const answer = await managed.post({
+      kind: 'cast',
+      text: intent.text,
+      ...(intent.parentHash === undefined
+        ? {}
+        : { parentHash: intent.parentHash }),
+      ...(parentUrl === undefined ? {} : { parentUrl }),
+      embeds: intent.embeds,
+    });
+    if (!answer.ok) {
+      this.evidence({
+        node: MANAGED_LABEL,
+        nodeBaseUrl: MANAGED_BASE_URL,
+        accepted: false,
+        landed: null,
+        refusal: answer.message,
+      });
+      return errorResponse(answer.status, answer.message);
+    }
+
+    if (answer.hash === null) {
+      // Without the hash there is no read-back and no shape to render: the
+      // network took it, and this client cannot point at what it took.
+      this.evidence({
+        node: MANAGED_LABEL,
+        nodeBaseUrl: MANAGED_BASE_URL,
+        accepted: true,
+        landed: null,
+      });
+      return errorResponse(
+        502,
+        `${MANAGED_LABEL} took this cast but did not say which cast it is, so this client cannot confirm it is there. Open your profile to see it.`,
+      );
+    }
+
+    const readbackPath = '/v1/castById';
+    let stored: NodeMessage | undefined;
+    const landed = await this.readBack(async () => {
+      try {
+        stored = await this.node.castById({ fid, hash: answer.hash as string });
+        return true;
+      } catch (error) {
+        if (isMissingOnNode(error)) {
+          return false;
+        }
+        throw error;
+      }
+    });
+
+    this.evidence({
+      node: MANAGED_LABEL,
+      nodeBaseUrl: MANAGED_BASE_URL,
+      messageType: stored?.type ?? 'MESSAGE_TYPE_CAST_ADD',
+      messageHash: answer.hash,
+      accepted: true,
+      landed,
+      readbackPath,
+    });
+
+    if (!landed) {
+      return errorResponse(
+        502,
+        `${MANAGED_LABEL} accepted this cast, but a node is not showing it yet — so this client cannot say it posted.`,
+      );
+    }
+
+    const cast =
+      this.options.apiCastFor && stored !== undefined
+        ? await this.options.apiCastFor(stored)
+        : undefined;
+    if (cast === undefined) {
+      return errorResponse(
+        502,
+        `${MANAGED_LABEL} accepted this cast — but this build could not turn the stored message back into a cast to show you. Reload to see it.`,
+      );
+    }
+
+    return jsonResponse({ result: { cast } });
   }
 
   // ------------------------------------------------------------- the writes
