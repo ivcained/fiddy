@@ -35,7 +35,18 @@
  *   VITE_FIDDY_MEDIA_URL=http://localhost:3217 npx vite --port 5174
  *
  * Nothing secret lives here: the client knows a URL, never a key.
+ *
+ * WHAT DOES NOT LEAVE THE DEVICE
+ *
+ * The bytes are prepared before they are sent: a photo is re-encoded (≤2048px
+ * JPEG) and a video's location/device boxes are overwritten, so the picture
+ * reaches the host and the camera's metadata does not. See `./photoPrivacy` for
+ * what that does and does not cover. A file nothing can be done to is still
+ * sent — an unscrubbable photo is not a reason to lose somebody's post — and the
+ * result says whether anything was changed.
  */
+
+import { type ScrubEnvironment, scrubForUpload } from './photoPrivacy';
 
 export const MEDIA_UPLOAD_PATH = '/api/fiddy/media';
 
@@ -111,6 +122,12 @@ export interface UploadedMedia {
   contentType: string;
   ext: string;
   deduped: boolean;
+  /**
+   * What was taken out of the file on the way out: `re-encoded` for a photo,
+   * `metadata-stripped` for a video, `unchanged` when there was nothing this
+   * client knows how to remove (or the file was already safe).
+   */
+  privacy: 're-encoded' | 'metadata-stripped' | 'unchanged';
 }
 
 interface MediaEndpointReply {
@@ -135,14 +152,24 @@ export const uploadMedia = async ({
   file,
   uploadUrl,
   fetchImpl = fetch,
+  environment,
+  scrub = true,
 }: {
   file: File;
   /** Defaults to this build's media host. */
   uploadUrl?: string;
   fetchImpl?: typeof fetch;
+  /** The browser pieces the re-encode needs; a test supplies its own. */
+  environment?: ScrubEnvironment;
+  /** Off only for a caller that has already prepared the bytes itself. */
+  scrub?: boolean;
 }): Promise<UploadedMedia> => {
+  const prepared = scrub
+    ? await scrubForUpload({ file, environment })
+    : { file: file as Blob, changed: false };
+
   const body = new FormData();
-  body.append('file', file, file.name);
+  body.append('file', prepared.file, file.name);
 
   let response: Response;
   try {
@@ -172,9 +199,14 @@ export const uploadMedia = async ({
   return {
     url: reply.url,
     sha256: reply.sha256 ?? '',
-    bytes: typeof reply.bytes === 'number' ? reply.bytes : file.size,
-    contentType: reply.contentType ?? file.type,
+    bytes: typeof reply.bytes === 'number' ? reply.bytes : prepared.file.size,
+    contentType: reply.contentType ?? prepared.file.type ?? file.type,
     ext: reply.ext ?? '',
     deduped: Boolean(reply.deduped),
+    privacy: !prepared.changed
+      ? 'unchanged'
+      : /^image\//.test(prepared.file.type)
+        ? 're-encoded'
+        : 'metadata-stripped',
   };
 };
