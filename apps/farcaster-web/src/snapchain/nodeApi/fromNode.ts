@@ -10,8 +10,15 @@
  *
  * WHAT IS HONEST HERE, AND WHAT IS A FLOOR
  *
- * - Text, timestamps, embeds, mentions, the author's handle / display name /
- *   avatar / bio and the reply graph are protocol messages: exact.
+ * - Text, timestamps, embeds, the author's handle / display name / avatar / bio
+ *   and the reply graph are protocol messages: exact.
+ * - A cast's mentions are exact as FIDs and *read* as handles. The protocol
+ *   stores a placeholder where each handle belongs and names the position in
+ *   bytes (`mentions` + `mentionsPositions`); the handle itself is the mentioned
+ *   account's own user data, so a mention is only rendered once that account has
+ *   been read. With no profile the fid floor stands and the text keeps its
+ *   placeholder — never an invented handle, and never one tagged person shown
+ *   where the cast names five.
  * - Which bucket an embed lands in is *measured*, not exact: the protocol sends
  *   a bare URL, so the URL's own media type is asked for over the network
  *   (`embedKinds.ts`, one bounded probe per URL, cached). A URL nothing can
@@ -41,10 +48,11 @@ import {
   ApiQuoteCastEmbed,
   ApiUser,
 } from 'farcaster-client-data';
-import type {
-  NodeCastAddBody,
-  NodeMessage,
-  NodeUserDataBody,
+import {
+  type NodeCastAddBody,
+  type NodeMessage,
+  type NodeUserDataBody,
+  utf8ByteLength,
 } from 'farcaster-node-client';
 
 import { type EmbedKindAnswer, embedKindFromExtension } from './embedKinds';
@@ -270,6 +278,137 @@ export const castEmbedsFromNode = ({
   };
 };
 
+/**
+ * A mentioned account whose user data has not been read: the fid, said as a
+ * fid. The renderer degrades to this rather than to a wrong name.
+ */
+export const mentionFloorUser = (fid: number): ApiUser => ({
+  fid,
+  displayName: `fid ${fid}`,
+  followerCount: 0,
+  followingCount: 0,
+  profile: { bio: { text: '', mentions: [] } },
+});
+
+const HANDLE_CHARACTER = /[a-zA-Z0-9_.-]/;
+
+/**
+ * True when the text at `index` already reads `@username` — a whole handle, not
+ * the start of a longer one (`@ivc` is not found in `@ivc2`).
+ */
+const alreadyNamesHandle = ({
+  text,
+  index,
+  username,
+}: {
+  text: string;
+  index: number;
+  username: string;
+}): boolean => {
+  const written = text.slice(index, index + username.length + 1);
+  if (written.toLowerCase() !== `@${username.toLowerCase()}`) {
+    return false;
+  }
+  const after = text.charAt(index + username.length + 1);
+  return after === '' || !HANDLE_CHARACTER.test(after);
+};
+
+/** Byte offset → index into the JS string, or undefined if it lands nowhere. */
+const indexesByByteOffset = (text: string): Map<number, number> => {
+  // The protocol counts mentions in *bytes*; a JS string is indexed in UTF-16
+  // units. The two agree only while the text is ASCII — an emoji is four bytes
+  // and two units, which is the difference that shifts every later mention.
+  const byByte = new Map<number, number>();
+  let bytes = 0;
+  let index = 0;
+  for (const character of text) {
+    byByte.set(bytes, index);
+    bytes += utf8ByteLength(character);
+    index += character.length;
+  }
+  // The protocol allows a position at the very end of the text (a mention typed
+  // last), so the end offset is a legal place to insert.
+  byByte.set(bytes, index);
+  return byByte;
+};
+
+export interface CastTextWithMentionsOptions {
+  text: string;
+  /** The mentioned FIDs, in the cast's own order. */
+  mentions: number[];
+  /** Each mention's position in the text, in UTF-8 bytes. */
+  mentionsPositions: number[];
+  /** What each mentioned fid's handle is, once it has been read. */
+  mentionUsers?: ReadonlyMap<number, ApiUser>;
+}
+
+/**
+ * A cast's text with its mentions rendered in, the way every Farcaster client
+ * renders them.
+ *
+ * MEASURED (protocol spec + a live node, 2026-10-21): the stored text does *not*
+ * contain the handles. Each mention leaves a placeholder character where the
+ * handle belongs — usually a space — and `mentionsPositions` says where, in
+ * bytes. "🤓@farcaster can mention immediately after emoji" is stored as
+ * `🤓 can mention immediately after emoji` with position `4`. So a client that
+ * does not render mentions shows raw placeholders: a cast tagging six people
+ * reads as six spaces. That is the bug this closes.
+ *
+ * The rule here is insertion at the position, from the last mention backwards so
+ * earlier byte offsets stay valid: the placeholder stays as the separator, which
+ * is what the stored text was written to do ("Looking forward to  finally" +
+ * `@dwr` at byte 19 reads "Looking forward to @dwr finally"). Two floors are
+ * deliberate and both keep the cast readable:
+ *
+ *   - a mention with no resolved handle inserts nothing, so its placeholder
+ *     stays and the mention list carries the fid;
+ *   - a cast whose own text already writes the handle at that position is left
+ *     alone. MEASURED in the wild (1 of 50 successive mention-casts on a live
+ *     node): some bots write "@ivc" into the text *and* register the mention, and
+ *     inserting again would read "@ivcivc".
+ *
+ * A position outside the text (also measured in the wild: 9 of 50 successive
+ * mention-casts on that node carry one) inserts nothing rather than throwing —
+ * the mention still appears in the mention list.
+ */
+export const castTextWithMentions = ({
+  text,
+  mentions,
+  mentionsPositions,
+  mentionUsers,
+}: CastTextWithMentionsOptions): string => {
+  if (mentions.length === 0) {
+    return text;
+  }
+
+  const indexByByte = indexesByByteOffset(text);
+  const insertions = mentions
+    .map((fid, mention) => ({
+      fid,
+      byteOffset: mentionsPositions[mention],
+    }))
+    .flatMap(({ fid, byteOffset }) => {
+      const index =
+        typeof byteOffset === 'number'
+          ? indexByByte.get(byteOffset)
+          : undefined;
+      const username = mentionUsers?.get(fid)?.username;
+      return index === undefined || !username ? [] : [{ index, username }];
+    })
+    // Backwards, so each insertion happens at the offset the protocol named.
+    .sort((a, b) => b.index - a.index);
+
+  let rendered = text;
+  for (const { index, username } of insertions) {
+    if (alreadyNamesHandle({ text: rendered, index, username })) {
+      continue;
+    }
+    rendered = `${rendered.slice(0, index)}@${username}${rendered.slice(index)}`;
+  }
+
+  return rendered;
+};
+
 export interface ApiCastFromNodeOptions {
   message: NodeMessage;
   body: NodeCastAddBody;
@@ -285,6 +424,13 @@ export interface ApiCastFromNodeOptions {
   viewerContext?: ApiCast['viewerContext'];
   /** What the caller has already learned about embed URLs (see embedKinds). */
   embedKind?: (url: string) => EmbedKindAnswer | undefined;
+  /**
+   * The profile of every account this cast mentions, by fid. The caller reads
+   * these (one batched `userDataByFid` per page — see `reads.ts`), because a
+   * mention's handle is not in the cast: it is the mentioned account's own user
+   * data. A fid with no entry keeps the fid floor.
+   */
+  mentionUsers?: ReadonlyMap<number, ApiUser>;
 }
 
 /**
@@ -306,14 +452,25 @@ export const apiCastFromNode = ({
   quotedCasts,
   viewerContext,
   embedKind,
+  mentionUsers,
 }: ApiCastFromNodeOptions): ApiCast => {
   const { embeds } = castEmbedsFromNode({ body, quotedCasts, embedKind });
+
+  // A cast's mentions are rendered into its text (see castTextWithMentions) and
+  // listed as profiles. Both halves need the mentioned accounts' own user data,
+  // which the caller read; a fid it could not read stays a fid.
+  const text = castTextWithMentions({
+    text: body.text,
+    mentions: body.mentions,
+    mentionsPositions: body.mentionsPositions,
+    ...(mentionUsers ? { mentionUsers } : {}),
+  });
 
   const cast: ApiCast = {
     hash: message.hash,
     threadHash: threadHash ?? message.hash,
     author,
-    text: body.text,
+    text,
     timestamp: message.timestampMs,
     replies: {
       count: replies?.count ?? 0,
@@ -342,15 +499,13 @@ export const apiCastFromNode = ({
     }
   }
   if (body.mentions.length > 0) {
-    // The protocol carries mentioned FIDs, not their handles. Only FIDs are
-    // claimed here; the renderer degrades to `fid N` rather than a wrong name.
-    cast.mentions = body.mentions.map((fid) => ({
-      fid,
-      displayName: `fid ${fid}`,
-      followerCount: 0,
-      followingCount: 0,
-      profile: { bio: { text: '', mentions: [] } },
-    }));
+    // Every mentioned FID gets an entry: the profile the caller read, or the fid
+    // floor. The text above was rendered from the same profiles, so the handle a
+    // reader sees, the profile a popover opens and the fid the protocol names are
+    // one account — never only the viewer's.
+    cast.mentions = body.mentions.map(
+      (fid) => mentionUsers?.get(fid) ?? mentionFloorUser(fid),
+    );
   }
   if (ancestors) {
     cast.ancestors = ancestors;

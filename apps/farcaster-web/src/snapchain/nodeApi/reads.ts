@@ -381,6 +381,52 @@ export class NodeBackedReads {
     }
   }
 
+  /**
+   * The profiles of the accounts a read's casts mention.
+   *
+   * A cast's mentions are FIDs, and the handle that belongs where each one sits
+   * in the text is the mentioned account's own user data — so every tagged
+   * account has to be read, not only the signed-in one. Asked for together and
+   * deduped: a page asks once per distinct FID and shares the authors' cache and
+   * in-flight reads, so a cast that tags six people is six reads for the whole
+   * page, not six on every re-render.
+   *
+   * A FID the node cannot answer for is left out of the map rather than failing
+   * the read: the cast then renders the fid floor for it and the rest of the page
+   * is unaffected.
+   */
+  private async resolveMentionUsers(
+    mentionedFids: number[],
+  ): Promise<Map<number, ApiUser>> {
+    const distinct = [...new Set(mentionedFids)];
+    if (distinct.length === 0) {
+      return new Map();
+    }
+
+    const read = await mapWithConcurrency(
+      distinct,
+      RESOLVE_CONCURRENCY,
+      async (fid) => {
+        try {
+          return [fid, await this.readUser(fid)] as const;
+        } catch {
+          return undefined;
+        }
+      },
+    );
+
+    return new Map(
+      read.filter(
+        (entry): entry is readonly [number, ApiUser] => entry !== undefined,
+      ),
+    );
+  }
+
+  /** Every FID a set of casts mentions, page order preserved. */
+  private static mentionedFidsOf(messages: NodeMessage[]): number[] {
+    return messages.flatMap((message) => message.castAdd?.mentions ?? []);
+  }
+
   private async isFollowing({
     viewerFid,
     targetFid,
@@ -577,6 +623,7 @@ export class NodeBackedReads {
     replies,
     withCounts = true,
     embedsAsked = false,
+    mentionUsers,
   }: {
     message: NodeMessage;
     likedHashes?: Set<string>;
@@ -592,6 +639,13 @@ export class NodeBackedReads {
      * wait per read, not one per cast.
      */
     embedsAsked?: boolean;
+    /**
+     * The mentioned accounts' profiles, when the caller already read them for a
+     * whole page (`buildCasts`, `readThread`). A cast built on its own — the
+     * reply a notification names, the cast a write just stored — reads its own
+     * mentions instead, so no path renders bare placeholders.
+     */
+    mentionUsers?: Map<number, ApiUser>;
   }): Promise<ApiCast | undefined> {
     const body = message.castAdd;
     if (!body) {
@@ -609,7 +663,12 @@ export class NodeBackedReads {
       }
     }
 
-    const [author, reactions, recasts] = await Promise.all([
+    const mentionUsersPromise =
+      mentionUsers !== undefined
+        ? Promise.resolve(mentionUsers)
+        : this.resolveMentionUsers(body.mentions);
+
+    const [author, reactions, recasts, mentioned] = await Promise.all([
       this.readUser(message.fid),
       withCounts
         ? this.countReactions({
@@ -625,6 +684,7 @@ export class NodeBackedReads {
             reactionType: 'Recast',
           })
         : Promise.resolve(exactCount(0)),
+      mentionUsersPromise,
     ]);
 
     // Quoted casts are resolved for real (they address their parent), so a
@@ -669,6 +729,7 @@ export class NodeBackedReads {
       recasts,
       quotedCasts: quoted.filter((cast) => cast !== undefined),
       embedKind: this.embedKindLookup,
+      mentionUsers: mentioned,
       ...(viewerContext && Object.keys(viewerContext).length > 0
         ? { viewerContext }
         : {}),
@@ -687,6 +748,12 @@ export class NodeBackedReads {
     // The page's embed URLs are asked about together, before any cast is built:
     // a photo is drawn as a photo on the first paint rather than after a reload.
     await this.classifyEmbeds(messages);
+    // ...and so is every account the page mentions, for the same reason: a
+    // mention is drawn as a handle on the first paint, once per distinct FID for
+    // the whole page rather than once per cast.
+    const mentionUsers = await this.resolveMentionUsers(
+      NodeBackedReads.mentionedFidsOf(messages),
+    );
     const [likedHashes, recastHashes] = withViewer
       ? await Promise.all([
           this.viewerReactionHashes('Like'),
@@ -704,6 +771,7 @@ export class NodeBackedReads {
           recastHashes,
           withCounts,
           embedsAsked: true,
+          mentionUsers,
         }),
     );
 
@@ -942,6 +1010,10 @@ export class NodeBackedReads {
     ]);
 
     const castMessages = [...ancestors, root, ...replies];
+    // One batch of profiles for every account the thread's casts mention.
+    const mentionUsers = await this.resolveMentionUsers(
+      NodeBackedReads.mentionedFidsOf(castMessages),
+    );
     const built = await mapWithConcurrency(
       castMessages,
       RESOLVE_CONCURRENCY,
@@ -950,6 +1022,7 @@ export class NodeBackedReads {
           message,
           likedHashes,
           recastHashes,
+          mentionUsers,
           threadHash: ancestors[0]?.hash ?? root.hash,
           ...(message.hash === root.hash
             ? {
