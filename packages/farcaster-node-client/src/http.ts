@@ -280,6 +280,39 @@ export class SnapchainNodeClient {
     );
   }
 
+  /**
+   * `GET /v1/linkById` — one follow (or other link) edge, and the cheapest way
+   * to ask "does this account follow that one?".
+   *
+   * The node answers with the edge only while the ADD is the account's latest
+   * message for that target: after a `LINK_REMOVE` merges, this route answers
+   * 400 with `NotFound` in its detail rather than an empty 200. MEASURED
+   * (2026-10-21, both a public read node and Neynar's node):
+   *
+   *   200 {"data":{"type":"MESSAGE_TYPE_LINK_ADD","fid":3,…}}   for a real edge
+   *   400 {"error":"Failed to get link",
+   *        "error_detail":"status: NotFound, message: \"cast not found\""}
+   *
+   * A caller that is testing a state ("has my follow landed?") has to read the
+   * 400 as "no", not as a failed request — see `isNotFound` in errors.ts.
+   */
+  async linkById(
+    options: {
+      fid: number;
+      targetFid: number;
+      linkType?: string;
+    },
+  ): Promise<NodeMessage> {
+    const json = await this.request(
+      `/v1/linkById${buildQuery({
+        fid: options.fid,
+        target_fid: options.targetFid,
+        link_type: options.linkType,
+      })}`,
+    );
+    return decodeNodeMessageSafe(json);
+  }
+
   async linksByTargetFid(
     options: { targetFid: number; linkType?: string } & PageOptions,
   ): Promise<NodeMessagesPage> {

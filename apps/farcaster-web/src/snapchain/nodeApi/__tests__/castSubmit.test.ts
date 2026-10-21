@@ -80,10 +80,11 @@ describe('pressing Cast with the node-backed client', () => {
         path: '/~api/v2/draft-casts',
       }),
     ).toMatchObject({ kind: 'local', path: '/v2/draft-casts' });
-    // …and the submit itself as the one endpoint this client cannot serve.
+    // …and the submit itself as a write this client really makes: signed here
+    // with the account's own app key and handed to a node (`nodeWrites.ts`).
     expect(
       classifyHostedRequest({ method: 'POST', path: '/~api/v2/casts' }),
-    ).toMatchObject({ kind: 'hosted', path: '/v2/casts' });
+    ).toMatchObject({ kind: 'write', path: '/v2/casts' });
   });
 
   it('stores the pre-publish draft on the device and answers 200, not 501', async () => {
@@ -112,7 +113,7 @@ describe('pressing Cast with the node-backed client', () => {
     });
   });
 
-  it('reaches POST /v2/casts and is refused there in plain words', async () => {
+  it('reaches POST /v2/casts and is refused with the one step that is missing', async () => {
     const { fetch: nodeBackedFetch, nodeFetch, log } = buildHarness();
 
     const response = await nodeBackedFetch(
@@ -123,16 +124,17 @@ describe('pressing Cast with the node-backed client', () => {
     expect(response.status).toBe(501);
     const message = await messageOf(response);
     // The sentence the composer shows after "The cast didn't post." — it names
-    // the real missing piece, and claims nothing was sent.
-    expect(message).toContain('app key');
+    // the one step the reader can take ("Issue app key", on Advanced) and claims
+    // nothing was sent.
+    expect(message).toContain('Issue app key');
     expect(message).toContain('nothing was signed and nothing was sent');
-    // The node was never asked to write: a Snapchain read node has no such call
-    // here, and a probe must not see a request leave for one.
+    // Nothing was signed and nothing was submitted: without a key this device
+    // cannot make a message at all, and a probe must not see one leave.
     expect(nodeFetch).not.toHaveBeenCalled();
     expect(log.at(-1)).toMatchObject({
       method: 'POST',
       path: '/~api/v2/casts',
-      kind: 'hosted',
+      kind: 'write',
       status: 501,
     });
   });
@@ -146,9 +148,7 @@ describe('pressing Cast with the node-backed client', () => {
 
     // What the composer's own copy does with it.
     const shown = `The cast didn't post. ${asSentence(await messageOf(response))}`;
-    expect(shown).toMatch(
-      /^The cast didn't post\. Sending a cast means signing/,
-    );
+    expect(shown).toMatch(/^The cast didn't post\. This device has no key/);
     expect(shown.endsWith('.')).toBe(true);
   });
 

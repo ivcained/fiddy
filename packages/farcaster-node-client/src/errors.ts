@@ -76,6 +76,25 @@ export class MessageBuildError extends Error {
 export const isNodeApiError = (error: unknown): error is NodeApiError =>
   error instanceof NodeApiError;
 
+/**
+ * Is this failure the node saying "there is nothing there", rather than "that
+ * request was wrong"?
+ *
+ * Two shapes, both MEASURED (2026-10-21, a public read node and Neynar's node,
+ * on a real mainnet state):
+ *
+ *   - a 404 — the route or the object does not exist;
+ *   - a **400 whose detail says `NotFound`** — `/v1/linkById` answers
+ *     `status: NotFound, message: "cast not found"` for an edge that is not in
+ *     the merged state. A writer testing a state ("has my unfollow landed?")
+ *     has to read that as "no", or it would report a request that worked as a
+ *     request that failed.
+ */
+export const isMissingOnNode = (error: unknown): boolean =>
+  isNodeApiError(error) &&
+  (error.status === 404 ||
+    /not.?found/i.test(`${error.nodeError} ${error.nodeErrorDetail ?? ''}`));
+
 export const isNodeUnreachableError = (
   error: unknown,
 ): error is NodeUnreachableError => error instanceof NodeUnreachableError;

@@ -24,13 +24,20 @@
  *   through would silently mix two data sources and hand the user someone
  *   else's session requirement half way through a page.
  *
- * THE ONE WRITE IT ANSWERS
+ * THE WRITES IT ANSWERS
  *
- * `POST /v1/generate-image-upload-url` is the media pipeline, not a read. The
- * answer names our own media host (`mediaUploadUrl`, see `mediaUpload.ts`),
- * which really stores the bytes; the composer then uploads to it and keeps the
- * URL it gets back. Everything else about media that belongs to Warpcast's
- * pipeline (video transcoding, attachment resolution) still says so.
+ * Two, and neither is a read:
+ *
+ * - `POST /v1/generate-image-upload-url` is the media pipeline. The answer names
+ *   our own media host (`mediaUploadUrl`, see `mediaUpload.ts`), which really
+ *   stores the bytes; the composer then uploads to it and keeps the URL it gets
+ *   back. Everything else about media that belongs to Warpcast's pipeline (video
+ *   transcoding, attachment resolution) still says so.
+ * - every route in `hostedRoutes.ts`'s `write` table — the heart, the recast
+ *   action, Follow/Unfollow and the composer's Cast. They are answered by
+ *   `nodeWrites.ts`, which builds the protocol message, signs it with this
+ *   device's app key, submits it to the node, and reads the node's own state
+ *   back before it says the write landed.
  */
 
 import { type FetchLike, SnapchainNodeClient } from 'farcaster-node-client';
@@ -38,7 +45,13 @@ import { type FetchLike, SnapchainNodeClient } from 'farcaster-node-client';
 import { classifyHostedRequest, type HostedRouteMatch } from './hostedRoutes';
 import { answerLocalDraftRequest, LocalDraftStore } from './localDrafts';
 import { mediaUploadUrl } from './mediaUpload';
-import { NodeBackedReads, NodeCannotAnswerError } from './reads';
+import { NodeBackedWrites, type WriteEvidence } from './nodeWrites';
+import {
+  castAuthorOf,
+  channelParentUrlFor,
+  NodeBackedReads,
+  NodeCannotAnswerError,
+} from './reads';
 
 export interface NodeBackedFetchOptions {
   /** The node's base URL, already resolved (proxy path in the browser). */
@@ -65,6 +78,24 @@ export interface NodeBackedFetchOptions {
    * storage of its own (the test runner has no `window`).
    */
   drafts?: LocalDraftStore;
+  /**
+   * The app key this device signs writes with, per account. Defaults to the
+   * store the one-time "Issue app key" step writes to
+   * (`~/snapchain/appKeyStorage`); injectable so a test can drive a write
+   * without a browser.
+   */
+  getAppKeyHex?: (fid: number) => Promise<string | null>;
+  /**
+   * The server's plain name, used by the sentences a write's failures are
+   * phrased in ("your node would not accept this like: …").
+   */
+  nodeLabel?: string;
+  /**
+   * Where a write records what it submitted and whether the node's state showed
+   * it. Defaults to the request log below, so a probe reads it from the same
+   * place it reads everything else.
+   */
+  onWriteEvidence?: (evidence: WriteEvidence) => void;
   /**
    * Where this adapter appends what it classified. Defaults to an array of its
    * own. The provider layer passes one shared sink here so that whichever layer
@@ -133,12 +164,10 @@ const errorResponse = (status: number, message: string): Response =>
  * The answer every `hosted` route gets: the hosted API's error envelope with the
  * classification's own sentence, which the UI shows as written.
  *
- * Exported because one of those routes is answered by the provider seam as well
- * as by this adapter — `POST /v2/casts`, whose refusal must read the same
- * whichever server is answering today's feed. A provider's generic write guard
- * ("Farcaster's own public server does not take writes from this client. Posting
- * goes through your node (or ours) instead") names a way to post that this
- * client does not have yet; the classification's sentence names the real one.
+ * Exported because one of those routes used to be answered by the provider seam
+ * as well as by this adapter — `POST /v2/casts`, which is now a real write
+ * (`nodeWrites.ts`) rather than a refusal. The export stays because a provider
+ * that cannot take writes still refuses in this shape, and a test asserts it.
  */
 export const hostedRefusal = (route: HostedRouteMatch): Response =>
   errorResponse(501, route.why);
@@ -148,6 +177,21 @@ const jsonResponse = (payload: unknown, status = 200): Response =>
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
+
+/**
+ * Where this device's app key lives — loaded only when a write actually
+ * happens.
+ *
+ * Dynamic on purpose: the key store is `localforage`-backed browser storage,
+ * and a *read* has no business pulling a storage engine into the module graph.
+ * A build with no key store at all (a test runner, an odd browser) then fails
+ * inside one write's answer — as a sentence about the key — instead of taking
+ * the whole client down at import time.
+ */
+const appKeyFromThisDevice = async (fid: number): Promise<string | null> => {
+  const { loadAppKey } = await import('~/snapchain/appKeyStorage');
+  return loadAppKey(fid);
+};
 
 /**
  * Protocol limits, not server data: these are the Farcaster cast limits and the
@@ -243,6 +287,13 @@ export interface RequestLogEntry {
    * submitted. Only kept when the debug surface is on; never sent anywhere.
    */
   bodyPreview?: string;
+  /**
+   * For a write: what was signed, which server was asked to carry it, and
+   * whether that server's own state showed it afterwards. This is the evidence a
+   * probe reads — a node's ack alone is not evidence that anything happened
+   * (see `nodeWrites.ts`). Never sent anywhere.
+   */
+  write?: WriteEvidence;
 }
 
 export interface NodeBackedFetchHandle {
@@ -313,6 +364,9 @@ export const createNodeBackedFetch = ({
   readTimeoutMs = NODE_READ_TIMEOUT_MS,
   mediaUploadUrl: mediaUploadUrlOption,
   drafts: draftsOption,
+  getAppKeyHex: getAppKeyHexOption,
+  nodeLabel = 'your node',
+  onWriteEvidence,
   log: logOption,
 }: NodeBackedFetchOptions): NodeBackedFetchHandle => {
   const nodeFetch = fetchImpl ?? fetch;
@@ -385,9 +439,38 @@ export const createNodeBackedFetch = ({
   // browser storage, so both layers read the same drafts.
   const drafts = draftsOption ?? new LocalDraftStore();
 
+  /**
+   * A writer for one write — wired to that write's own request-log entry.
+   *
+   * Built per write rather than once per adapter on purpose: the evidence
+   * ("this is the message that was signed, this is the server that was asked,
+   * this is whether its state showed it") belongs to one request, and a probe
+   * reads it next to the request it came from. Writes are user actions, so the
+   * construction is not on any hot path, and it keeps the writer free of state
+   * that two overlapping writes could mix up.
+   */
+  const writerFor = (entry: RequestLogEntry): NodeBackedWrites =>
+    new NodeBackedWrites({
+      nodeBaseUrl,
+      nodeLabel,
+      // The write carries its own deadline (the node client's), so it is not
+      // put under the read deadline here: a read must fail fast, a write must
+      // get its answer.
+      fetchImpl: boundFetch,
+      getAppKeyHex: getAppKeyHexOption ?? appKeyFromThisDevice,
+      castAuthor: castAuthorOf,
+      channelParentUrl: channelParentUrlFor,
+      apiCastFor: (message) => reader.apiCastFor(message),
+      onEvidence: (evidence) => {
+        entry.write = evidence;
+        onWriteEvidence?.(evidence);
+      },
+    });
+
   const answer = async (
     { url, method, body }: ParsedRequest,
     route: HostedRouteMatch,
+    entry: RequestLogEntry,
   ): Promise<Response> => {
     const searchParams = url.searchParams;
 
@@ -397,6 +480,17 @@ export const createNodeBackedFetch = ({
 
       case 'media':
         return mediaAnswer();
+
+      case 'write':
+        // The write half of this seam: this device signs it and the node
+        // carries it, then the node's own state is read back before the answer
+        // is given. See `nodeWrites.ts`.
+        return writerFor(entry).answer({
+          method,
+          path: route.path,
+          body,
+          fid: getSignedInFid(),
+        });
 
       case 'local':
         return localAnswer({
@@ -600,7 +694,7 @@ export const createNodeBackedFetch = ({
     };
     log.push(entry);
     const response = await raceClientDeadline(
-      answer(parsed, route),
+      answer(parsed, route, entry),
       requestSignal(input, init),
       startedAt,
     );

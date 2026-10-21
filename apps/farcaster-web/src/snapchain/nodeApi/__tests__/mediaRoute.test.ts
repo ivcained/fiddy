@@ -148,11 +148,15 @@ describe('the media pipeline through the adapter', () => {
       body: JSON.stringify({ text: 'a photo', embeds: [embed] }),
     });
 
+    // The submit is a real write now (it used to be a `hosted` refusal). No app
+    // key is injected here, so the honest answer is the one-step sentence that
+    // names how to get one — and what the composer carried is still on the log,
+    // which is the only trace of a write that never leaves the page.
     const write = loud.log.at(-1);
     expect(write).toMatchObject({
       method: 'POST',
       path: '/~api/v2/casts',
-      kind: 'hosted',
+      kind: 'write',
       status: 501,
     });
     expect(write?.bodyPreview).toContain(embed);

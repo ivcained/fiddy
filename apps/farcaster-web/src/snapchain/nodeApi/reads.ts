@@ -72,6 +72,41 @@ const COUNT_PAGE_SIZE = 1000;
 const RESOLVE_CONCURRENCY = 12;
 /** Walk at most this far up a thread looking for its root. */
 const MAX_ANCESTOR_HOPS = 20;
+
+/**
+ * hash → the FID that authored it: the index that makes a hash-only page
+ * answerable at all.
+ *
+ * A Snapchain node shards by FID, so `castById` needs the author as well as the
+ * hash, while the fork's client asks for threads and reactions by hash alone.
+ * Every cast this client has served is therefore remembered here by the reader
+ * that served it — see `readThread`.
+ *
+ * ONE index for the whole client, not one per reader, and that is load-bearing
+ * now that writes exist: a cast is normally READ through the node that serves
+ * the feed and WRITTEN through whichever server answers that account's writes
+ * (they can be different servers — a Neynar key answers profiles and writes
+ * while the feed comes from a node). The author of a cast is a fact about the
+ * network, not about which server told us, so a like must not fail because the
+ * server that will carry it never served the page it was pressed on.
+ */
+const castFidIndex = new Map<string, number>();
+
+/** Remember who wrote a cast, so a hash-only request can be resolved later. */
+export const rememberCastAuthor = (hash: string, fid: number): void => {
+  if (hash.length > 0) {
+    castFidIndex.set(hash, fid);
+  }
+};
+
+/** The author of a cast this client has seen, or undefined when never seen. */
+export const castAuthorOf = (hash: string): number | undefined =>
+  castFidIndex.get(hash);
+
+/** Forget the shared index (sign-out, and tests). */
+export const forgetCastAuthors = (): void => {
+  castFidIndex.clear();
+};
 const USER_DATA_PAGE_SIZE = 100;
 const SEEN_STORAGE_PREFIX = 'fiddy:node-seen';
 
@@ -110,6 +145,28 @@ const USER_CACHE_MS = 60_000;
 const COUNT_CACHE_MS = 60_000;
 
 /**
+ * A channel's parent URL from its key.
+ *
+ * MEASURED: a consolidated channel is addressed on chain by
+ * `https://farcaster.xyz/~/channel/<key>` and the node serves its casts by
+ * that URL (`/v1/castsByParent?url=…`, verified against a live node). A channel
+ * owned by an NFT is addressed `chain://eip155:7777777/erc721:0x…` and its
+ * short key lives only in Warpcast's directory — the node cannot turn one into
+ * the other, which is why that case is an honest error, not an empty feed.
+ *
+ * A module function as well as a reader method because a *write* needs it too:
+ * a channel cast is a cast to this URL, so the writer must speak it without
+ * owning a reader (a Neynar-themed client writes through a different server
+ * than the one that served the channel page).
+ */
+export const channelParentUrlFor = (key: string): string => {
+  if (/^(https?:\/\/|chain:\/\/)/.test(key)) {
+    return key;
+  }
+  return `https://farcaster.xyz/~/channel/${key}`;
+};
+
+/**
  * Reads the hosted API's answers out of a Snapchain node, with the caches a
  * browser client needs (one page of feed asks for ~25 authors).
  */
@@ -123,8 +180,6 @@ export class NodeBackedReads {
   private readonly userCache = new Map<number, CacheEntry<ApiUser>>();
   private readonly userPromiseCache = new Map<number, Promise<ApiUser>>();
   private readonly countCache = new Map<string, CacheEntry<NodeCount>>();
-  /** hash → the FID that authored it, so a hash-only page can be resolved. */
-  private readonly castFidMemo = new Map<string, number>();
   private readonly castCache = new Map<string, CacheEntry<NodeMessage>>();
 
   constructor({
@@ -348,13 +403,24 @@ export class NodeBackedReads {
   private rememberCasts(messages: NodeMessage[]): void {
     for (const message of messages) {
       if (message.castAdd) {
-        this.castFidMemo.set(message.hash, message.fid);
+        rememberCastAuthor(message.hash, message.fid);
         this.castCache.set(`${message.fid}:${message.hash}`, {
           at: Date.now(),
           value: message,
         });
       }
     }
+  }
+
+  /**
+   * One cast, as the hosted shapes — for a caller that already holds a node
+   * message (the writer, answering `POST /v2/casts` with the cast it just got
+   * the node to store). Counts are not read: a cast that was just accepted has
+   * no reactions to report, and the client re-reads it as soon as the composer
+   * invalidates its queries.
+   */
+  async apiCastFor(message: NodeMessage): Promise<ApiCast | undefined> {
+    return this.buildCast({ message, withCounts: false });
   }
 
   private async castById(
@@ -565,21 +631,11 @@ export class NodeBackedReads {
   // ---------------------------------------------------------------- feed reads
 
   /**
-   * A channel's parent URL from its key.
-   *
-   * MEASURED: a consolidated channel is addressed on chain by
-   * `https://farcaster.xyz/~/channel/<key>` and the node serves its casts by
-   * that URL (`/v1/castsByParent?url=…`, verified against a live node).
-   * A channel owned by an NFT is addressed `chain://eip155:7777777/erc721:0x…`
-   * and its short key lives only in Warpcast's directory — the node cannot turn
-   * one into the other, which is why that case is an honest error, not an empty
-   * feed.
+   * A channel's parent URL from its key — `channelParentUrlFor` is the one
+   * implementation; this is the reader-shaped door onto it.
    */
   channelParentUrl(key: string): string {
-    if (/^(https?:\/\/|chain:\/\/)/.test(key)) {
-      return key;
-    }
-    return `https://farcaster.xyz/~/channel/${key}`;
+    return channelParentUrlFor(key);
   }
 
   private async followingFeedMessages({
@@ -760,7 +816,7 @@ export class NodeBackedReads {
     limit?: number;
     replyPreviewLimit?: number;
   }): Promise<ApiThreadResult> {
-    const fid = this.castFidMemo.get(castHash);
+    const fid = castAuthorOf(castHash);
     if (fid === undefined) {
       throw new NodeCannotAnswerError(
         'Your node addresses a cast by its author and its hash, and this page only has the hash. Open the cast from your feed or a profile and it will load.',
@@ -1063,7 +1119,7 @@ export class NodeBackedReads {
     if (reactionMessages.length > 0) {
       const items: ApiNotificationCastReaction[] = [];
       for (const entry of reactionMessages.slice(0, 3)) {
-        const target = this.castFidMemo.get(entry.hash);
+        const target = castAuthorOf(entry.hash);
         const targetMessage =
           target !== undefined
             ? await this.castById(target, entry.hash)
@@ -1197,6 +1253,6 @@ export class NodeBackedReads {
     this.userPromiseCache.clear();
     this.countCache.clear();
     this.castCache.clear();
-    this.castFidMemo.clear();
+    forgetCastAuthors();
   }
 }

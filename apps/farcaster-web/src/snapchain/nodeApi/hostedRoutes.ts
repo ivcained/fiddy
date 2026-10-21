@@ -20,16 +20,19 @@
  *                   (`POST /api/fiddy/media`, see `mediaUpload.ts`) takes the
  *                   bytes instead. Nothing is invented: the answer names a real
  *                   endpoint that really stores the file.
- *   - `hosted`    — your node cannot answer it: ranking, search, direct
- *                   messages, channel directories and the other indexer
- *                   features are Warpcast's own. The request fails with a
- *                   message that says so, rather than an empty success that
- *                   would read as "there is nothing there". The one write in
- *                   this list is `POST /v2/casts`: sending a cast is the
- *                   client's own job, but it needs a signed message, and this
- *                   device holds no app key to sign with yet — so it is named
- *                   here, refused in plain words, and shown to the person who
- *                   pressed Cast.
+ *   - `write`     — it is a write, and a write is a *signed message*: this
+ *                   device signs it with the account's own app key and a node
+ *                   carries it (`submitMessage`). `nodeWrites.ts` builds it,
+ *                   submits it, and reads the resulting state back before it
+ *                   answers. Every one of these used to fall through to the
+ *                   unknown-path branch below — which is why pressing the heart
+ *                   on a cast answered with a sentence about a *reader*.
+ *   - `hosted`    — neither the node nor this client can answer it: ranking,
+ *                   search, direct messages, channel directories, video
+ *                   transcoding and the other indexer features are Warpcast's
+ *                   own. The request fails with a message that says so, rather
+ *                   than an empty success that would read as "there is nothing
+ *                   there".
  *
  * The classification is by path, because that is all a `fetch` sees: the
  * hosted client builds `${baseUrl}${relativeUrl}` itself, so the path is the
@@ -42,6 +45,7 @@ export type HostedRoutePolicy =
   | { kind: 'node'; why: string }
   | { kind: 'local'; why: string }
   | { kind: 'media'; why: string }
+  | { kind: 'write'; why: string }
   | { kind: 'hosted'; why: string };
 
 export type HostedRouteMatch = HostedRoutePolicy & {
@@ -192,12 +196,61 @@ const MEDIA_ROUTES: { method: string; path: string; why: string }[] = [
   },
 ];
 
-const HOSTED_ROUTES: { method: string; path: string; why: string }[] = [
+/**
+ * The writes this client can really make, one row per request the fork's data
+ * layer sends when somebody presses something.
+ *
+ * Every one of these is a message this device signs with the account's own app
+ * key and hands to a node — the same three builders the Advanced screen's own
+ * composer has used since before this file existed
+ * (`~/snapchain/nodeApi/nodeWrites` maps the path to the builder). The `why`
+ * text is what a person reading a debug overlay (or a failing probe) is told
+ * about where the write went.
+ *
+ * The ones that are NOT here stay `hosted`: deleting a cast, editing a profile,
+ * mutes, blocks, bookmarks and the rest of the fork's write surface have no
+ * builder wired up in this client yet, and the honest answer to those is the
+ * unknown-path sentence below rather than a guess at a message type.
+ */
+const WRITE_ROUTES: { method: string; path: string; why: string }[] = [
+  {
+    method: 'PUT',
+    path: '/v2/cast-likes',
+    why: 'the heart pressed on a cast — signed here as REACTION_ADD and handed to your node, which gossips it',
+  },
+  {
+    method: 'DELETE',
+    path: '/v2/cast-likes',
+    why: 'the heart pressed again — signed here as REACTION_REMOVE and handed to your node',
+  },
+  {
+    method: 'PUT',
+    path: '/v2/recasts',
+    why: 'the recast action — signed here as REACTION_ADD (recast) and handed to your node',
+  },
+  {
+    method: 'DELETE',
+    path: '/v2/recasts',
+    why: 'undo a recast — signed here as REACTION_REMOVE and handed to your node',
+  },
+  {
+    method: 'PUT',
+    path: '/v2/follows',
+    why: 'the Follow button — signed here as LINK_ADD and handed to your node',
+  },
+  {
+    method: 'DELETE',
+    path: '/v2/follows',
+    why: 'the Unfollow button — signed here as LINK_REMOVE and handed to your node',
+  },
   {
     method: 'POST',
     path: '/v2/casts',
-    why: 'sending a cast means signing it with an app key and handing it to a node — this device has no app key yet, so nothing was signed and nothing was sent',
+    why: 'pressing Cast — the text is signed here as CAST_ADD with the app key this device holds, handed to your node, and read back to prove it was stored',
   },
+];
+
+const HOSTED_ROUTES: { method: string; path: string; why: string }[] = [
   {
     method: 'GET',
     path: '/v2/feeds',
@@ -350,6 +403,16 @@ export const classifyHostedRequest = ({
     };
   }
 
+  const write = find(WRITE_ROUTES, normalizedMethod, endpoint);
+  if (write) {
+    return {
+      kind: 'write',
+      path: endpoint,
+      method: normalizedMethod,
+      why: write.why,
+    };
+  }
+
   const hosted = find(HOSTED_ROUTES, normalizedMethod, endpoint);
   if (hosted) {
     return {
@@ -375,7 +438,10 @@ export const classifyHostedRequest = ({
     kind: 'hosted',
     path: endpoint,
     method: normalizedMethod,
-    why: 'no node-backed reader has been written for this endpoint yet',
+    why:
+      normalizedMethod === 'GET' || normalizedMethod === 'HEAD'
+        ? 'no node-backed reader has been written for this endpoint yet'
+        : `no node-backed writer has been written for ${normalizedMethod} ${endpoint} yet, so nothing was signed and nothing was sent`,
   };
 };
 
@@ -386,6 +452,9 @@ export const localRoutes = LOCAL_ROUTES.map(
   (entry) => `${entry.method} ${entry.path}`,
 );
 export const mediaRoutes = MEDIA_ROUTES.map(
+  (entry) => `${entry.method} ${entry.path}`,
+);
+export const writeRoutes = WRITE_ROUTES.map(
   (entry) => `${entry.method} ${entry.path}`,
 );
 export const hostedOnlyRoutes = HOSTED_ROUTES.map(
