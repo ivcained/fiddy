@@ -1473,7 +1473,13 @@ const AppFrameIFrame = forwardRef<IFrameLoaderRef, AppFrameIframeProps>(
         <IFrameLoader
           ref={ref}
           src={url}
-          allow="microphone; camera; clipboard-write"
+          // clipboard-write only. Camera and microphone stay denied: the
+          // document's own Permissions-Policy is `camera=(), microphone=()`, a
+          // child frame cannot be granted a feature its parent denies, and this
+          // client already answers `cameraAndMicrophoneAccess: false` and
+          // no-ops `requestCameraAndMicrophoneAccess`. Asking here was dead
+          // weight that read as a capability we do not have.
+          allow="clipboard-write"
           sandbox="allow-forms allow-scripts allow-same-origin allow-popups"
           onLoaded={onLoaded}
           className={classNames(
