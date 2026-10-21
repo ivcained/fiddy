@@ -5,16 +5,28 @@
 #
 #   1. a FROZEN tree at the sha under release (git archive) — a release is a
 #      commit, not whatever the working clone happens to hold;
-#   2. a build that CARRIES the two env values the client needs in production:
+#   2. a build that CARRIES the three env values the client needs in production:
 #        VITE_SNAPCHAIN_HTTP_URL  the node the client reads through. Without it
 #                                 `isNodeConfigured()` is false and a signed-in
 #                                 session lands on the device-only landing.
 #        VITE_FIDDY_MEDIA_URL     the media host the composer uploads to
 #                                 (default https://fiddy.fun, named anyway);
-#   3. a LOCAL gate: the built bundle must contain the adapter's 501 sentence
-#      and the media path, or we do not ship it at all — and the built shell
-#      must carry no inline script, because the host serves script-src 'self'
-#      (the theme bootstrap lives at public/shell-bootstrap.js);
+#        VITE_TOGETHER_API_URL    the collaboration service's origin, for the
+#                                 Together surface (/~/together). It is BAKED on
+#                                 purpose: `src/lib/together.ts` falls back to
+#                                 http://127.0.0.1:8766 when the variable is
+#                                 UNDEFINED, so a release that merely omits it
+#                                 ships a client that asks the visitor's own
+#                                 laptop for the board. The value is the empty
+#                                 string — "same origin as this app" — because
+#                                 the vhost rewrites /spaces onto the hosted
+#                                 service (docs/TOGETHER.md);
+#   3. a LOCAL gate: the built bundle must contain the adapter's 501 sentence,
+#      the media path and the Together route — and must NOT contain the laptop
+#      fallback above, or we do not ship it at all (the surface ships itself, so
+#      a dropped route string is a release that quietly loses a feature) — and
+#      the built shell must carry no inline script, because the host serves
+#      script-src 'self' (the theme bootstrap lives at public/shell-bootstrap.js);
 #   4. assemble the release tree the vhost expects — web/ (the client) plus
 #      server/ (the read-only preview's API, which systemd runs from
 #      /var/www/fiddy.fun/current/server/server.mjs, so a release without it
@@ -56,9 +68,17 @@ STAGE_ROOT=${FIDDY_RELEASE_STAGE_ROOT:-$HOME/.hermes/cache/scratch}
 STAGE_PINNED=${FIDDY_RELEASE_STAGE:-}
 NODE_URL=${FIDDY_BUILD_NODE_URL:-https://haatz.quilibrium.com}
 MEDIA_URL=${FIDDY_BUILD_MEDIA_URL:-https://fiddy.fun}
+# The collaboration service's origin for the Together surface. Empty string is
+# the production shape: the client and the service share fiddy.fun's origin, and
+# the vhost rewrites /spaces onto the hosted service. Never leave it out — see
+# the header (an undefined value is the laptop fallback).
+TOGETHER_URL=${FIDDY_BUILD_TOGETHER_API_URL-}
 # Strings only this client build has (the adapter's sentence and our media path).
 GATE_ADAPTER='no node-backed reader has been written'
 GATE_MEDIA='api/fiddy/media'
+# The Together surface's route literal, and the fallback that must never ship.
+GATE_TOGETHER='/together'
+GATE_TOGETHER_FALLBACK='127.0.0.1:8766'
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 say() { printf '\n== %s\n' "$*"; }
@@ -101,20 +121,32 @@ git -C "$REPO" archive "$SHA" | tar -x -C "$STAGE/base"
 ln -s "$REPO/node_modules" "$STAGE/base/node_modules"
 ln -s "$REPO/apps/farcaster-web/node_modules" "$STAGE/base/apps/farcaster-web/node_modules"
 
-say "2/8 vite build (node $NODE_URL, media $MEDIA_URL)"
+say "2/8 vite build (node $NODE_URL, media $MEDIA_URL, together '${TOGETHER_URL}' = same origin)"
 ( cd "$STAGE/base/apps/farcaster-web" && rm -rf dist && \
   VITE_SNAPCHAIN_HTTP_URL="$NODE_URL" VITE_FIDDY_MEDIA_URL="$MEDIA_URL" \
+  VITE_TOGETHER_API_URL="$TOGETHER_URL" \
   NODE_OPTIONS=--max-old-space-size=8192 npx vite build > "$STAGE/build.log" 2>&1 ) \
   || { tail -30 "$STAGE/build.log"; exit 1; }
 
-say "3/8 local gate: the bundle carries the adapter and the media path"
+say "3/8 local gate: the bundle carries the adapter, the media path and Together"
 APP="$STAGE/base/apps/farcaster-web/dist"
 grep -rqs "$GATE_ADAPTER" "$APP/assets" || { echo "MISSING adapter sentence in the build" >&2; exit 1; }
 grep -rqs "$GATE_MEDIA" "$APP/assets" || { echo "MISSING media path in the build" >&2; exit 1; }
 grep -rqs "$NODE_URL" "$APP/assets" || { echo "MISSING the configured node in the build" >&2; exit 1; }
+grep -rqs "$GATE_TOGETHER" "$APP/assets" || { echo "MISSING the Together route in the build" >&2; exit 1; }
+# The Together surface ships itself: /~/together is reachable signed out, and
+# the page asks the collaboration service for a board. `src/lib/together.ts`
+# answers http://127.0.0.1:8766 when VITE_TOGETHER_API_URL is UNDEFINED, which in
+# a visitor's browser means their own laptop — the page renders and every call
+# fails. That is a shipping bug, so refuse it here rather than measure it live.
+if grep -rqs "$GATE_TOGETHER_FALLBACK" "$APP/assets"; then
+  echo "REFUSING to ship: the bundle carries $GATE_TOGETHER_FALLBACK, so VITE_TOGETHER_API_URL was never set" >&2
+  exit 1
+fi
 echo "  adapter  ok"
 echo "  media    ok"
 echo "  node     ok ($NODE_URL)"
+echo "  together ok (route literal; no laptop fallback, api = '${TOGETHER_URL}' same origin)"
 # The shell the host serves runs under script-src 'self'. An inline <script> in
 # index.html (the theme bootstrap used to be one) or an inline on*= handler (the
 # font sheet used to have one) is inline script, and that CSP refuses it — in
@@ -160,11 +192,16 @@ ssh_ "set -e
   grep -rqs '$GATE_ADAPTER' $RELEASES/$SHA/web/assets
   grep -rqs '$GATE_MEDIA' $RELEASES/$SHA/web/assets
   grep -rqs '$NODE_URL' $RELEASES/$SHA/web
+  grep -rqs '$GATE_TOGETHER' $RELEASES/$SHA/web/assets
+  if grep -rqs '$GATE_TOGETHER_FALLBACK' $RELEASES/$SHA/web/assets; then
+    echo 'the extracted bundle carries the laptop fallback'; exit 1
+  fi
   test -f $RELEASES/$SHA/web/preview/index.html
   test -f $RELEASES/$SHA/server/server.mjs
   grep -q 'snapchain-api' /etc/nginx/sites-available/fiddy.fun
   grep -q 'location ^~ /preview/' /etc/nginx/sites-available/fiddy.fun
-  echo '  disk gate ok: bundle, preview, server, vhost locations'"
+  grep -q 'proxy_pass http://127.0.0.1:8787;' /etc/nginx/sites-available/fiddy.fun
+  echo '  disk gate ok: bundle (adapter, media, node, together), preview, server, vhost locations'"
 
 if [ "$NO_CUTOVER" = "--no-cutover" ]; then
   say "staged at $RELEASES/$SHA (not cut over)"
@@ -204,6 +241,15 @@ curl -fsS "https://fiddy.fun$ASSET" -o "$STAGE/served-$SHORT.js"
 grep -q "$GATE_ADAPTER" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
 grep -q "$GATE_MEDIA" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
 grep -q "$NODE_URL" "$STAGE/served-$SHORT.js" || { rollback_on_failure; exit 1; }
+# Belt and braces for Together: the route literal and the absent laptop fallback
+# are asserted over EVERY built asset in step 3 and over the extracted tree in
+# step 6, and the `cmp` below ties the served entry chunk to those same bytes.
+# Checking the served chunk too costs one grep and catches a host serving a
+# different index than the one we just published.
+if grep -q "$GATE_TOGETHER_FALLBACK" "$STAGE/served-$SHORT.js"; then
+  echo "REFUSING: the served bundle carries $GATE_TOGETHER_FALLBACK" >&2
+  rollback_on_failure; exit 1
+fi
 echo "  served bundle: $(wc -c < "$STAGE/served-$SHORT.js") bytes, sha256 $(shasum -a 256 "$STAGE/served-$SHORT.js" | cut -c1-16)…"
 echo "  built bundle:  $(wc -c < "$STAGE/base/apps/farcaster-web/dist$ASSET") bytes, sha256 $(shasum -a 256 "$STAGE/base/apps/farcaster-web/dist$ASSET" | cut -c1-16)…"
 cmp -s "$STAGE/served-$SHORT.js" "$STAGE/base/apps/farcaster-web/dist$ASSET" || { rollback_on_failure; exit 1; }
