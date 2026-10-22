@@ -5,6 +5,8 @@
 //   node scripts/render-share-card.mjs splash          # the splash  -> public/fiddy-splash.png
 //   node scripts/render-share-card.mjs splash-deploy   # the Deploy a Node mini app's splash
 //                                                      #             -> ../../site/assets/fiddy-splash.png
+//   node scripts/render-share-card.mjs microsite       # the /client microsite landing's card
+//                                                      #             -> ../../site/assets/client-card.png
 //   node scripts/render-share-card.mjs all             # every card
 //
 // Why this exists, and why it is a script rather than a checked-in drawing:
@@ -69,6 +71,18 @@
 //     icon and embed. So this variant exists to replace a borrowed watermark
 //     with Fiddy's own mark on Fiddy's own ground, at the size the spec asks,
 //     for the surface that had no way to notice any of it.
+//
+//   * `microsite` is the one card here that is not a mini app picture: it is the
+//     `og:image` for the microsite's landing pages (`site/index.html` ->
+//     /client, `site/zh/index.html` -> /client/zh/). Measured 2026-10-22 (card
+//     t_d4a88ae2): both pages declared `og:title`, `og:description` and
+//     `og:url` and no `og:image` at all, so the URL the README, docs/SPEC.md
+//     and `bin/fiddy` all link to — the microsite link a human is most likely
+//     to paste — unfurled as bare text while every other Fiddy surface carried
+//     a card it owned. It is a `share`-shaped poster (1200x630, the ratio an
+//     unfurl lays out) with this surface's own line and its own address
+//     (`fiddy.fun/client`), because the two pages are the same product at two
+//     URLs and a second language: one card, drawn once.
 //
 // It uses the Playwright Chromium this repo already installs for its probes, so
 // there is nothing extra to fetch, and it needs no network. The font stack is
@@ -180,9 +194,54 @@ const CARDS = {
     height: 200,
     mark: { size: 100 },
   },
+  // The microsite landing pages' `og:image`, in the poster language and at the
+  // ratio an unfurl lays out. `share`'s numbers, this surface's words: the
+  // address is the microsite's own (`fiddy.fun/client`, the slashless form
+  // `rel=canonical` pins), and the copy is the page's own claim rather than the
+  // client shell's — an unfurl prints the page's `og:title`/`og:description`
+  // next to this picture, so the art says what the picture is for, not what the
+  // two tags beside it already say word for word.
+  microsite: {
+    file: 'client-card.png',
+    outDir: path.join(repoRoot, 'site', 'assets'),
+    width: 1200,
+    height: 630,
+    glow: { size: 560, at: '81% 72%', alpha: 0.2 },
+    mascot: { size: 434, right: 54, bottom: 26 },
+    text: {
+      left: 92,
+      top: 132,
+      maxWidth: 620,
+      wordmark: 34,
+      headline: 76,
+      line: 30,
+      gapWordmark: 18,
+      gapLine: 22,
+    },
+    address: { left: 92, bottom: 62, size: 26 },
+    copy: {
+      headline: 'Your own client.',
+      line: 'Your own node. Three commands.',
+      address: 'fiddy.fun/client',
+    },
+  },
 };
 
-const card = (spec, mascotUrl) => `<!doctype html>
+/**
+ * What a poster says when its spec does not say: the copy the committed `share`
+ * and `embed` cards were drawn with. A surface whose claim differs (the
+ * microsite) states its own `copy` — and only in these three strings, so no
+ * variant can restyle the poster by accident.
+ */
+const POSTER_COPY = {
+  headline: 'Meet your Fiddy.',
+  line: 'A little agent. A world to discover.',
+  address: 'fiddy.fun',
+};
+
+const card = (spec, mascotUrl) => {
+  const copy = { ...POSTER_COPY, ...(spec.copy ?? {}) };
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -255,12 +314,13 @@ const card = (spec, mascotUrl) => `<!doctype html>
     <img class="mascot" src="${mascotUrl}" alt="" />
     <div class="text">
       <div class="wordmark">fiddy</div>
-      <div class="headline">Meet your Fiddy.</div>
-      <div class="line">A little agent. A world to discover.</div>
+      <div class="headline">${copy.headline}</div>
+      <div class="line">${copy.line}</div>
     </div>
-    <div class="address">fiddy.fun</div>
+    <div class="address">${copy.address}</div>
   </body>
 </html>`;
+};
 
 /**
  * Where the mark's box sits, as an inset from the left/top edge: the number that
@@ -324,8 +384,8 @@ const splashCard = (spec) => `<!doctype html>
 </html>`;
 
 // Which cards to draw: the first argument names one (`share`, `embed`, `splash`,
-// `splash-deploy`) or says `all`. An unknown name lists what there is rather
-// than drawing the wrong card.
+// `splash-deploy`, `microsite`) or says `all`. An unknown name lists what there
+// is rather than drawing the wrong card.
 const requested = process.argv[2] ?? 'share';
 const names =
   requested === 'all'
@@ -397,7 +457,10 @@ try {
   for (const name of names) {
     const spec = CARDS[name];
     const splash = spec.layout === 'splash';
-    const outPath = path.join(spec.outDir ?? path.join(webRoot, 'public'), spec.file);
+    const outPath = path.join(
+      spec.outDir ?? path.join(webRoot, 'public'),
+      spec.file,
+    );
     mkdirSync(path.dirname(outPath), { recursive: true });
     const page = await browser.newPage({
       viewport: { width: spec.width, height: spec.height },
