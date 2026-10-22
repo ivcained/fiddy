@@ -461,6 +461,9 @@ wire the approval will sit on gets pinned before an approval exists on it, and
 the two effectful asks come last. Each block below is the decision set its card
 must carry; none of them re-opens a question settled in this file.
 
+Cards: S1 `t_d2d97be5`, S4 `t_c39bf6da`, S2 `t_f02bb238`, S3 `t_f0cfd22c` — each
+gated on the one before it, so one worker owns this repo at a time.
+
 **S1 — the channel and the refusals.** `apps/farcaster-web/src/components/miniApp/agentAskChannel.ts`
 (a pure module: envelope validation, the one-shot ids, the 30 s dedupe, the
 3-ask budget, the session mute, the sentences of §6, all testable with no
