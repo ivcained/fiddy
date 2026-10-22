@@ -42,6 +42,7 @@ import {
 } from 'farcaster-client-data';
 import {
   fetchFollowing,
+  isMissingOnNode,
   isTerminalPageToken,
   mapWithConcurrency,
   type NodeCastAddBody,
@@ -79,8 +80,17 @@ export class NodeCannotAnswerError extends Error {
 
 const DEFAULT_COUNT_CAP = 6000;
 const COUNT_PAGE_SIZE = 1000;
-/** How many quotes/names to resolve per response, to keep fan-out bounded. */
-const RESOLVE_CONCURRENCY = 12;
+/**
+ * How many reads this reader keeps in flight at once.
+ *
+ * MEASURED (2026-10-22, the live client against a public read node, 10-core
+ * laptop under load ~9): a home feed's first page is ~62 per-author reads and
+ * they answer in p50 ~250ms / p95 ~1s, so the fan-out is where the first cast's
+ * wall clock goes — and 12 at a time turns 62 reads into six waves of waiting
+ * for no reason. 24 halves the waves; the fan-out stays bounded, and the node
+ * is asked no more often than before.
+ */
+const RESOLVE_CONCURRENCY = 24;
 /** Walk at most this far up a thread looking for its root. */
 const MAX_ANCESTOR_HOPS = 20;
 
@@ -225,6 +235,13 @@ export class NodeBackedReads {
 
   private readonly userCache = new Map<number, CacheEntry<ApiUser>>();
   private readonly userPromiseCache = new Map<number, Promise<ApiUser>>();
+  /**
+   * The cast-shaped account cache. Separate from `userCache` on purpose: the two
+   * hold different answers (see `readAuthor`), and a cast-shaped read must never
+   * satisfy a profile-shaped one.
+   */
+  private readonly authorCache = new Map<number, CacheEntry<ApiUser>>();
+  private readonly authorPromiseCache = new Map<number, Promise<ApiUser>>();
   private readonly countCache = new Map<string, CacheEntry<NodeCount>>();
   private readonly castCache = new Map<string, CacheEntry<NodeMessage>>();
 
@@ -379,8 +396,13 @@ export class NodeBackedReads {
   }
 
   /**
-   * A profile. Counts are counted by paging the follow graph, so they are exact
-   * below the cap and a floor above it — `NodeCount.isFloor` says which.
+   * A PROFILE-shaped account: the one a profile header, a search result or
+   * `useUser` shows. Counts are counted by paging the follow graph, so they are
+   * exact below the cap and a floor above it — `NodeCount.isFloor` says which.
+   *
+   * Cast-shaped surfaces (a card in the feed, a thread, a notification's actor)
+   * must NOT come here: see `readAuthor` for what they need, and for the
+   * measurement that says why counting followers is not part of drawing a cast.
    */
   async readUser(fid: number): Promise<ApiUser> {
     const cached = this.userCache.get(fid);
@@ -400,11 +422,8 @@ export class NodeBackedReads {
         this.countLinkDirection({ fid }),
       ]);
 
-      const viewerFid = this.getSignedInFid();
-      const viewerContext =
-        viewerFid !== undefined && viewerFid !== fid
-          ? { following: await this.isFollowing({ viewerFid, targetFid: fid }) }
-          : undefined;
+      const following = await this.viewerFollows(fid);
+      const viewerContext = following === undefined ? undefined : { following };
 
       const user = apiUserFromNode({
         fid,
@@ -423,6 +442,95 @@ export class NodeBackedReads {
       return await promise;
     } finally {
       this.userPromiseCache.delete(fid);
+    }
+  }
+
+  /**
+   * Is there a follow edge from the viewer to this account?
+   *
+   * `/v1/linkById` asks the question itself, so the answer is one small message
+   * or a "no such link". This used to page `/v1/linksByFid` with
+   * `pageSize: 1000` and look for the target among the links that came back —
+   * which is both a large response per account (the node treats `pageSize` as a
+   * minimum and answers 2000) and wrong for a viewer who follows more accounts
+   * than one page holds. A not-found link is `false`; a node that cannot answer
+   * at all leaves the field out rather than claiming either way.
+   */
+  private async viewerFollows(targetFid: number): Promise<boolean | undefined> {
+    const viewerFid = this.getSignedInFid();
+    if (viewerFid === undefined || viewerFid === targetFid) {
+      return undefined;
+    }
+    try {
+      await this.node.linkById({
+        fid: viewerFid,
+        targetFid,
+        linkType: 'follow',
+      });
+      return true;
+    } catch (error) {
+      // A missing edge is the answer "no"; anything else leaves the field out.
+      return isMissingOnNode(error) ? false : undefined;
+    }
+  }
+
+  /**
+   * An account as a CAST-SHAPED surface needs it: who they are, and whether the
+   * viewer follows them. Never the follower/following counts.
+   *
+   * WHY THIS EXISTS (MEASURED, 2026-10-22, the live client, a real follow graph)
+   *
+   * The counts are not free: the node serves them as a *paged log*, so counting
+   * a popular account's followers means several responses of 2000 links each,
+   * and `pageSize` is a minimum. Building a 25-cast home feed through the
+   * profile-shaped read therefore cost, before this change, 98
+   * `/v1/linksByTargetFid` and 120 `/v1/linksByFid` requests — 232 seconds of
+   * request time across the run, and the slowest account's count paging was
+   * still in flight when the first cast finally painted at 29.4s. Nothing on a
+   * cast card (or in a notification, or on a quoted cast) renders either count;
+   * the surfaces that do — a profile header, a search result, `useUser` — read
+   * the account through `readUser`, which is unchanged and still counts for
+   * real.
+   *
+   * The consequence is deliberate and worth stating: the account object this
+   * returns carries `0` for both counts, because the fork's `ApiUser` type has
+   * no way to say "not read". A surface that renders a count must therefore use
+   * `readUser`, never a cast's author.
+   */
+  async readAuthor(fid: number): Promise<ApiUser> {
+    const cached = this.authorCache.get(fid);
+    if (cached && Date.now() - cached.at < USER_CACHE_MS) {
+      return cached.value;
+    }
+
+    const inFlight = this.authorPromiseCache.get(fid);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = (async () => {
+      // Two small reads, together: the account's own user data, and the one
+      // follow edge the viewer may or may not have to them.
+      const [userData, following] = await Promise.all([
+        this.userDataMessages(fid),
+        this.viewerFollows(fid),
+      ]);
+
+      const user = apiUserFromNode({
+        fid,
+        userData,
+        ...(following !== undefined ? { viewerContext: { following } } : {}),
+      });
+
+      this.authorCache.set(fid, { at: Date.now(), value: user });
+      return user;
+    })();
+
+    this.authorPromiseCache.set(fid, promise);
+    try {
+      return await promise;
+    } finally {
+      this.authorPromiseCache.delete(fid);
     }
   }
 
@@ -453,7 +561,7 @@ export class NodeBackedReads {
       RESOLVE_CONCURRENCY,
       async (fid) => {
         try {
-          return [fid, await this.readUser(fid)] as const;
+          return [fid, await this.readAuthor(fid)] as const;
         } catch {
           return undefined;
         }
@@ -470,29 +578,6 @@ export class NodeBackedReads {
   /** Every FID a set of casts mentions, page order preserved. */
   private static mentionedFidsOf(messages: NodeMessage[]): number[] {
     return messages.flatMap((message) => message.castAdd?.mentions ?? []);
-  }
-
-  private async isFollowing({
-    viewerFid,
-    targetFid,
-  }: {
-    viewerFid: number;
-    targetFid: number;
-  }): Promise<boolean> {
-    // One page is enough to answer this for real: the question is "is there a
-    // follow link from me to them", and the node serves the links themselves.
-    try {
-      const page = await this.node.linksByFid({
-        fid: viewerFid,
-        linkType: 'follow',
-        pageSize: COUNT_PAGE_SIZE,
-      });
-      return page.messages.some(
-        (message) => message.link?.targetFid === targetFid,
-      );
-    } catch {
-      return false;
-    }
   }
 
   async readUserByUsername(username: string): Promise<ApiUser | undefined> {
@@ -711,7 +796,7 @@ export class NodeBackedReads {
         : this.resolveMentionUsers(body.mentions);
 
     const [author, reactions, recasts, mentioned] = await Promise.all([
-      this.readUser(message.fid),
+      this.readAuthor(message.fid),
       withCounts
         ? this.countReactions({
             targetFid: message.fid,
@@ -740,7 +825,7 @@ export class NodeBackedReads {
         if (!quotedMessage?.castAdd) {
           return undefined;
         }
-        const quotedAuthor = await this.readUser(quotedMessage.fid);
+        const quotedAuthor = await this.readAuthor(quotedMessage.fid);
         return {
           hash: quotedMessage.hash,
           threadHash: quotedMessage.hash,
@@ -1246,7 +1331,7 @@ export class NodeBackedReads {
         RESOLVE_CONCURRENCY,
         async (message) => {
           const cast = await this.buildCast({ message, withCounts: false });
-          const actor = await this.readUser(message.fid);
+          const actor = await this.readAuthor(message.fid);
           if (!cast) {
             return undefined;
           }
@@ -1283,7 +1368,7 @@ export class NodeBackedReads {
         RESOLVE_CONCURRENCY,
         async (message) => {
           const cast = await this.buildCast({ message, withCounts: false });
-          const actor = await this.readUser(message.fid);
+          const actor = await this.readAuthor(message.fid);
           if (!cast) {
             return undefined;
           }
@@ -1332,7 +1417,7 @@ export class NodeBackedReads {
           withCounts: false,
         });
         const reactionMessage = entry.messages[0]!;
-        const actor = await this.readUser(reactionMessage.fid);
+        const actor = await this.readAuthor(reactionMessage.fid);
         if (!cast) {
           continue;
         }
@@ -1376,7 +1461,7 @@ export class NodeBackedReads {
         followMessages.slice(0, 3),
         RESOLVE_CONCURRENCY,
         async (message) => {
-          const actor = await this.readUser(message.fid);
+          const actor = await this.readAuthor(message.fid);
           return {
             type: 'follow' as const,
             id: `follow:${message.fid}`,
