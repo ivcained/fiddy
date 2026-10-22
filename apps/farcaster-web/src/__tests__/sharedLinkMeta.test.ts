@@ -64,6 +64,17 @@ describe('the shell a shared link unfurls as', () => {
     expect(
       existsSync(path.join(webRoot, 'scripts', 'render-share-card.mjs')),
     ).toBe(true);
+    // The embed card the `fc:miniapp` tag names is drawn by the same script, at
+    // the 3:2 the mini app spec asks of an embed, and the file is in the repo.
+    const embedCard = readFileSync(
+      path.join(webRoot, 'public', 'fiddy-embed.png'),
+    );
+    expect([...embedCard.subarray(0, 8)]).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    expect([embedCard.readUInt32BE(16), embedCard.readUInt32BE(20)]).toEqual([
+      1200, 800,
+    ]);
   });
 
   it('carries no static og:url, because this document answers for every route', () => {
@@ -90,9 +101,10 @@ describe('the shell a shared link unfurls as', () => {
     };
 
     expect(embed.version).toBe('1');
-    // 3:2 is what the spec asks of an embed image; /image.png is the manifest's
-    // own image and was measured at 1200x800.
-    expect(embed.imageUrl).toBe('https://fiddy.fun/image.png');
+    // 3:2 is what the spec asks of an embed image; /fiddy-embed.png is the
+    // manifest's own image, rendered from the repo's mascot by
+    // scripts/render-share-card.mjs — and both surfaces name the same file.
+    expect(embed.imageUrl).toBe('https://fiddy.fun/fiddy-embed.png');
     expect(embed.button.title.length).toBeLessThanOrEqual(32);
     expect(embed.button.action.type).toBe('launch_miniapp');
     expect(embed.button.action.name).toBe('fiddy');

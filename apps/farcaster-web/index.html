@@ -33,11 +33,12 @@
       card, so a shared fiddy.fun link unfurled as nothing, or as the wrong
       product.
 
-      The picture is ours and drawn by us: `fiddy-share-card.png` is rendered
-      from `fiddy-mark-poster.png` by `scripts/render-share-card.mjs`. The
+      The picture is ours and drawn by us: `fiddy-share-card.png` (the 1.91:1
+      og card) and `fiddy-embed.png` (the 3:2 embed) are both rendered from
+      `fiddy-mark-poster.png` by `scripts/render-share-card.mjs`. The
       `fc:miniapp` tag makes the same URL a launchable mini app card, matching
       the manifest served at /.well-known/farcaster.json (whose own `imageUrl`
-      is the 3:2 /image.png used here, and whose `name` is `fiddy`).
+      is the 3:2 /fiddy-embed.png used here, and whose `name` is `fiddy`).
 
       Nothing here is per-page yet: a cast or profile URL unfurls with THIS
       card, not its own. Per-page cards need a server that renders HTML for a
@@ -64,7 +65,7 @@
     <meta name="twitter:title" content="fiddy — a Farcaster client with an agent" />
     <meta name="twitter:description" content="Read your feed, open mini apps, and post with a little agent that asks before it acts." />
     <meta name="twitter:image" content="https://fiddy.fun/fiddy-share-card.png" />
-    <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://fiddy.fun/image.png","button":{"title":"Open fiddy","action":{"type":"launch_miniapp","name":"fiddy","url":"https://fiddy.fun/","splashImageUrl":"https://fiddy.fun/fiddy-splash.png","splashBackgroundColor":"#161715"}}}' />
+    <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://fiddy.fun/fiddy-embed.png","button":{"title":"Open fiddy","action":{"type":"launch_miniapp","name":"fiddy","url":"https://fiddy.fun/","splashImageUrl":"https://fiddy.fun/fiddy-splash.png","splashBackgroundColor":"#161715"}}}' />
     <title>fiddy — a Farcaster client with an agent</title>
     <!-- Preconnect to image CDN for faster LCP -->
     <link rel="preconnect" href="https://wrpcd.net" crossorigin />
