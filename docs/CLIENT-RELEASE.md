@@ -267,6 +267,13 @@ release is what changes the listing (step 7 installs the manifest, and
 missing, mis-sized, or off-origin); this nginx half was a one-time vhost edit
 (`nginx -t && systemctl reload nginx`), not a step in the release ritual.
 
+Measured after the cut-over: the ORIGIN answers `301` on all three immediately
+(`curl -sk --resolve fiddy.fun:443:187.127.148.194 …`), while the edge goes on
+serving its own cached copies of `/icon.png` and `/image.png` for up to the
+7-day TTL the old `expires 7d` aliases set. That is a cache, not a failed fix:
+nothing names those two URLs any more, and the pictures the listing and the
+shell DO name are the repo-owned ones.
+
 The live state, in four commands:
 
 ```bash
