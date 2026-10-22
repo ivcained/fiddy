@@ -36,12 +36,12 @@ this surface was serving (cards t_5890479d and t_d4a88ae2):
 | URL | https://fiddy.fun/client | `curl -o /dev/null -w '%{http_code}'` → **200** (also `/client/`, `?x=1`) |
 | Canonical | `<link rel="canonical" href="https://fiddy.fun/client">`, `og:url` same | served HTML |
 | Origin file | `/var/www/fiddy-client/index.html` (outside the release symlink tree) | `ls -l`, `md5sum` |
-| Deployed content | `md5 30d6c9588967272d44d3ab8a96068428` = `site/index.html` at repo HEAD | `md5sum` on the VPS vs `md5 -q site/index.html` locally, equal (re-measured 2026-10-22) |
+| Deployed content | `md5 3b862ebf80c042a4cd5d622c14eca14e` = `site/index.html` at `5cfcc24` (the tree that carries the unfurl card) | `md5sum` on the VPS vs `md5 -q site/index.html` locally, equal (re-measured 2026-10-22) |
 | Deploy path | `scripts/deploy-microsite.sh [sha]` — frozen tree, gate, upload, read its own bytes back off the box, fetch them from the origin, gate the served copy. `--gate-only` runs the gate and uploads nothing | the script, run 2026-10-22 |
 | The gate | `scripts/check-microsite-assets.mjs` (`node scripts/check-microsite-assets.mjs [site dir]`) — every page's `fc:miniapp`, its splash's size/ground/placement, its card and its launch URL, **and every page's unfurl card** (`og:image` + stated size against the PNG's own header, `twitter:*` agreement, `og:url` == `rel=canonical` == the address the page answers at, alt text, and a look inside the picture); also a CI job (`microsite (site/)`) on every pull request | run on the frozen tree, on the served mirror of the live host, and on eighteen negative trees — all refused by name (see *What holds the shape*) |
 | The mini app's splash | `/client/assets/fiddy-splash.png` — 200×200, ground `#161715`, mark 100×96 centred at (99.5,99.5); drawn by `apps/farcaster-web/scripts/render-share-card.mjs splash-deploy`, a file this repo owns | live bytes measured 2026-10-22, see *The splash* |
 | The landing pages' unfurl card | `/client/assets/client-card.png` — 1200×630 on `#161715`, the Fiddy mascot and the microsite's own line (`“Your own client. Your own node. Three commands.”`); `og:image` + `twitter:card`/`twitter:image` on `/client` and `/client/zh/` alike; drawn by `render-share-card.mjs microsite` | live bytes measured 2026-10-22, see *The card a shared link unfurls with* |
-| Served bytes | byte-identical to the repo file | `diff <(curl -sS https://fiddy.fun/client) site/index.html` → empty |
+| Served bytes | byte-identical to the repo file, at the CDN and at the origin | `diff <(curl -sS https://fiddy.fun/client) site/index.html` → empty (2026-10-22, after the unfurl-card deploy) |
 | Host | srv1569292 (LC VPS, 100.111.203.78 / public 187.127.148.194), Cloudflare-proxied | `hostname`, `curl -4 ifconfig.me`, `dig fiddy.fun` |
 | Redirects | `http → 308 https://fiddy.fun/client`; `www → 308 https://fiddy.fun/client` | `curl -w '%{redirect_url}'` |
 | Neighbours unchanged | `/start` 200, `/FSSC/` 200, `/release.json` 200 (`revision 9047c21`), mate.legitclub.com `/api/health` 200 | `curl` |
@@ -313,6 +313,36 @@ open, and what a host does with a 200×200 `splashImageUrl` over
 `splashBackgroundColor` is the host's code. What is verified is everything the host
 reads: the page's declaration, the bytes at the URL it names, the picture's own
 size, its ground, and where its drawing sits.
+
+## Verified on the live host (2026-10-22 — the unfurl card)
+
+Deployed from `5cfcc24` (PR #34, whose tree also carries the splash fix that
+preceded it) with `scripts/deploy-microsite.sh 5cfcc24`: all four of the
+deploy's own gates passed — the frozen tree's gate, the disk gate (**8 files**,
+sha256 read back off the box), the served gate (every file fetched from the
+ORIGIN by IP), and the gate run over the **served mirror**, which now includes
+the unfurl half. Everything below was then measured again, independently of the
+deploy script's own output.
+
+| Check | Result |
+| --- | --- |
+| `https://fiddy.fun/client` (CDN) | 200 `text/html`; the served head carries `og:image` → `/client/assets/client-card.png`, `og:image:width 1200`, `og:image:height 630`, `og:image:alt`, `twitter:card summary_large_image`, `twitter:image` — none of these were served before this deploy |
+| `https://fiddy.fun/client/zh/` (CDN) | 200; the same card, the page's own Chinese `og:title`/`og:image:alt`/`twitter:*` |
+| `https://fiddy.fun/client/deploy/` (CDN) | 200; now states `og:url`, `rel=canonical`, `og:image:width 1200`/`height 800`, `og:image:alt`, `twitter:*` |
+| The three pages at the **ORIGIN** (`--resolve fiddy.fun:443:187.127.148.194`) | byte-identical to `site/index.html`, `site/zh/index.html`, `site/deploy/index.html` (`cmp`, exit 0) |
+| `/client` at the **CDN** | byte-identical to the repo file — Cloudflare rewrote nothing in the head (the `&#64;` pitfall is why that is worth checking) |
+| `https://fiddy.fun/client/assets/client-card.png` at the CDN | 200 `image/png`, 149,442 bytes, sha256 `97682bed…` |
+| … at the ORIGIN | 200 `image/png`, 149,442 bytes, sha256 `97682bed…` — the same bytes |
+| … the same bytes as the repo file | `site/assets/client-card.png` sha256 `97682bed…` |
+| The size, read from the LIVE PNG's own IHDR | **1200×630** |
+| The pixels, measured on the live CDN bytes with `apps/farcaster-web/scripts/lib/png.mjs` | ground `#161715` (the ground the card is painted on and the page's own dark theme), drawing 1008×440 at (91,140) — the poster's art band, not a flat rectangle |
+| What did NOT change | `/client/assets/deploy-card.png` (sha256 `5b9a4b9b…`), `/client/assets/fiddy-splash.png` (`4175fcbf…`, re-fetched cache-busted and plainly through the CDN by the deploy: both `4175fcbf…`), `…/miniapp-sdk.min.js`, `…/open-in-cloud-shell.svg`; `fiddy-59s.mp4`/`.vtt` still on the host (the upload is additive) |
+
+**Not verified**: the unfurl as an actual platform renders it. What a given
+crawler does with `og:image` is the platform's code, and no crawler was driven
+here. What is verified is everything a crawler reads: the tags on all three
+served pages, the bytes at the URL they name, the picture's own size, its
+ground, and that it carries a drawing.
 
 ## Verification performed (2026-10-18)
 
