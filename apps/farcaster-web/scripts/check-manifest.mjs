@@ -26,11 +26,28 @@
  * domain association is the owner's cryptographic approval — carried through
  * unchanged, never regenerated.
  *
+ * And for the splash it also looks INSIDE: the art that shipped was 200x200 and
+ * off-centre (measured 2026-10-22, card t_28b3612c — see the placement block
+ * below), so this gate now measures where the drawing sits, not only how big the
+ * picture is. A sprite that is the right size and in the wrong place is exactly
+ * the defect a header-only check cannot see, and the splash is the first frame
+ * of every launch.
+ *
  *   node scripts/check-manifest.mjs <built web root>    # e.g. apps/farcaster-web/dist
  */
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+
+import {
+  boxCentre,
+  decodePng,
+  dominantColour,
+  hex,
+  minAlpha,
+  rgbOf,
+  visibleBox,
+} from './lib/png.mjs';
 
 const root = process.argv[2];
 if (!root) {
@@ -183,13 +200,78 @@ const ownedPng = (urlString, label, [wantWidth, wantHeight]) => {
       `the ${label} is ${width}x${height}; the spec asks ${wantWidth}x${wantHeight}`,
     );
   }
-  return { pathname: url.pathname, width, height };
+  return { pathname: url.pathname, width, height, bytes: png };
 };
 
 const splash = ownedPng(app.splashImageUrl, 'splash', [200, 200]);
 const icon = ownedPng(app.iconUrl, 'icon', [1024, 1024]);
 const embedImage = ownedPng(app.imageUrl, 'embed image', [1200, 800]);
 
+// WHERE the splash's art sits, not only how big the splash is.
+//
+// Measured 2026-10-22 (card t_28b3612c): the art that shipped was 200x200, a
+// file in this repo, byte-identical live and in the repo — and off-centre. Its
+// drawing's box was (29,16)-(118,117), centre (73.5,66.5) on a canvas whose
+// centre is (100,100), so the launch transition painted Fiddy's mascot into the
+// upper-left of its own square with the empty ground stacked to the right and
+// below: an alignment bug on the first frame of every launch, and nothing in the
+// release could see it, because everything the release measured was right.
+//
+// So: decode the splash and measure the drawing. The drawing is everything that,
+// composited on the colour the manifest paints behind it
+// (`splashBackgroundColor` — the ground the launch transition shows), is not
+// that colour by more than ~30 in RGB: the rule the measurement that found the
+// bug used, which is also the rule the picture was cropped to when it was drawn
+// (`render-share-card.mjs` measures with the same reader). Its box must be
+// centred on the canvas within a couple of pixels.
+const splashImage = decodePng(splash.bytes);
+let splashGround;
+try {
+  splashGround = rgbOf(app.splashBackgroundColor);
+} catch {
+  refuse(
+    `the manifest's splashBackgroundColor is ${app.splashBackgroundColor}, not a #rrggbb colour`,
+  );
+}
+const ground = dominantColour(splashImage);
+const transparentGround = minAlpha(splashImage) < 250;
+const drawn = visibleBox(splashImage, { ground: splashGround, threshold: 30 });
+if (drawn === null) {
+  refuse(`${splash.pathname} carries no drawing at all — a blank splash`);
+}
+// An opaque splash whose ground is not the colour the manifest paints behind it
+// shows up as a rectangle of the wrong colour: the purple-vs-#161715 drift this
+// listing already had once, in the one picture nobody could see a size problem
+// in. (A transparent splash is asking for that colour from the host instead.)
+if (!transparentGround && hex(ground) !== hex(splashGround)) {
+  refuse(
+    `the splash is drawn on ${hex(ground)} while the manifest paints ${app.splashBackgroundColor} behind it`,
+  );
+}
+const drawnCentre = boxCentre(drawn);
+const offBy = Math.max(
+  Math.abs(drawnCentre.x - splash.width / 2),
+  Math.abs(drawnCentre.y - splash.height / 2),
+);
+if (offBy > 2) {
+  refuse(
+    `the splash's art is off-centre: its drawing occupies (${drawn.x0},${drawn.y0})-(${drawn.x1},${drawn.y1}) — centre (${drawnCentre.x},${drawnCentre.y}) on a ${splash.width}x${splash.height} canvas whose centre is (${splash.width / 2},${splash.height / 2}), ${offBy}px away — so the launch transition paints the mark in the wrong place`,
+  );
+}
+// Centred and filling nothing is not a splash either: the mark takes about half
+// the square, the share the app icon gives its own mark. The band is wide on
+// purpose (the drawing's exact share is an art decision, not a spec) — it only
+// refuses a speck and a mark running off the edges.
+const fills = Math.min(
+  drawn.width / splash.width,
+  drawn.height / splash.height,
+);
+if (fills < 0.3 || fills > 0.8) {
+  refuse(
+    `the splash's drawing fills ${Math.round(fills * 100)}% of the square; a mark takes about half of it`,
+  );
+}
+
 console.log(
-  `  manifest ok  ${app.name} "${app.description}" — signed; splash ${splash.pathname} (${splash.width}x${splash.height} on ${app.splashBackgroundColor}), icon ${icon.pathname} (${icon.width}x${icon.height}), embed ${embedImage.pathname} (${embedImage.width}x${embedImage.height}) — every one of them a file in this build, shell and listing agree`,
+  `  manifest ok  ${app.name} "${app.description}" — signed; splash ${splash.pathname} (${splash.width}x${splash.height} on ${app.splashBackgroundColor}; mark ${drawn.width}x${drawn.height} centred at (${drawnCentre.x},${drawnCentre.y})), icon ${icon.pathname} (${icon.width}x${icon.height}), embed ${embedImage.pathname} (${embedImage.width}x${embedImage.height}) — every one of them a file in this build, shell and listing agree`,
 );

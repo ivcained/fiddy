@@ -24,7 +24,7 @@ embed renders as and the provider the client reads through, neither of which the
 | `/api/farcaster/status`, `/api/farcaster/poidh/bounties` | the preview's read API | nginx → `:3218` (`fiddy-preview.service`) |
 | `/client`, `/client/`, `/FSSC/`, `/start` | unchanged | elsewhere, untouched |
 | `/.well-known/farcaster.json` | the signed app-list manifest — Fiddy's listing identity (name, icon, description, splash, webhook) | nginx `alias /var/www/fiddy-well-known/farcaster.json`; the release installs it from `releases/<sha>/web/.well-known/farcaster.json`, i.e. from the repo's `apps/farcaster-web/public/.well-known/farcaster.json` |
-| `/fiddy-splash.png` | the 200×200 splash the manifest and the shell's `fc:miniapp` embed both paint | `releases/<sha>/web/fiddy-splash.png` (a file in this repo) |
+| `/fiddy-splash.png` | the 200×200 splash the manifest and the shell's `fc:miniapp` embed both paint | `releases/<sha>/web/fiddy-splash.png` (a file in this repo, drawn by `apps/farcaster-web/scripts/render-share-card.mjs`) |
 | `/fiddy-embed.png` | the 1200×800 (3:2) embed card the manifest's `imageUrl` and the shell's `fc:miniapp` tag both name | `releases/<sha>/web/fiddy-embed.png` (a file in this repo, drawn by `apps/farcaster-web/scripts/render-share-card.mjs`) |
 | `/brand/fiddy-app-icon.png` | the 1024×1024 icon the manifest's `iconUrl` names — the app's own icon (the same PNG the shell serves as `apple-touch-icon` and the Expo app declares in `apps/fiddy-mobile/app.json`) | `releases/<sha>/web/brand/fiddy-app-icon.png` (a file in this repo) |
 | `/icon.png`, `/image.png`, `/splash.png` | 301s to `/brand/fiddy-app-icon.png`, `/fiddy-embed.png`, `/fiddy-splash.png` — the listing URLs as they stood before 2026-10-22, still answering for anything that cached them | nginx `location = … { return 301 …; }`; see *The listing's pictures* below |
@@ -234,7 +234,12 @@ Rules that come with it:
   is the app's own (one PNG, three surfaces: the Farcaster listing, the shell's
   `apple-touch-icon`, the Expo icon); the embed card is drawn from the repo's
   mascot by `scripts/render-share-card.mjs`, the same script and art system as
-  the og card.
+  the og card. The splash is drawn by that script too, and the gate checks more
+  than its size: it decodes the PNG and holds the DRAWING's bounding box to the
+  centre of the square, because the splash that shipped was the right size, the
+  right file, and off-centre — a mark in the corner of its own square is what the
+  first frame of every launch showed (measured 2026-10-22, card t_28b3612c; see
+  *The splash* below).
 - **Every URL it names must answer 200**, and the well-known path must serve real
   JSON (never a redirect) on **http and https** — a redirect or a 404 there is
   what makes a signing phone answer "error matching manifest" (the debug playbook
@@ -283,6 +288,54 @@ for u in fiddy-splash.png fiddy-embed.png brand/fiddy-app-icon.png; do \
   curl -s -o /dev/null -w "$u %{http_code} %{content_type} %{size_download}\n" https://fiddy.fun/$u; done
 for u in icon.png image.png splash.png; do \
   curl -s -o /dev/null -w "$u %{http_code} -> %{redirect_url}\n" https://fiddy.fun/$u; done
+```
+
+### The splash: one thing in a 200×200 square, and where it sits
+
+The splash is the one picture here that is a COMPOSITION rather than a file found
+somewhere: 200×200, the mascot on the brand's ground `#161715`, no wordmark, no
+glow, no address — a square of that size has room for one thing. It is drawn by
+the third variant of the same generator the og card and the embed card come from:
+
+```bash
+cd apps/farcaster-web && node scripts/render-share-card.mjs splash   # or `all`
+```
+
+Two things about that variant are the whole point:
+
+- **It crops the still to its drawing.** `fiddy-mark-poster.png` is 384×384 and
+  its drawing is a 217×210 box at (89,80) once composited over the ground, so an
+  `<img>` centred by its BOX puts the DRAWING 2.5px right and 3.2px high. The
+  variant measures that box with the same reader the release gate uses
+  (`scripts/lib/png.mjs`), crops in the page's own canvas, and only then places a
+  centred box — so a centred box is a centred mark. It refuses to write a splash
+  whose drawing is not centred.
+- **It is the size the app icon's mark is.** Measured: the icon's drawing is
+  499×550 of 1024, i.e. about half the square, so the splash draws its mark at
+  100px in a 200px square.
+
+Measured 2026-10-22 (card t_28b3612c): the art that shipped from card t_8654d91e
+was a hand-made 200×200 whose drawing occupied (29,16)-(118,117) — centre
+(73.5,66.5) on a canvas whose centre is (100,100) — so the launch transition
+painted Fiddy's mascot into the upper-left of its own square with the empty
+ground stacked to its right and below. Nothing in the release could see it: the
+size was right, the file was this repo's, the bytes were identical live and in
+the repo. `check-manifest.mjs` now decodes the splash (a 200×200 PNG is 40k
+pixels of inflate, no dependency) and refuses a drawing whose box is not centred
+within a couple of pixels, or one that fills less than 30% or more than 80% of
+the square. The shipped picture measures 100×96 at (50,52) — centre (99.5,99.5).
+
+The same measurement on what is LIVE, if a splash ever looks off:
+
+```bash
+curl -s https://fiddy.fun/fiddy-splash.png -o /tmp/live-splash.png
+node --input-type=module -e "
+  import { readFileSync } from 'node:fs';
+  import { boxCentre, decodePng, rgbOf, visibleBox } from './apps/farcaster-web/scripts/lib/png.mjs';
+  const img = decodePng(readFileSync('/tmp/live-splash.png'));
+  const box = visibleBox(img, { ground: rgbOf('#161715') });
+  console.log(img.width + 'x' + img.height, box.width + 'x' + box.height, JSON.stringify(boxCentre(box)));
+"
 ```
 
 ### Rollback
