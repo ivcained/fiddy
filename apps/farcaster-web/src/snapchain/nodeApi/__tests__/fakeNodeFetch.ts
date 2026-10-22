@@ -175,7 +175,12 @@ export const createFixtureNodeFetch = ({
           : read('castsByParent.sample.json');
       }
       case '/v1/reactionsByCast':
-        return read('reactionsByCast.sample.json');
+        // The recorded like page, and a recast page derived from it (same
+        // recorded envelopes, the reaction type switched) so both readers are
+        // tested against pages shaped like the node's own.
+        return params.get('reaction_type') === 'Recast'
+          ? read('reactionsByCast.recast.sample.json')
+          : read('reactionsByCast.sample.json');
       default:
         return fallback?.(request);
     }

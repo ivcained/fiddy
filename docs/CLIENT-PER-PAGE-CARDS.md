@@ -177,15 +177,24 @@ answers them as it did. What changed is that this client hands nobody one — th
 same rule `FiddyUrlUtils.ts` already wrote down for shares. The handle is not
 lost: it is on the page, and on the card the page unfurls as.
 
-Not fixed here, and measured:
+Not fixed there, and measured — both are t_fb198c05, and both are decided:
 
+* a conversation's recasts/quotes/likes tabs read their cast by prefix through
+  `/v2/user-cast`, which a node does not answer either. **Decision, measured:
+  the recasters and the likes are node reads after all** — `/v1/reactionsByCast`
+  pages both kinds by the cast's own (author, hash) (a live node answered a
+  terminal page of 186 recasts and like pages of 200), so those two tabs now
+  point at `/~/conversations/<full hash>/{recasts,reactions}` and have real
+  node-backed readers (`reads.ts`). Quotes are the indexer's job and stay
+  refused, in words that say so. The prefix-cast read itself is now classified
+  with a sentence that names why (`hostedRoutes.ts`), so a cold open of a
+  prefix URL from somewhere else says what it needs instead of "no reader
+  written yet".
 * a quote of an *external* cast URL (`FauxQuoteCast`, out of a
   `warpcast.com/<handle>/<prefix>` embed) has only the prefix in its metadata,
-  and still overlays the prefix route;
-* a conversation's recasts/quotes/likes tabs read a cast by prefix through
-  `/v2/user-cast`, which a node does not answer either.
-
-Both need an indexer read, not a node read — they are their own card.
+  and its overlay now opens the `og.url` the embed itself carries — the one
+  destination that can actually show the quoted cast — instead of this app's
+  prefix route.
 
 ## Host state this needs (once, then it outlives any release)
 
