@@ -79,8 +79,11 @@ else
     --tags snapchain-node \
     --metadata startup-script='#!/bin/bash
 curl -fsSL https://get.docker.com | sh
-apt-get install -y cron
-systemctl enable --now cron'
+apt-get install -y cron git
+systemctl enable --now cron
+git clone https://github.com/ivcained/fiddy /opt/fiddy 2>/dev/null || git -C /opt/fiddy pull --ff-only
+chmod +x /opt/fiddy/bin/fiddy
+ln -sf /opt/fiddy/bin/fiddy /usr/local/bin/fiddy'
 fi
 
 IP="$(gcloud compute instances describe "$NAME" --zone "$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')"

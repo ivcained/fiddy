@@ -34,6 +34,7 @@ Usage: fiddy <command> [options]
               up [--tunnel] [--build]     dev server, SSH tunnel, or prod build
               check                       where the client's reads go today
   doctor      Check local prerequisites
+  install     Put `fiddy` on PATH permanently (symlink into /usr/local/bin)
   config      Show current fiddy configuration
 
 A mainnet read node needs 4 vCPU, 16 GB RAM and 1.5 TB free disk (snapshot
@@ -50,6 +51,17 @@ case "$cmd" in
   node)      source "$FIDDY_REPO/cli/node.sh";      node_main "$@" ;;
   client)    source "$FIDDY_REPO/cli/client.sh";    client_main "$@" ;;
   doctor)    source "$FIDDY_REPO/cli/doctor.sh";    doctor_main "$@" ;;
+  install)
+    target=/usr/local/bin/fiddy
+    if [ -w /usr/local/bin ] 2>/dev/null; then
+      ln -sf "$FIDDY_REPO/bin/fiddy" "$target"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo ln -sf "$FIDDY_REPO/bin/fiddy" "$target"
+    else
+      die "need sudo to write $target — run: sudo ln -sf $FIDDY_REPO/bin/fiddy $target"
+    fi
+    ok "installed: $target → $FIDDY_REPO/bin/fiddy (every new shell finds \`fiddy\` now)"
+    ;;
   config)    config_load; config_show ;;
   ""|-h|--help|help) usage ;;
   *) die "unknown command: $cmd (try: fiddy --help)" ;;
