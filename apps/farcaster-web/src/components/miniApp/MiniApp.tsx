@@ -95,6 +95,10 @@ import {
   LegacyWalletProvider,
 } from '~/components/miniApp/legacyWalletChannel';
 import { MiniAppQualityButton } from '~/components/miniApp/MiniAppQualityButton';
+import {
+  gateMiniAppWire,
+  pinnedMiniAppOrigin,
+} from '~/components/miniApp/miniAppWireGate';
 import { ComposeCastModal } from '~/components/modals/ComposeCastModal';
 import { MiniAppQualityModal } from '~/components/modals/MiniAppQualityModal';
 import {
@@ -556,12 +560,23 @@ function InnerMiniAppContent({
     }
 
     setEndpoint(
-      createIframeEndpoint({
-        iframe,
-        // targetOrigin: '*',
-        targetOrigin: new URL(url).origin,
-        debug,
-      }),
+      // The wire the exposed SDK listens on is pinned to the frame it serves
+      // here, where it is built: the listener lives on this window, so a gate
+      // anywhere further along would be a gate on the wrong side of the message
+      // (`~/components/miniApp/miniAppWireGate`). Only the incoming side is
+      // touched — `emit`'s own `targetOrigin` below stays what it was.
+      gateMiniAppWire(
+        createIframeEndpoint({
+          iframe,
+          // targetOrigin: '*',
+          targetOrigin: new URL(url).origin,
+          debug,
+        }),
+        // Read at message time: a reload hands back a window this effect never
+        // saw, and the gate has to follow the frame that is on screen.
+        () => iframeLoaderRef.current?.iframe?.contentWindow,
+        pinnedMiniAppOrigin(url),
+      ),
     );
   }, [debug, url]);
 
@@ -1400,10 +1415,19 @@ function InnerMiniAppContent({
     preferredWallet,
   ]);
 
+  // The origin this window was launched with, pinned as the exposed SDK's own
+  // allowed origin. The endpoint above is already gated on the frame's window
+  // object; this is the second half, stated where the package reads it, so the
+  // wire holds even if the gate is ever moved or the package's list is passed a
+  // wildcard again. An unpinnable window is not exposed at all rather than
+  // exposed to anyone (`~/components/miniApp/miniAppWireGate`).
+  const launchedOrigin = pinnedMiniAppOrigin(url);
   useExposeToEndpoint({
-    endpoint,
+    endpoint: launchedOrigin ? endpoint : undefined,
     sdk,
-    miniAppOrigin: '*',
+    // Unreachable with no endpoint, and inert if it ever were: no document's
+    // origin is the empty string.
+    miniAppOrigin: launchedOrigin ?? '',
     // @ts-expect-error - cant figure out typing here
     ethProvider: instrumentedProvider,
     debug,
