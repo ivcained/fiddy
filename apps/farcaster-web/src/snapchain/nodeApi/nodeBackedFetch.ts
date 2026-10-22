@@ -673,6 +673,36 @@ export const createNodeBackedFetch = ({
           });
         }
 
+        case '/v2/cast-recasters': {
+          const castHash = searchParams.get('castHash') ?? '';
+          const cursor = searchParams.get('cursor') ?? undefined;
+          const limit = Number(searchParams.get('limit') ?? 15);
+          const { users, nextCursor } = await reader.readCastRecasters({
+            castHash,
+            cursor,
+            limit,
+          });
+          return jsonResponse({
+            result: { users },
+            next: nextCursor ? { cursor: nextCursor } : {},
+          });
+        }
+
+        case '/v2/cast-likes': {
+          const castHash = searchParams.get('castHash') ?? '';
+          const cursor = searchParams.get('cursor') ?? undefined;
+          const limit = Number(searchParams.get('limit') ?? 15);
+          const { likes, nextCursor } = await reader.readCastLikes({
+            castHash,
+            cursor,
+            limit,
+          });
+          return jsonResponse({
+            result: { likes },
+            next: nextCursor ? { cursor: nextCursor } : {},
+          });
+        }
+
         case '/v2/unseen':
           return jsonResponse({ result: await reader.readUnseen() });
 

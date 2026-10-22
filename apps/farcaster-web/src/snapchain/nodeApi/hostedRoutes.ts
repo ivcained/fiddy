@@ -102,6 +102,16 @@ const NODE_ROUTES: { method: string; path: string; why: string }[] = [
   },
   {
     method: 'GET',
+    path: '/v2/cast-recasters',
+    why: 'the accounts that recast a cast are its reaction messages, read by reactionsByCast (recast)',
+  },
+  {
+    method: 'GET',
+    path: '/v2/cast-likes',
+    why: 'the accounts that liked a cast are its reaction messages, read by reactionsByCast (like)',
+  },
+  {
+    method: 'GET',
     path: '/v2/unseen',
     why: 'counts are derived from mentions, reactions and follows since your watermark',
   },
@@ -373,6 +383,16 @@ const HOSTED_ROUTES: { method: string; path: string; why: string }[] = [
     method: 'GET',
     path: '/v2/search-casts',
     why: 'a read node keeps no search index',
+  },
+  {
+    method: 'GET',
+    path: '/v2/cast-quotes',
+    why: 'quotes of a cast are an indexer’s reverse index — a node keeps no list of the casts that embed one',
+  },
+  {
+    method: 'GET',
+    path: '/v2/user-cast',
+    why: 'a cast-hash prefix is an indexer’s lookup — your node addresses a cast by its author and its full hash',
   },
 ];
 
