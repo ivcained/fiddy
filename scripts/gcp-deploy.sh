@@ -114,8 +114,10 @@ Cost honesty: ~\$350/mo while this runs (our own bill). New to GCP? Your \$300
 free credit covers the start — set a calendar reminder NOW to delete the VM or
 decide to keep it before the credit ends.
 
-Next — install the node (from any machine with the fiddy repo):
+Next — install the node (from any machine with the fiddy repo cloned):
 
+  git clone https://github.com/ivcained/fiddy && cd fiddy
+  export PATH="$PWD/bin:$PATH"
   fiddy provision --ssh $(whoami)@$IP
   fiddy node up
   fiddy client up

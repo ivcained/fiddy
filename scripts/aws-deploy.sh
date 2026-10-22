@@ -85,8 +85,10 @@ cat <<EOF2
 Cost honesty: ~\$285/mo at list price while this runs. Stop billing with:
   aws ec2 terminate-instances --region $REGION --instance-ids $IID
 
-Next — install the node (from any machine with the fiddy repo):
+Next — install the node (from any machine with the fiddy repo cloned):
 
+  git clone https://github.com/ivcained/fiddy && cd fiddy
+  export PATH="$PWD/bin:$PATH"
   fiddy provision --ssh ubuntu@$IP
   fiddy node up
   fiddy client up
