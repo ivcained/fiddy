@@ -125,6 +125,15 @@ export default defineConfig(({ mode }) => {
           ),
         },
         {
+          // `@farcaster/core`'s single-file ESM build imports faker at module
+          // scope for its test-data factories, which this app never calls — and
+          // faker's locale corpus alone is 3.6 MB of source, the largest single
+          // contributor to the entry chunk. Answered with a stub that throws if
+          // anything ever does call it: see `config/fakerInterop.mjs`.
+          find: /^@faker-js\/faker$/,
+          replacement: path.resolve(__dirname, './config/fakerInterop.mjs'),
+        },
+        {
           find: /^metamask-ecies-commonjs$/,
           replacement: metamaskEciesCommonJs,
         },

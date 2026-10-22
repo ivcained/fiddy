@@ -118,9 +118,40 @@ const sealedMarkers = [
 
 const priceMarkers = ['api.dexscreener.com', 'no market was found for'];
 
+/* livekit-client is the audio-room transport. It must be reachable only through
+   the lazily-loaded Space provider — a static import from the right rail's
+   "live now" card put the whole WebRTC client in the entry chunk once already
+   (MEASURED 2026-10-22), which is exactly what this catches. */
+const livekitMarkers = ['livekit-pc-transport', 'livekit-dummy-audio-el'];
+
+/* ------------------------------------------------------------------ 1b. faker */
+
+/* faker's locale corpus is the single largest thing that used to sit in this
+   entry chunk (3.6 MB of source), dragged in by `@farcaster/core`'s top-level
+   `import { faker }` for message factories this client never calls. The alias
+   that answers it is `config/fakerInterop.mjs`, and these markers are strings
+   only that corpus carries — an animal breed and a song title from its own
+   locale data — so this fails the moment the corpus is bundled again. */
+const fakerMarkers = ['Abyssinian Shorthorned Zebu', 'A Whole New World (Aladdin'];
+
+const fakerInEntry = fakerMarkers.filter((marker) =>
+  readFileSync(join(assetsDir, entryName), 'utf8').includes(marker),
+);
+
+if (fakerInEntry.length > 0) {
+  fail(
+    `faker's locale corpus is inside the main entry chunk (${entryName}) — "${fakerInEntry[0]}" was found there (see config/fakerInterop.mjs)`,
+  );
+} else {
+  note(
+    `faker's locale corpus is not in the entry chunk (${fakerMarkers.length} markers checked)`,
+  );
+}
+
 for (const [label, markers] of [
   ['the sealed-cast crypto', sealedMarkers],
   ['the price lookup', priceMarkers],
+  ['the audio-room transport', livekitMarkers],
 ]) {
   const holderNames = new Set();
 
