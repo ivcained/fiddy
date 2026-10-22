@@ -23,6 +23,8 @@ Full tutorial (mobile + desktop, protocol concepts explained as you go):
 
 ```bash
 git clone https://github.com/ivcained/fiddy && cd fiddy
+export PATH="$PWD/bin:$PATH"   # puts `fiddy` on PATH for this shell
+                               # (or permanently: sudo ln -sf "$PWD/bin/fiddy" /usr/local/bin/fiddy)
 
 fiddy provision   # (0) compute: one click on GCP (https://fiddy.fun/client/deploy/),
                   #      --gcp / --aws / --ovh / --hetzner, Terraform (terraform/gcp-read-node/),

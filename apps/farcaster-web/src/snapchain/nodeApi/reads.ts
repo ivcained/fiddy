@@ -1383,6 +1383,155 @@ export class NodeBackedReads {
     };
   }
 
+  /**
+   * `GET /v2/cast-recasters` and `GET /v2/cast-likes`: WHO reacted to one cast.
+   *
+   * MEASURED against a live node (t_fb198c05, on the cast the conversation
+   * probe opens): `/v1/reactionsByCast` answers both kinds — a page of 186
+   * recast messages (terminal) and like pages of 200 with more to follow — so
+   * the two lists a conversation's action row paints are node reads after all.
+   * The count on the cast card already pages this same route
+   * (`countReactions`); the only new thing asked here is the messages
+   * themselves, and each one carries the reactor's FID.
+   *
+   * QUOTES are deliberately absent: a quote is a cast that EMBEDS a castId,
+   * and a node keeps no reverse index from an embedded cast to its quoters —
+   * every such shape (`/v1/castsByEmbed`, `/v1/quotesByCast`, …) answered 404
+   * on the same probe. That read stays an indexer's job, and its route says so
+   * in words (`hostedRoutes.ts`).
+   *
+   * The cursor the fork's client hands back is the node's own page token,
+   * passed through unread: both sides treat it as opaque, so one is the other.
+   */
+  private async readCastReactionsPage({
+    castHash,
+    reactionType,
+    cursor,
+    limit,
+  }: {
+    castHash: string;
+    reactionType: 'Like' | 'Recast';
+    cursor?: string;
+    limit?: number;
+  }): Promise<{ messages: NodeMessage[]; nextCursor?: string }> {
+    const targetFid =
+      castAuthorOf(castHash) ?? (await this.resolveCastAuthor(castHash));
+    if (targetFid === undefined) {
+      throw new NodeCannotAnswerError(
+        'Your node addresses a cast by its author and its hash, and this page only has the hash. Open the cast from your feed or a profile and it will load.',
+      );
+    }
+    // Remembered for the rest of the session, exactly as `readThread` does:
+    // the OTHER tab of the same cast must not pay for this lookup twice.
+    rememberCastAuthor(castHash, targetFid);
+
+    // The cast itself, so an unknown hash is said to be unknown rather than
+    // answered with a list that reads as "nobody reacted". Cached by the
+    // conversation page that painted the tab in the common case.
+    const cast = await this.castById(targetFid, castHash);
+    if (!cast?.castAdd) {
+      throw new NodeCannotAnswerError('Your node does not have that cast.');
+    }
+
+    const page = await this.node.reactionsByCast({
+      targetFid,
+      targetHash: castHash,
+      reactionType,
+      pageSize: limit,
+      pageToken: cursor,
+    });
+
+    return {
+      messages: page.messages.filter((message) => message.reaction),
+      ...(page.nextPageToken && !isTerminalPageToken(page.nextPageToken)
+        ? { nextCursor: page.nextPageToken }
+        : {}),
+    };
+  }
+
+  /** `GET /v2/cast-recasters`: the accounts that recast one cast, paged. */
+  async readCastRecasters({
+    castHash,
+    cursor,
+    limit,
+  }: {
+    castHash: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<{ users: ApiUser[]; nextCursor?: string }> {
+    const { messages, nextCursor } = await this.readCastReactionsPage({
+      castHash,
+      reactionType: 'Recast',
+      cursor,
+      limit,
+    });
+
+    // A reactor whose profile cannot be read is dropped rather than drawn as
+    // a row that holds nothing: the same rule `resolveMentionUsers` follows.
+    const users = await mapWithConcurrency(
+      messages,
+      RESOLVE_CONCURRENCY,
+      async (message) => {
+        try {
+          return await this.readAuthor(message.fid);
+        } catch {
+          return undefined;
+        }
+      },
+    );
+
+    return {
+      users: users.filter((user): user is ApiUser => user !== undefined),
+      ...(nextCursor ? { nextCursor } : {}),
+    };
+  }
+
+  /** `GET /v2/cast-likes`: the likes on one cast, paged. */
+  async readCastLikes({
+    castHash,
+    cursor,
+    limit,
+  }: {
+    castHash: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<{ likes: ApiCastReaction[]; nextCursor?: string }> {
+    const { messages, nextCursor } = await this.readCastReactionsPage({
+      castHash,
+      reactionType: 'Like',
+      cursor,
+      limit,
+    });
+
+    const likes = await mapWithConcurrency(
+      messages,
+      RESOLVE_CONCURRENCY,
+      async (message) => {
+        try {
+          const like: ApiCastReaction = {
+            type: 'like',
+            hash: message.hash,
+            reactor: await this.readAuthor(message.fid),
+            timestamp: message.timestampMs,
+            castHash,
+          };
+          return like;
+        } catch {
+          // A like whose reactor cannot be named is not a like this page can
+          // draw; dropping it keeps the count honest to what is rendered.
+          return undefined;
+        }
+      },
+    );
+
+    return {
+      likes: likes.filter(
+        (like): like is ApiCastReaction => like !== undefined,
+      ),
+      ...(nextCursor ? { nextCursor } : {}),
+    };
+  }
+
   /** `GET /v2/user-casts`: one account's own casts, newest first. */
   async readUserCasts({
     fid,

@@ -101,6 +101,8 @@ Next:
   fiddy node up
   fiddy client up
 
+(If 'fiddy: command not found': run  export PATH="$PWD/bin:$PATH"  inside the repo first.)
+
 Tear down (both, or the volume keeps billing):
 
   curl -X DELETE -H "Authorization: Bearer \$HCLOUD_TOKEN" $API/servers/$SERVER_ID
