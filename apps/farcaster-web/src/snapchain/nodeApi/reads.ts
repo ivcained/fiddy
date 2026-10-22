@@ -27,6 +27,7 @@
  */
 
 import {
+  ApiBlockedUser,
   ApiCast,
   ApiCastReaction,
   ApiFeedItemsResult,
@@ -36,6 +37,7 @@ import {
   ApiNotificationCastReply,
   ApiNotificationFollow,
   ApiNotificationGroup,
+  ApiStorageUtilization,
   ApiThreadResult,
   ApiUser,
   ApiVerification,
@@ -47,6 +49,7 @@ import {
   mapWithConcurrency,
   type NodeCastAddBody,
   type NodeMessage,
+  type NodeMessagesPage,
   SnapchainNodeClient,
 } from 'farcaster-node-client';
 
@@ -70,6 +73,7 @@ import {
   exactCount,
   floorCount,
   NodeCount,
+  userMinimalFrom,
 } from './fromNode';
 
 /** Raised when the node genuinely cannot answer a request the app made. */
@@ -111,6 +115,17 @@ const COUNT_PAGE_SIZE = 1000;
 const RESOLVE_CONCURRENCY = 24;
 /** Walk at most this far up a thread looking for its root. */
 const MAX_ANCESTOR_HOPS = 20;
+/**
+ * How far a hash-prefix lookup walks one account's casts before it gives up.
+ *
+ * A node can only be asked for a cast by its author, so a page that carries a
+ * hash prefix (a cast permalink) has to be resolved by walking that account's
+ * casts. Four pages of 100 is deep enough for the prefix of a cast that was
+ * posted in the last few months, and bounded on purpose: a prefix that is not
+ * there must cost a page walk, not an unbounded crawl.
+ */
+const PREFIX_SEARCH_PAGES = 4;
+const PREFIX_SEARCH_PAGE_SIZE = 100;
 
 /**
  * hash → the FID that authored it: the index that makes a hash-only page
@@ -277,6 +292,22 @@ const heldHash = (hashes: Set<string>, hash: string): string | undefined => {
   }
   return undefined;
 };
+
+/**
+ * The snaps channel, as the network actually carries it.
+ *
+ * MEASURED (2026-10-22, a live public read node):
+ *
+ *   GET /v1/castsByParent?url=https://warpcast.com/~/channel/snaps → casts
+ *   GET /v1/castsByParent?url=https://farcaster.xyz/~/channel/snaps → none
+ *
+ * A snap is an ordinary cast whose parent URL is this channel, so an account's
+ * snaps are its own casts with this parent — the same `castsByFid` page every
+ * other cast list on a profile comes from, filtered. `channelParentUrlFor`
+ * would spell the same channel the farcaster.xyz way, which answers empty, so
+ * the spelling is written down here rather than derived.
+ */
+export const SNAPS_CHANNEL_PARENT_URL = 'https://warpcast.com/~/channel/snaps';
 
 /**
  * Reads the hosted API's answers out of a Snapchain node, with the caches a
@@ -719,6 +750,170 @@ export class NodeBackedReads {
         },
       ];
     });
+  }
+
+  // ---------------------------------------------------------------- settings reads
+
+  /**
+   * The accounts this one has blocked, read from the node's own block links.
+   *
+   * MEASURED (a live public read node, 2026-10-22) — a block is a protocol
+   * message, not a hosted list:
+   *
+   *   GET /v1/linksByFid?fid=3&link_type=block
+   *     → MESSAGE_TYPE_LINK_ADD, linkBody { type: 'block', targetFid: 15156 }
+   *
+   * So the settings page's blocked list is answerable from your own node: the
+   * links ARE the list, and each blocked account's profile is read the way every
+   * other profile in this client is. Before this reader existed the page asked
+   * for a reader that had never been written and said so on screen.
+   */
+  async readBlockedUsers({
+    fid,
+    limit,
+  }: {
+    fid: number;
+    limit: number;
+  }): Promise<{ blockedUsers: ApiBlockedUser[]; cursor?: string }> {
+    const pageSize = Math.min(
+      Math.max(Math.trunc(limit) || 1, 1),
+      COUNT_PAGE_SIZE,
+    );
+    const url = `${this.nodeBaseUrl}/v1/linksByFid?fid=${fid}&link_type=block&pageSize=${pageSize}`;
+    const response = await this.fetchImpl(url, { method: 'GET' });
+    if (!response.ok) {
+      throw new NodeCannotAnswerError(
+        `Your node refused the blocked-accounts read (${response.status}).`,
+      );
+    }
+
+    const body = (await response.json()) as {
+      messages?: {
+        data?: {
+          timestamp?: number;
+          linkBody?: { type?: string; targetFid?: number };
+        };
+      }[];
+      nextPageToken?: string;
+    };
+
+    // One row per block link this account wrote. A link of any other type in
+    // this page is not a block and is not claimed as one.
+    const blocks = (body.messages ?? []).flatMap((message) => {
+      const link = message.data?.linkBody;
+      if (link?.type !== 'block' || link.targetFid === undefined) {
+        return [];
+      }
+      return [
+        { targetFid: link.targetFid, timestamp: message.data?.timestamp ?? 0 },
+      ];
+    });
+
+    const profiles = new Map(
+      (
+        await mapWithConcurrency(
+          [...new Set(blocks.map((block) => block.targetFid))],
+          RESOLVE_CONCURRENCY,
+          async (targetFid) => {
+            try {
+              return [targetFid, await this.readUser(targetFid)] as const;
+            } catch {
+              return undefined;
+            }
+          },
+        )
+      ).filter(
+        (entry): entry is readonly [number, ApiUser] => entry !== undefined,
+      ),
+    );
+
+    const blockedUsers: ApiBlockedUser[] = blocks.flatMap((block) => {
+      const user = profiles.get(block.targetFid);
+      // A block whose account could not be read is still a real block: the
+      // fid is the fact, the profile is decoration. The page renders a row
+      // only when it has the profile, so the row is dropped rather than
+      // drawn with an invented name.
+      if (!user) {
+        return [];
+      }
+      return [
+        {
+          blockerFid: fid,
+          blockedFid: block.targetFid,
+          blockedUser: userMinimalFrom(user),
+          createdAt: fcTimestampToMs(block.timestamp),
+        },
+      ];
+    });
+
+    const nextPageToken = body.nextPageToken;
+    return {
+      blockedUsers,
+      ...(nextPageToken && !isTerminalPageToken(nextPageToken)
+        ? { cursor: nextPageToken }
+        : {}),
+    };
+  }
+
+  /**
+   * What this account may store, and what it is using — the node's own numbers.
+   *
+   * MEASURED (2026-10-22, `GET /v1/storageLimitsByFid?fid=3` on a live read
+   * node):
+   *
+   *   casts  limit 108000  used 51340
+   *   links  limit  54000  used  4660
+   *   reactions limit 54000 used 53162     … plus `units: 30`
+   *
+   * Two honest translations, and no invented ones:
+   *
+   *   - `used` is the node's own count of this account's messages in that store;
+   *   - `rented` is the node's own allowance for the store. The hosted page
+   *     draws that column as "used / rented" with the percentage in use, and
+   *     the allowance is exactly the denominator a reader cares about. It is the
+   *     protocol's base plus whatever units this account has bought — the node
+   *     computed it, this client did not guess it.
+   *
+   * `rentedUnits` is the node's `units`, the same storage-unit count the hosted
+   * page shows next to "Buy more storage".
+   */
+  async readStorageUtilization({
+    fid,
+  }: {
+    fid: number;
+  }): Promise<ApiStorageUtilization> {
+    const url = `${this.nodeBaseUrl}/v1/storageLimitsByFid?fid=${fid}`;
+    const response = await this.fetchImpl(url, { method: 'GET' });
+    if (!response.ok) {
+      throw new NodeCannotAnswerError(
+        `Your node refused the storage read (${response.status}).`,
+      );
+    }
+
+    const body = (await response.json()) as {
+      limits?: {
+        name?: string;
+        storeType?: string;
+        limit?: number;
+        used?: number;
+      }[];
+      units?: number;
+    };
+
+    const store = (name: string) => {
+      const entry = (body.limits ?? []).find(
+        (candidate) =>
+          (candidate.name ?? candidate.storeType ?? '').toLowerCase() === name,
+      );
+      return { used: entry?.used ?? 0, rented: entry?.limit ?? 0 };
+    };
+
+    return {
+      rentedUnits: typeof body.units === 'number' ? body.units : 0,
+      casts: store('casts'),
+      reactions: store('reactions'),
+      links: store('links'),
+    };
   }
 
   // ---------------------------------------------------------------- cast reads
@@ -1702,6 +1897,250 @@ export class NodeBackedReads {
     return await this.buildCasts(messages);
   }
 
+  // -------------------------------------------------------- the follow graph
+
+  /**
+   * The accounts that follow this one — the node's own follow links.
+   *
+   * MEASURED (a live public read node, 2026-10-22):
+   *
+   *   GET /v1/linksByTargetFid?target_fid=3&link_type=follow&pageSize=2
+   *     → MESSAGE_TYPE_LINK_ADD, data.fid 6, linkBody { type: 'follow', targetFid: 3 }
+   *
+   * The *author* of the edge is the follower, so the page's edges are the page's
+   * accounts: each one is read the way every other account in this client is.
+   * Before this reader existed the profile's Followers tab asked for a reader
+   * that had never been written and said so on screen.
+   */
+  async readFollowers({
+    fid,
+    limit,
+    cursor,
+  }: {
+    fid: number;
+    limit?: number;
+    cursor?: string;
+  }): Promise<{ users: ApiUser[]; cursor?: string }> {
+    const page = await this.node.linksByTargetFid({
+      targetFid: fid,
+      linkType: 'follow',
+      pageSize: this.pageSizeFor(limit),
+      ...(cursor === undefined ? {} : { pageToken: cursor }),
+    });
+    // The edge's author is the follower; the link's own target is the account
+    // that was followed, which is already known.
+    return await this.usersOfLinks(page, (message) => message.fid);
+  }
+
+  /**
+   * The accounts this one follows — the same edges, read from the other side.
+   *
+   * MEASURED (a live public read node, 2026-10-22):
+   *
+   *   GET /v1/linksByFid?fid=3&link_type=follow&pageSize=2
+   *     → MESSAGE_TYPE_LINK_ADD, linkBody { type: 'follow', targetFid: 3 }
+   *
+   * The account is the *target* of the edge here, so each row's profile is the
+   * one the link points at. A link of another type in the same page is not a
+   * follow and is never claimed as one.
+   */
+  async readFollowing({
+    fid,
+    limit,
+    cursor,
+  }: {
+    fid: number;
+    limit?: number;
+    cursor?: string;
+  }): Promise<{ users: ApiUser[]; cursor?: string }> {
+    const page = await this.node.linksByFid({
+      fid,
+      linkType: 'follow',
+      pageSize: this.pageSizeFor(limit),
+      ...(cursor === undefined ? {} : { pageToken: cursor }),
+    });
+    return await this.usersOfLinks(page, (message) => message.link?.targetFid);
+  }
+
+  /**
+   * The accounts one account follows that also follow a second — a "followers
+   * you know" tab.
+   *
+   * WHY THIS EXISTS: both halves are already node state — the reader's own
+   * follow edges (`linksByFid`) and the other account's followers
+   * (`linksByTargetFid`) — so a tab that said a node kept nothing for this read
+   * was wrong about the node. MEASURED (2026-10-22, a live public read node):
+   * one page of `linksByFid?link_type=follow` for the seeded account is 79
+   * edges of exactly the shape `readFollowing` reads.
+   *
+   * BOUND, SAID OUT LOUD: each side is ONE page (`pageSizeFor`), newest first,
+   * so this is the intersection of the pages the node gave rather than of two
+   * unbounded sets. `totalCount` is the number of rows in this answer, counted
+   * — never a total inferred from a page, which would be a number nobody
+   * measured.
+   */
+  async readFollowersYouKnow({
+    fid,
+    limit,
+  }: {
+    fid: number;
+    limit?: number;
+  }): Promise<{ users: ApiUser[]; totalCount: number }> {
+    const viewerFid = this.requireFid();
+    const [mine, theirs] = await Promise.all([
+      this.node.linksByFid({
+        fid: viewerFid,
+        linkType: 'follow',
+        pageSize: this.pageSizeFor(limit),
+      }),
+      this.node.linksByTargetFid({
+        targetFid: fid,
+        linkType: 'follow',
+        pageSize: this.pageSizeFor(limit),
+      }),
+    ]);
+    const followed = new Set(
+      mine.messages.flatMap((message) => {
+        const target = message.link?.targetFid;
+        return target === undefined ? [] : [target];
+      }),
+    );
+    const known = theirs.messages.filter((message) =>
+      followed.has(message.fid),
+    );
+    const profiles = await this.profilesOf(known.map((message) => message.fid));
+    // The page's order is the node's order, and an account that could not be
+    // read is dropped rather than drawn with an invented name.
+    const users = known.flatMap((message) => {
+      const user = profiles.get(message.fid);
+      return user === undefined ? [] : [user];
+    });
+    return { users, totalCount: users.length };
+  }
+
+  /**
+   * `GET /v2/profile-snap-casts`: one account's casts to the snaps channel.
+   *
+   * The node holds them (see `SNAPS_CHANNEL_PARENT_URL`): this is the same
+   * `castsByFid` page `/v2/user-casts` serves, kept to the casts whose parent
+   * URL is that channel. The page asks for more than it draws, because most of
+   * an account's casts are not snaps.
+   */
+  async readSnapCasts({
+    fid,
+    limit = 15,
+  }: {
+    fid: number;
+    limit?: number;
+  }): Promise<ApiCast[]> {
+    const page = await this.node.castsByFid({
+      fid,
+      pageSize: Math.min(limit * 4, 100),
+      reverse: true,
+    });
+    const messages = page.messages
+      .filter((message) => message.castAdd)
+      .filter(
+        (message) => message.castAdd?.parentUrl === SNAPS_CHANNEL_PARENT_URL,
+      )
+      .slice(0, limit);
+    return await this.buildCasts(messages);
+  }
+
+  /**
+   * One account's cast, found by the first characters of its hash.
+   *
+   * The hosted route takes a username and a hash prefix, and a node cannot
+   * answer either on its own: `castsByFid` is the only way in, so the account's
+   * pages are walked (bounded) until a hash with that prefix is found. Nothing
+   * is guessed from a near miss — a prefix that matches nothing is reported as
+   * not found, and the caller says so in its own words.
+   */
+  async readUserCastByHashPrefix({
+    fid,
+    hashPrefix,
+  }: {
+    fid: number;
+    hashPrefix: string;
+  }): Promise<ApiCast | undefined> {
+    const wanted = hashPrefix.toLowerCase();
+    if (wanted.length === 0) {
+      return undefined;
+    }
+    let pageToken: string | undefined;
+    for (let page = 0; page < PREFIX_SEARCH_PAGES; page += 1) {
+      const casts = await this.node.castsByFid({
+        fid,
+        pageSize: PREFIX_SEARCH_PAGE_SIZE,
+        reverse: true,
+        ...(pageToken === undefined ? {} : { pageToken }),
+      });
+      const match = casts.messages.find(
+        (message) =>
+          message.castAdd && message.hash.toLowerCase().startsWith(wanted),
+      );
+      if (match) {
+        return (await this.buildCasts([match])).at(0);
+      }
+      pageToken = casts.nextPageToken;
+      if (casts.messages.length === 0 || isTerminalPageToken(pageToken)) {
+        break;
+      }
+    }
+    return undefined;
+  }
+
+  /** The page size a paged read asks a node for. */
+  private pageSizeFor(limit: number | undefined): number {
+    return Math.min(Math.max(Math.trunc(limit ?? 25) || 1, 1), COUNT_PAGE_SIZE);
+  }
+
+  /** The next-page cursor, or nothing when the node's page was the last. */
+  private cursorOf(page: { nextPageToken?: string }): { cursor?: string } {
+    const next = page.nextPageToken;
+    return next && !isTerminalPageToken(next) ? { cursor: next } : {};
+  }
+
+  /** The accounts a page of follow edges points at, with the page's cursor. */
+  private async usersOfLinks(
+    page: NodeMessagesPage,
+    accountFid: (message: NodeMessage) => number | undefined,
+  ): Promise<{ users: ApiUser[]; cursor?: string }> {
+    const profiles = await this.profilesOf([
+      ...new Set(
+        page.messages.flatMap((message) => {
+          const fid = accountFid(message);
+          return fid === undefined ? [] : [fid];
+        }),
+      ),
+    ]);
+    // The page's order is the node's order, and a row without a profile is
+    // dropped rather than drawn with an invented name.
+    const users = page.messages.flatMap((message) => {
+      const fid = accountFid(message);
+      const user = fid === undefined ? undefined : profiles.get(fid);
+      return user === undefined ? [] : [user];
+    });
+    return { users, ...this.cursorOf(page) };
+  }
+
+  /** Read a set of accounts, once each, tolerating the ones that cannot be read. */
+  private async profilesOf(fids: number[]): Promise<Map<number, ApiUser>> {
+    return new Map(
+      (
+        await mapWithConcurrency(fids, RESOLVE_CONCURRENCY, async (fid) => {
+          try {
+            return [fid, await this.readUser(fid)] as const;
+          } catch {
+            return undefined;
+          }
+        })
+      ).filter(
+        (entry): entry is readonly [number, ApiUser] => entry !== undefined,
+      ),
+    );
+  }
+
   // -------------------------------------------------- notifications, derived
 
   private seenKey(fid: number): string {
@@ -1766,13 +2205,19 @@ export class NodeBackedReads {
    * The hosted API also sends invites, wallet activity, streak updates, tips
    * and mini-app news; none of those are protocol messages, so they cannot be
    * derived here and are simply absent rather than faked.
+   *
+   * `previewLimit` is how many items each group carries. The tab draws three,
+   * and a group's own page asks for the group itself
+   * (`readNotificationGroup`) — same build, deeper list.
    */
   async readNotifications({
     fid,
     limit = 15,
+    previewLimit = 3,
   }: {
     fid?: number;
     limit?: number;
+    previewLimit?: number;
   } = {}): Promise<ApiNotificationGroup[]> {
     const accountFid = fid ?? this.requireFid();
     const myHashes = await this.myRecentCastHashes(accountFid);
@@ -1831,7 +2276,7 @@ export class NodeBackedReads {
     if (mentionMessages.length > 0) {
       this.rememberCasts(mentionMessages);
       const items = await mapWithConcurrency(
-        mentionMessages.slice(0, 3),
+        mentionMessages.slice(0, previewLimit),
         RESOLVE_CONCURRENCY,
         async (message) => {
           const cast = await this.buildCast({ message, withCounts: false });
@@ -1868,7 +2313,7 @@ export class NodeBackedReads {
     if (replyMessages.length > 0) {
       this.rememberCasts(replyMessages);
       const items = await mapWithConcurrency(
-        replyMessages.slice(0, 3),
+        replyMessages.slice(0, previewLimit),
         RESOLVE_CONCURRENCY,
         async (message) => {
           const cast = await this.buildCast({ message, withCounts: false });
@@ -1907,7 +2352,7 @@ export class NodeBackedReads {
       .filter((entry) => entry.messages.length > 0);
     if (reactionMessages.length > 0) {
       const items: ApiNotificationCastReaction[] = [];
-      for (const entry of reactionMessages.slice(0, 3)) {
+      for (const entry of reactionMessages.slice(0, previewLimit)) {
         const target = castAuthorOf(entry.hash);
         const targetMessage =
           target !== undefined
@@ -1962,7 +2407,7 @@ export class NodeBackedReads {
     const followMessages = follows.messages.filter((message) => message.link);
     if (followMessages.length > 0) {
       const items = await mapWithConcurrency(
-        followMessages.slice(0, 3),
+        followMessages.slice(0, previewLimit),
         RESOLVE_CONCURRENCY,
         async (message) => {
           const actor = await this.readAuthor(message.fid);
@@ -1989,6 +2434,48 @@ export class NodeBackedReads {
     }
 
     return groups.sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+  }
+
+  /**
+   * `GET /v2/notification-group`: the items of one group the notifications tab
+   * drew.
+   *
+   * WHY THIS EXISTS: the groups this client shows ARE the node's own messages,
+   * and each carries the id this reader made for it (`mentions:<fid>`,
+   * `replies:<fid>`, `reactions:<fid>`, `follows:<fid>`) — so a group a reader
+   * opened is a group this reader can fill. The tab asks for three-item
+   * previews; a group's own page asks for the group, so the same build runs with
+   * a deeper preview limit rather than a second implementation.
+   *
+   * The kinds a node holds nothing for — frame and mini-app notifications,
+   * channel role invites — are refused in words that name the missing service,
+   * never as an empty list that would read as "there is nothing here".
+   */
+  async readNotificationGroup({
+    groupId,
+    limit = 25,
+  }: {
+    groupId: string;
+    limit?: number;
+  }): Promise<ApiNotificationGroup['previewItems']> {
+    if (groupId.length === 0) {
+      throw new NodeCannotAnswerError(
+        'This read needs a notification group id: open a group from your notifications and its items load from your node.',
+      );
+    }
+    const fid = this.requireFid();
+    const groups = await this.readNotifications({
+      fid,
+      limit: Math.max(limit, 25),
+      previewLimit: limit,
+    });
+    const group = groups.find((candidate) => candidate.id === groupId);
+    if (group === undefined) {
+      throw new NodeCannotAnswerError(
+        `Your node has no group “${groupId}” to open. It carries mentions, replies, likes and follows; the other kinds of notification group come from Warpcast’s own notification service, which a read node does not hold.`,
+      );
+    }
+    return group.previewItems;
   }
 
   /**
