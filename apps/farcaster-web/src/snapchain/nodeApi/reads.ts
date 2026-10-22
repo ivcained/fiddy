@@ -92,6 +92,16 @@ export interface CastCounts {
 }
 
 /**
+ * One cast a counts pass is about, addressed the way a node addresses a cast:
+ * its author's FID and its hash. A Snapchain node shards by FID, so a hash
+ * alone cannot be looked up — every read of one cast carries both.
+ */
+export interface CastCountsTarget {
+  fid: number;
+  hash: string;
+}
+
+/**
  * Where a page's counts go when they are read behind its paint.
  *
  * Only counts that were really read arrive here: a count whose read failed is
@@ -1029,7 +1039,7 @@ export class NodeBackedReads {
   async readCastCounts({
     targets,
   }: {
-    targets: { fid: number; hash: string }[];
+    targets: CastCountsTarget[];
   }): Promise<CastCounts[]> {
     if (targets.length === 0) {
       return [];
@@ -1038,10 +1048,7 @@ export class NodeBackedReads {
     const read = await mapWithConcurrency(
       targets,
       RESOLVE_CONCURRENCY,
-      async (target: {
-        fid: number;
-        hash: string;
-      }): Promise<CastCounts | undefined> => {
+      async (target: CastCountsTarget): Promise<CastCounts | undefined> => {
         const { fid, hash } = target;
         try {
           const [reactions, recasts] = await Promise.all([
@@ -1084,7 +1091,7 @@ export class NodeBackedReads {
     messages: NodeMessage[];
     onCounts: CastCountsSink;
   }): void {
-    const targets: { fid: number; hash: string }[] = [];
+    const targets: CastCountsTarget[] = [];
     const seen = new Set<string>();
     for (const message of messages) {
       const key = `${message.fid}:${message.hash}`;

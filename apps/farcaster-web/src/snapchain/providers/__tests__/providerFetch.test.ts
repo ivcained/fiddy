@@ -824,3 +824,90 @@ describe('createProviderBackedFetch: which server can answer', () => {
     expect(direct).toEqual([]);
   });
 });
+
+/**
+ * The counts of casts this browser already holds (card t_43249104): a restored
+ * feed page carries no engagement numbers and is not re-read, so the numbers are
+ * all it needs — and they are read from a node, whichever server is live.
+ */
+describe('createProviderBackedFetch: the counts of a restored page', () => {
+  /** A node adapter whose reader answers a counts pass, and records it. */
+  const stubCountsAdapter = () => {
+    const passes: { nodeBaseUrl: string; targets: unknown }[] = [];
+    const factory = (({ nodeBaseUrl }: { nodeBaseUrl: string }) => ({
+      fetch: (async () => jsonResponse({ result: {} })) as typeof fetch,
+      reads: {
+        readCastCounts: async ({ targets }: { targets: unknown }) => {
+          passes.push({ nodeBaseUrl, targets });
+          return [
+            { hash: '0xa', reactions: { count: 7 }, recasts: { count: 2 } },
+          ];
+        },
+      } as never,
+      log: [],
+    })) as unknown as typeof import('~/snapchain/nodeApi/nodeBackedFetch').createNodeBackedFetch;
+    return { passes, factory };
+  };
+
+  it('reads them from a node even when the live server is not one', async () => {
+    // A count is a set of protocol messages: Neynar's index keeps a profile, a
+    // thread and a page, but counting reactions across a cast is the node's own
+    // read (`reads.ts` `countReactions`), which is why this is a node-only read
+    // like the feed itself.
+    const { passes, factory } = stubCountsAdapter();
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => neynarProvider(),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: fetch,
+      createNodeAdapter: factory,
+      getProviderOrder: () => [
+        neynarProvider(),
+        publicNodeProvider('https://relay.example'),
+      ],
+    });
+
+    const counts = await handle.readCastCounts([{ fid: 3, hash: '0xa' }]);
+
+    expect(counts).toEqual([
+      { hash: '0xa', reactions: { count: 7 }, recasts: { count: 2 } },
+    ]);
+    expect(passes).toEqual([
+      {
+        nodeBaseUrl: 'https://relay.example',
+        targets: [{ fid: 3, hash: '0xa' }],
+      },
+    ]);
+    // A pass is not a fork request: nothing was routed, so the log says nothing.
+    expect(handle.log).toEqual([]);
+  });
+
+  it('asks the build’s own node when nothing has been measured yet', async () => {
+    const { passes, factory } = stubCountsAdapter();
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => null,
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: fetch,
+      createNodeAdapter: factory,
+    });
+
+    await handle.readCastCounts([{ fid: 3, hash: '0xb' }]);
+
+    expect(passes[0]!.nodeBaseUrl).toBe('/snapchain-api');
+  });
+
+  it('asks nothing, and builds no adapter, for an empty pass', async () => {
+    const { passes, factory } = stubCountsAdapter();
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => null,
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: fetch,
+      createNodeAdapter: factory,
+    });
+
+    expect(await handle.readCastCounts([])).toEqual([]);
+    expect(passes).toEqual([]);
+  });
+});

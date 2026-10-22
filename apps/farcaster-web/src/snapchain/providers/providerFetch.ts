@@ -70,7 +70,9 @@ import {
 } from '~/snapchain/nodeApi/nodeWrites';
 import {
   castAuthorOf,
+  type CastCounts,
   type CastCountsSink,
+  type CastCountsTarget,
   channelParentUrlFor,
 } from '~/snapchain/nodeApi/reads';
 
@@ -166,6 +168,27 @@ export interface ProviderBackedFetchHandle {
   fetch: typeof fetch;
   /** Every request, with the provider that answered it — evidence, not logs. */
   log: { path: string; providerId: string; kind: NodeProvider['kind'] }[];
+  /**
+   * The like and recast counts of casts this browser ALREADY holds — the read a
+   * restored feed page asks for (card t_43249104).
+   *
+   * A feed page kept in this browser's own storage (`~/lib/feedCache`) was
+   * written by the node-backed path, which builds a page WITHOUT its engagement
+   * counts (`nodeApi/reads.ts` `readFeed`, `withCounts: onCounts === undefined`).
+   * So a re-open inside the three-minute staleness window paints the stored page
+   * and issues no page read at all — and with no page read there is no count
+   * wave either: no `readFeed`, no `startCountsBehind`, no numbers, ever. That is
+   * the state this method is for: the page is already on screen and only its
+   * counts are missing.
+   *
+   * It answers from the same node a route the table classifies `node` is read
+   * from (`nodeForNodeOnlyRead`) and through the same `readCastCounts` a page's
+   * own wave uses, so a restored page's numbers are the numbers a read page
+   * would have carried. A count the node could not read is left OUT of the
+   * answer rather than answered with 0 (`CastCounts`), and nothing is re-read:
+   * the page's casts, text and authors are all in hand.
+   */
+  readCastCounts: (targets: CastCountsTarget[]) => Promise<CastCounts[]>;
 }
 
 interface ParsedRequest {
@@ -369,6 +392,26 @@ export const createProviderBackedFetch = ({
       nodes[0] ??
       buildConfiguredNode()
     );
+  };
+
+  /**
+   * The counts of casts this browser already holds, read from a node — see the
+   * handle's own `readCastCounts` for why a restored page needs this and what it
+   * deliberately does not do (re-read the page).
+   *
+   * The node is chosen the way every other node-only read's node is chosen
+   * (`nodeForNodeOnlyRead`): the reader's own list, the live node on it, else the
+   * address this build was configured with. Whichever it is, it is a NODE: a
+   * count is a set of protocol messages, and no non-node server in this catalog
+   * keeps them.
+   */
+  const readCastCounts = async (
+    targets: CastCountsTarget[],
+  ): Promise<CastCounts[]> => {
+    if (targets.length === 0) {
+      return [];
+    }
+    return nodeAdapter(nodeForNodeOnlyRead()).reads.readCastCounts({ targets });
   };
 
   /**
@@ -847,5 +890,5 @@ export const createProviderBackedFetch = ({
     return response;
   }) as typeof fetch;
 
-  return { fetch: providerBackedFetch, log };
+  return { fetch: providerBackedFetch, log, readCastCounts };
 };
