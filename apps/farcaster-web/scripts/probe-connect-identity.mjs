@@ -297,6 +297,22 @@ const open = async ({ label, width }) => {
     { timeout: 60_000 },
   );
 
+  // The front door paints before its sign-in button does (the shell and its
+  // providers land first), so WAIT for the button instead of clicking whatever
+  // is on screen at that instant. Measured 2026-10-22: a desktop context that
+  // clicked one paint too early never signed in, and the run then failed five
+  // checks later as "not signed in" — a harness race reported as a product bug.
+  await page
+    .waitForFunction(
+      () =>
+        Array.from(document.querySelectorAll('button, a, [role=button]')).some(
+          (el) => /go social/i.test((el.innerText || '').replace(/\s+/g, ' ')),
+        ),
+      undefined,
+      { timeout: 120_000 },
+    )
+    .catch(() => undefined);
+
   const social = await findButton(page, 'go social');
   if (social) {
     await social.element.click();
