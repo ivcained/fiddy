@@ -29,7 +29,7 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/dwr/0x50184b62b4c52fd76628713562e1eda3dccaf63dPrefix": {
@@ -58,7 +58,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/0x50184b62b4c52fd76628713562e1eda3dccaf63dPrefix/quotes": {
@@ -87,8 +87,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page couldn’t load",
-    "Explore isn’t on your node"
+    "This page couldn\u2019t load",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/0x50184b62b4c52fd76628713562e1eda3dccaf63dPrefix/reactions": {
@@ -117,8 +117,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page couldn’t load",
-    "Explore isn’t on your node"
+    "This page couldn\u2019t load",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/0x50184b62b4c52fd76628713562e1eda3dccaf63dPrefix/recasts": {
@@ -147,8 +147,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page couldn’t load",
-    "Explore isn’t on your node"
+    "This page couldn\u2019t load",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/assets": {
@@ -185,8 +185,8 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/casts-and-replies": {
@@ -215,7 +215,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/followers": {
@@ -244,7 +244,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/followers-you-know": {
@@ -273,7 +273,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/following": {
@@ -302,7 +302,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/likes": {
@@ -339,8 +339,8 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/pack/1": {
@@ -372,8 +372,8 @@
     "GET /~api/v2/starter-pack"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/packs": {
@@ -405,8 +405,8 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/dwr/referral": {
@@ -507,7 +507,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/miniapps/1/?/*": {
@@ -539,8 +539,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/miniapps/editors-choice": {
@@ -569,7 +569,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/recovery": {
@@ -654,7 +654,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/welcome/apps": {
@@ -686,7 +686,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/welcome/brain": {
@@ -718,7 +718,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/welcome/name": {
@@ -750,7 +750,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/welcome/ready": {
@@ -782,7 +782,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/admin/engagement-ring-candidates": {
@@ -829,8 +829,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/agent": {
@@ -859,7 +859,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/agent/apps": {
@@ -888,7 +888,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/agent/brains": {
@@ -917,7 +917,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/apps": {
@@ -946,7 +946,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/apps/trending": {
@@ -975,7 +975,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/apps/your-apps": {
@@ -1007,7 +1007,7 @@
     "GET /~api/v1/app-launcher"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/audio-room/1": {
@@ -1042,7 +1042,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/bookmarks": {
@@ -1074,8 +1074,8 @@
     "GET /~api/v2/bookmarked-casts"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/channel/ai": {
@@ -1107,7 +1107,7 @@
     "GET /~api/v1/channel-details"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/channel/ai/casts": {
@@ -1139,7 +1139,7 @@
     "GET /~api/v1/channel-details"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/channel/ai/followers": {
@@ -1171,7 +1171,7 @@
     "GET /~api/v1/channel-users"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/channel/ai/followers-you-know": {
@@ -1203,8 +1203,8 @@
     "GET /~api/v2/channel-followers-you-know"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/channel/ai/join": {
@@ -1241,7 +1241,7 @@
     "GET /~api/v1/channel-users"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/channel/ai/settings": {
@@ -1273,7 +1273,7 @@
     "GET /~api/v1/channel-details"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/channel/ai/settings/general": {
@@ -1302,8 +1302,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page couldn’t load",
-    "Explore isn’t on your node"
+    "This page couldn\u2019t load",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/cloudflare-challenge/1": {
@@ -1332,7 +1332,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/code/SWEEPCODE1": {
@@ -1369,7 +1369,7 @@
     "GET /~api/v2/search-channels"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/connect": {
@@ -1403,7 +1403,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/conversations/0x50184b62b4c52fd76628713562e1eda3dccaf63d": {
@@ -1435,7 +1435,7 @@
     "GET /~api/v1/user-thread-hidden-replies"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/conversations/0x50184b62b4c52fd76628713562e1eda3dccaf63d/quotes": {
@@ -1467,7 +1467,7 @@
     "GET /~api/v1/frame"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/conversations/0x50184b62b4c52fd76628713562e1eda3dccaf63d/reactions": {
@@ -1499,8 +1499,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/conversations/0x50184b62b4c52fd76628713562e1eda3dccaf63d/recasts": {
@@ -1532,8 +1532,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/debug": {
@@ -1562,7 +1562,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/debug/admin-token": {
@@ -1591,7 +1591,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/debug/casts": {
@@ -1620,8 +1620,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page couldn’t load",
-    "Explore isn’t on your node"
+    "This page couldn\u2019t load",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/debug/embedded-wallet": {
@@ -1650,7 +1650,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/deposit-bonuses": {
@@ -1682,7 +1682,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/developers": {
@@ -1738,7 +1738,7 @@
     "GET /~api/v2/api-keys"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/developers/frames": {
@@ -1880,7 +1880,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/explore/channels": {
@@ -1912,8 +1912,8 @@
     "GET /~api/v2/discover-channels"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/explore/users": {
@@ -1948,8 +1948,8 @@
     "GET /~api/v2/discover-channels"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/following": {
@@ -1978,7 +1978,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/frame-analytics": {
@@ -2010,8 +2010,8 @@
     "GET /~api/v2/global-frame-analytics"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/frames": {
@@ -2040,7 +2040,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/frames/launch": {
@@ -2068,7 +2068,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Direct casts isn’t on your node"
+    "Direct casts isn\u2019t on your node"
    ]
   },
   "/~/inbox/create/3": {
@@ -2091,7 +2091,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Direct casts isn’t on your node"
+    "Direct casts isn\u2019t on your node"
    ]
   },
   "/~/mini-apps": {
@@ -2120,7 +2120,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/mini-apps/launch": {
@@ -2157,7 +2157,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/mobile": {
@@ -2191,7 +2191,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/notifications": {
@@ -2220,7 +2220,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/notifications/casts": {
@@ -2249,7 +2249,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/notifications/channel-role-invites": {
@@ -2281,8 +2281,8 @@
     "GET /~api/v2/notification-group"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/notifications/frames": {
@@ -2314,8 +2314,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/notifications/mini-apps": {
@@ -2347,8 +2347,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/privacy-policy": {
@@ -2382,7 +2382,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/pro-upsell": {
@@ -2411,7 +2411,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/profiles/3": {
@@ -2443,7 +2443,7 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/profiles/3/assets": {
@@ -2477,7 +2477,7 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/profiles/3/casts-and-replies": {
@@ -2530,7 +2530,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/profiles/3/followers-you-know": {
@@ -2559,7 +2559,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/profiles/3/following": {
@@ -2588,7 +2588,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/profiles/3/likes": {
@@ -2622,7 +2622,7 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/profiles/3/packs": {
@@ -2656,7 +2656,7 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/profiles/3/snaps": {
@@ -2688,7 +2688,7 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/r/dwr": {
@@ -2725,8 +2725,8 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/recovery-init": {
@@ -2755,7 +2755,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/referral-code/SWEEPCODE1": {
@@ -2791,7 +2791,7 @@
     "POST /~api/v2/get-referral-code-join-info"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/referral/3": {
@@ -2846,7 +2846,7 @@
     "POST /~api/v2/get-referral-code-join-info"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/referrals": {
@@ -2877,7 +2877,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/referrals/list": {
@@ -2909,7 +2909,7 @@
     "GET /~api/v2/referrals"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/saved": {
@@ -2941,8 +2941,8 @@
     "GET /~api/v2/bookmarked-casts"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/saved/starter-packs": {
@@ -2974,8 +2974,8 @@
     "GET /~api/v2/starter-packs"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/sealed": {
@@ -3004,7 +3004,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/search/channels": {
@@ -3036,8 +3036,8 @@
     "GET /~api/v2/discover-channels"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/search/mini-apps": {
@@ -3066,7 +3066,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/search/recent": {
@@ -3098,8 +3098,8 @@
     "GET /~api/v2/discover-channels"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/search/top": {
@@ -3131,8 +3131,8 @@
     "GET /~api/v2/discover-channels"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/search/users": {
@@ -3167,8 +3167,8 @@
     "GET /~api/v2/discover-channels"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/settings/advanced": {
@@ -3388,7 +3388,7 @@
     "GET /~api/v2/get-twitter-following"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/settings/mini-apps": {
@@ -3435,7 +3435,7 @@
     "GET /~api/v2/get-muted-keywords"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/settings/muted-users": {
@@ -3461,7 +3461,7 @@
     "GET /~api/v2/get-muted-users"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/settings/muted-words": {
@@ -3487,7 +3487,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/settings/mutes-and-blocks": {
@@ -3597,7 +3597,7 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/settings/storage": {
@@ -3623,7 +3623,7 @@
     "GET /~api/v2/rent-storage-offerings"
    ],
    "panels": [
-    "This page isn’t on your node"
+    "This page isn\u2019t on your node"
    ]
   },
   "/~/settings/verifications": {
@@ -3712,7 +3712,7 @@
     "GET /~api/v1/audio-rooms"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/spaces/1": {
@@ -3745,17 +3745,21 @@
     "GET /~api/v2/direct-cast-inbox"
    ],
    "panels": [
-    "Explore isn’t on your node"
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/starter-packs": {
-   "verdict": "works",
-   "refusals": [],
+   "verdict": "refused",
+   "refusals": [
+    "GET /~api/v2/starter-packs"
+   ],
    "panels": []
   },
   "/~/starter-packs/1": {
-   "verdict": "works",
-   "refusals": [],
+   "verdict": "refused",
+   "refusals": [
+    "GET /~api/v2/starter-pack"
+   ],
    "panels": []
   },
   "/~/suggested-starter-packs": {
@@ -3787,8 +3791,8 @@
     "GET /~api/v2/starter-packs/suggested"
    ],
    "panels": [
-    "This page isn’t on your node",
-    "Explore isn’t on your node"
+    "This page isn\u2019t on your node",
+    "Explore isn\u2019t on your node"
    ]
   },
   "/~/support": {
