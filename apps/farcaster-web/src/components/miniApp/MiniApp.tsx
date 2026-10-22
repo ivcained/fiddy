@@ -86,6 +86,10 @@ import {
 } from '~/components/iframes/IFrameLoader';
 import { FrameIconImage } from '~/components/images/FrameIconImage';
 import { Image } from '~/components/images/Image';
+import {
+  createLegacyWalletChannel,
+  LegacyWalletProvider,
+} from '~/components/miniApp/legacyWalletChannel';
 import { MiniAppQualityButton } from '~/components/miniApp/MiniAppQualityButton';
 import { ComposeCastModal } from '~/components/modals/ComposeCastModal';
 import { MiniAppQualityModal } from '~/components/modals/MiniAppQualityModal';
@@ -515,9 +519,17 @@ function InnerMiniAppContent({
     emit?.({ event: 'primary_button_clicked' });
   };
 
-  const handleProviderRequest = useCallback(async () => {
-    throw new Error('not implemented');
-  }, []);
+  // The wallet channel an older mini app SDK asks through, instead of the
+  // host's own provider channel. It forwards to the instrumented wallet — see
+  // `legacyWalletChannel.ts` for why the provider is reached through a ref and
+  // why the old answer ('not implemented') was a lie this host contradicted.
+  const legacyWalletProviderRef = useRef<LegacyWalletProvider | undefined>(
+    undefined,
+  );
+  const handleProviderRequest = useMemo(
+    () => createLegacyWalletChannel(() => legacyWalletProviderRef.current),
+    [],
+  );
 
   const locationContext: Context.LocationContext | undefined = useMemo(
     () => (context && context.type !== 'dev_preview' ? context : undefined),
@@ -1328,6 +1340,11 @@ function InnerMiniAppContent({
     ethProvider: instrumentedProvider,
     debug,
   });
+
+  // Filled during render, not in an effect: the mini app SDK above is built
+  // before the wallet is instrumented, and a mini app that asks for the wallet
+  // the instant it loads must find the instrumented one, not an empty ref.
+  legacyWalletProviderRef.current = instrumentedProvider;
 
   // We always start out from minimized state so that we can animate it open
   const [showMiniAppAsMinimized, setShowMiniAppAsMinimized] =

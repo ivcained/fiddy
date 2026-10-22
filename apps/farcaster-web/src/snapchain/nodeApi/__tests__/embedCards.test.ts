@@ -339,6 +339,26 @@ describe('reading a page once, per embed', () => {
     expect(resolver.cardOf('https://slow.example/page')).toBeUndefined();
   });
 
+  it('reads a page anonymously, and never says which cast asked', async () => {
+    // The in-browser read is the privacy surface the policy names
+    // (`docs/CLIENT-MINIAPP-FEED.md` §4). What keeps it minimal is the request
+    // itself, so this holds the request: no credentials, and no referrer — a
+    // referrer would hand the page's host which cast the reader was looking at.
+    const fetchImpl = vi.fn(async () =>
+      htmlResponse(page('<title>Just a link</title>')),
+    );
+    const resolver = createEmbedCardResolver({ fetchImpl, storage: null });
+
+    await resolver.resolve(['https://link.example/page']);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [, init] = (
+      fetchImpl.mock.calls as unknown as [unknown, RequestInit?][]
+    )[0]!;
+    expect(init?.credentials).toBe('omit');
+    expect(init?.referrerPolicy).toBe('no-referrer');
+  });
+
   it('remembers a card for the next session, like the media kinds do', async () => {
     const store = new Map<string, string>();
     const storage = {

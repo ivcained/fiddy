@@ -482,7 +482,14 @@ export const createEmbedCardResolver = (
         method: 'GET',
         headers: { accept: 'text/html,application/xhtml+xml' },
         signal: controller.signal,
+        // Reading a page from the reader's own browser is how a link's card is
+        // found when nothing else can answer, and it is a privacy surface: that
+        // read tells the page's host the reader's address and that somebody is
+        // looking at this cast. `credentials: 'omit'` keeps it anonymous of the
+        // session; `referrerPolicy: 'no-referrer'` keeps it from also saying
+        // WHICH cast, which is what a referrer would hand over for free.
         credentials: 'omit',
+        referrerPolicy: 'no-referrer',
         redirect: 'follow',
       });
       if (response.ok && isHtmlResponse(response)) {
