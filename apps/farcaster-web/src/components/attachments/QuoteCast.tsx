@@ -4,8 +4,6 @@ import {
   ApiCastVideoEmbed,
   ApiMediaV2,
   ApiQuoteCastEmbed,
-  CastHashPrefix,
-  getCastHashPrefix,
 } from 'farcaster-client-data';
 import {
   CastClickType,
@@ -13,7 +11,7 @@ import {
   getCastSnap,
   processMediasForRendering,
   useHydratedQuoteCast,
-  usePrefetchUserThreadCasts,
+  usePrefetchThread,
   useTrackCastClick,
 } from 'farcaster-client-hooks';
 import { PlayIcon } from 'lucide-react';
@@ -26,7 +24,7 @@ import {
 import { Avatar } from '~/components/avatar/Avatar';
 import { CastAuthorLine } from '~/components/casts/CastAuthorLine';
 import { Image } from '~/components/images/Image';
-import { LinkToConversationWithUsername } from '~/components/links/LinkToConversationWithUsername';
+import { LinkToConversationWithoutUsername } from '~/components/links/LinkToConversationWithoutUsername';
 import { useUserAppContext } from '~/contexts/UserAppContextProvider';
 
 import { SnapEmbedAttachment } from './SnapEmbedAttachment';
@@ -46,26 +44,18 @@ const QuoteCast: FC<QuoteCastProps> = memo(
     variant = 'default',
   }) => {
     const trackCastClick = useTrackCastClick();
-    const prefetchUserThreadCasts = usePrefetchUserThreadCasts();
+    const prefetchThread = usePrefetchThread();
     const hydratedCast = useHydratedQuoteCast({ cast });
 
     const { regularCastByteLimit } = useUserAppContext();
 
-    const params = useMemo(() => {
-      if (typeof cast.author.username === 'undefined') {
-        return undefined;
-      }
-
-      const castHashPrefix = getCastHashPrefix({ castHash: cast.hash });
-
-      return {
-        username: cast.author.username,
-        castHashPrefix: castHashPrefix,
-      } as {
-        username: string;
-        castHashPrefix: CastHashPrefix;
-      };
-    }, [cast.author.username, cast.hash]);
+    /**
+     * Where this card's overlay goes: the quoted cast's own page, by full hash.
+     * A quote of a cast this app holds carries the whole hash, so it does not
+     * need — and must not use — the `/<handle>/<0x prefix>` route, which the
+     * node-backed client cannot read (card t_5068bb26).
+     */
+    const params = useMemo(() => ({ castHash: cast.hash }), [cast.hash]);
 
     const quotedCastImageEmbeds = useMemo(() => {
       return hydratedCast.embeds?.images || [];
@@ -168,16 +158,11 @@ const QuoteCast: FC<QuoteCastProps> = memo(
     ]);
 
     const optimisticallyPrefetchQuoteCast = useCallback(() => {
-      if (typeof params === 'undefined') {
-        return;
-      }
-
-      prefetchUserThreadCasts({
-        castHashPrefix: params.castHashPrefix,
-        username: params.username,
+      prefetchThread({
+        castHash: cast.hash,
         shouldAvoidUpdatingGlobalCache: true,
       });
-    }, [params, prefetchUserThreadCasts]);
+    }, [cast.hash, prefetchThread]);
 
     return (
       <div
@@ -226,8 +211,8 @@ const QuoteCast: FC<QuoteCastProps> = memo(
             <QuoteCastImageEmbeds images={quotedCastImageEmbeds} />
           </div>
         )}
-        {typeof params !== 'undefined' && !disabled && (
-          <LinkToConversationWithUsername
+        {!disabled && (
+          <LinkToConversationWithoutUsername
             className="absolute inset-0"
             params={params}
             title={''}

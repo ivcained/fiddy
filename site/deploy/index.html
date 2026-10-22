@@ -82,10 +82,23 @@ bin/fiddy node up --local</span></pre>
     </div>
 
     <div class="provider">
+      <div class="phead"><strong>AWS</strong><span class="price">~$285/mo · default cloud path</span></div>
+      <p class="dim prow">Open <a href="https://console.aws.amazon.com" target="_blank" rel="noopener">console.aws.amazon.com</a> → the <strong>CloudShell</strong> icon (<code style="font-family:var(--mono)">&gt;_</code> top bar) — pre-authenticated. One line:</p>
+      <pre class="pcmd"><span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span></pre>
+      <p class="dim prow" style="font-size:13px"><strong>Why AWS is the default:</strong> Hetzner caps new accounts at 1024 GB of volume
+      storage — a resize past that is refused with <code style="font-family:var(--mono)">resource_limit_exceeded</code>,
+      which is not enough for an unmodified node restore. A brand-new Hetzner account cannot follow this tutorial
+      to the end. AWS lets the root volume simply be 2 TB, so the default is AWS.</p>
+    </div>
+
+    <div class="provider">
       <div class="phead"><strong>Hetzner</strong><span class="price">~€120/mo · cheapest cloud</span></div>
       <p class="dim prow">Get an API token at <a href="https://console.hetzner.cloud" target="_blank" rel="noopener">console.hetzner.cloud</a> (project → Security → API tokens), then:</p>
       <pre class="pcmd"><span class="k">export HCLOUD_TOKEN=…
 git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/hetzner-deploy.sh</span></pre>
+      <p class="dim prow" style="font-size:13px">Roughly a third of AWS's price and fully supported <em>once your account's
+      volume quota has been raised past 1024 GB</em> — new accounts are capped below what the node needs
+      (see the AWS note above).</p>
     </div>
 
     <div class="provider">
@@ -93,12 +106,6 @@ git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/hetzner-
       <p class="dim prow">Create API credentials at <a href="https://api.ovh.com/createToken/" target="_blank" rel="noopener">api.ovh.com/createToken</a> (GET+POST on /cloud/*), then:</p>
       <pre class="pcmd"><span class="k">export OVH_APPLICATION_KEY=… OVH_APPLICATION_SECRET=… OVH_CONSUMER_KEY=… OVH_PUBLIC_CLOUD_PROJECT=…
 git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/ovh-deploy.sh</span></pre>
-    </div>
-
-    <div class="provider">
-      <div class="phead"><strong>AWS</strong><span class="price">~$285/mo · official-docs path</span></div>
-      <p class="dim prow">Open <a href="https://console.aws.amazon.com" target="_blank" rel="noopener">console.aws.amazon.com</a> → the <strong>CloudShell</strong> icon (<code style="font-family:var(--mono)">&gt;_</code> top bar) — pre-authenticated. One line:</p>
-      <pre class="pcmd"><span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span></pre>
     </div>
 
     <div class="provider">

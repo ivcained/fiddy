@@ -52,6 +52,7 @@ import {
   NodeBackedWrites,
   type WriteApproval,
   type WriteEvidence,
+  writeIntentFor,
 } from './nodeWrites';
 import {
   castAuthorOf,
@@ -578,16 +579,33 @@ export const createNodeBackedFetch = ({
         // index to read from. See `hostedRoutes.ts` and `capabilities.ts`.
         return errorResponse(501, NODE_CANNOT_LIST_APPS);
 
-      case 'write':
+      case 'write': {
         // The write half of this seam: this device signs it and the node
         // carries it, then the node's own state is read back before the answer
         // is given. See `nodeWrites.ts`.
-        return writerFor(entry).answer({
+        const intent = writeIntentFor({ method, path: route.path, body });
+        const answer = await writerFor(entry).answer({
           method,
           path: route.path,
           body,
           fid: getSignedInFid(),
         });
+        // A like or recast that really landed is folded into the viewer's own
+        // reaction set, which the reads memoise for a minute: the heart the
+        // person just pressed, and the one they just took back, have to be drawn
+        // that way by the NEXT page or thread read, without either of them
+        // paying to re-read the viewer's whole reaction log. A write that failed
+        // changes nothing — the client's own optimistic patch is reverted for
+        // exactly the same reason (`useCreateCastLike`).
+        if (answer.ok && intent !== null && intent.kind === 'reaction') {
+          reader.noteViewerReaction({
+            castHash: intent.castHash,
+            reactionType: intent.reaction === 'like' ? 'Like' : 'Recast',
+            added: intent.add,
+          });
+        }
+        return answer;
+      }
 
       case 'local':
         return localAnswer({
