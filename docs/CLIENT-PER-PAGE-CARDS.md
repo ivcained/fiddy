@@ -122,6 +122,71 @@ DREW (`x-unfurl: card:profile`), so a release that breaks the per-page half does
 not stay live. Step 3 renders both cards locally from the build, with the real
 renderer, and refuses to ship if either is the site card.
 
+## The link inside the app is the link a share copies
+
+Sharing pointed at ourselves, but the app's *own* permalink did not.
+
+Measured 2026-10-22 on the live build (`88071ae…`, node-backed, card
+t_5068bb26), signed in on the feed with the stubbed SIWF relay: the timestamp
+inside every cast in the feed is `a[href="/<handle>/<0x prefix>"]`, and opening
+it —
+
+    https://fiddy.fun/greg/0x8ae98f90
+
+— answered the shell (`x-unfurl` absent, as designed for a non-unfurl route) and
+a body reading
+
+    This page isn't on your node
+    No node-backed reader has been written for this endpoint yet.
+
+`casts: 0`: no cast, no action row, no share button. Tapping it from the feed
+landed on the same URL, and a cold open of that URL (a new tab, a bookmark, a
+link somebody was sent) was the same refusal — at 390 and at 1440.
+
+The read behind that route is `/v2/user-thread-casts`, and a Snapchain node
+shards by FID: it cannot address a hash prefix at all. There is nothing to
+implement there — a prefix is an indexer's lookup, and this client's data source
+is a node.
+
+So the decision this card owned, taken: **the app's own cast links point at the
+full-hash route** — the page `getFiddyCastUrl` copies,
+`/~/conversations/<full hash>`. That is the route a node answers
+(`/v2/thread-casts`), it is reachable from what the feed already holds in
+memory, and it makes the link inside the app and the link somebody else opens
+the SAME page. The alternative — a node-backed reader for
+`/v2/user-thread-casts` that resolves a prefix by paging the author's casts —
+was rejected: it would still dead-end on a cold open (resolving depends on this
+session having served that cast), it makes one click cost an unbounded walk
+through an account's history, and it keeps alive a URL shape only an indexer can
+serve.
+
+What that touched (`apps/farcaster-web/src`):
+
+| where | what it carried |
+| --- | --- |
+| `components/links/LinkToConversation.tsx` | the timestamp inside every cast — the full-hash route, always |
+| `hooks/navigation/useNavigateToConversation.tsx` | tapping a cast's body, the notifications, the composer's “View”, a mini app's `viewCast` — its handle parameter is gone |
+| `hooks/data/useOptimisticallyPrefetchConversation.ts` | the hover prefetch warms `/v2/thread-casts` instead of a read no page opens |
+| `components/attachments/QuoteCast.tsx` | the quoted cast's overlay, and its hover prefetch |
+| `components/notifications/CollectibleCast{Watch,}NotificationGroup.tsx` | the two notification paths that navigated by prefix |
+| `scripts/measure-first-cast.mjs` | the “a cast is painted” detector names the route the feed now paints |
+
+The app still SERVES the prefix route (`/:username/:castHashPrefix`,
+`ConversationWithUsernamePage`) for links that come from somewhere else, and
+answers them as it did. What changed is that this client hands nobody one — the
+same rule `FiddyUrlUtils.ts` already wrote down for shares. The handle is not
+lost: it is on the page, and on the card the page unfurls as.
+
+Not fixed here, and measured:
+
+* a quote of an *external* cast URL (`FauxQuoteCast`, out of a
+  `warpcast.com/<handle>/<prefix>` embed) has only the prefix in its metadata,
+  and still overlays the prefix route;
+* a conversation's recasts/quotes/likes tabs read a cast by prefix through
+  `/v2/user-cast`, which a node does not answer either.
+
+Both need an indexer read, not a node read — they are their own card.
+
 ## Host state this needs (once, then it outlives any release)
 
 `bash scripts/install-fiddy-unfurl-service.sh` installs the unit, the service

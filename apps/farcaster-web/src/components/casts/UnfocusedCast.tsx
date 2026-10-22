@@ -185,7 +185,6 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
           trackCastClick({ type: CastClickType.Cast });
           navigateToConversation({
             castHash: cast.hash,
-            authorUsername: cast.author.username,
             ...(castOpenIncludeReason
               ? { includeReason: castOpenIncludeReason }
               : {}),
@@ -193,7 +192,6 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
           });
         },
         [
-          cast.author.username,
           cast.hash,
           castOpenIncludeReason,
           navigateToConversation,
@@ -212,7 +210,6 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
           trackCastClick({ type: CastClickType.Cast });
           navigateToConversation({
             castHash: cast.hash,
-            authorUsername: cast.author.username,
             ...(castOpenIncludeReason
               ? { includeReason: castOpenIncludeReason }
               : {}),
@@ -221,7 +218,6 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
         }
       },
       [
-        cast.author.username,
         cast.hash,
         castOpenIncludeReason,
         navigateToConversation,

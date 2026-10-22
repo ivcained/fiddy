@@ -816,7 +816,6 @@ function InnerMiniAppContent({
 
       navigateToConversation({
         castHash: hash,
-        authorUsername: authorUsername,
         openInNewTab: false,
       });
     },
