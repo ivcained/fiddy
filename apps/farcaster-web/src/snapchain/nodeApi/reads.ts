@@ -654,7 +654,8 @@ export class NodeBackedReads {
 
   async readUserByUsername(username: string): Promise<ApiUser | undefined> {
     const proof = (await this.node.userNameProofByName(username)) as
-      { fid?: number } | undefined;
+      | { fid?: number }
+      | undefined;
     if (!proof || typeof proof.fid !== 'number') {
       return undefined;
     }
