@@ -178,16 +178,6 @@ const NODE_ROUTES: { method: string; path: string; why: string }[] = [
   },
   {
     method: 'GET',
-    path: '/v2/cast-likes',
-    why: 'the likes on a cast are the reactions to it (reactionsByCast), which a node keeps',
-  },
-  {
-    method: 'GET',
-    path: '/v2/cast-recasters',
-    why: 'the recasters of a cast are the recast reactions to it, resolved to their accounts',
-  },
-  {
-    method: 'GET',
     path: '/v2/notification-group',
     why: 'a notification group is the same mention/reply/reaction/follow messages the notifications tab draws; the other group kinds are Warpcast’s own notification service and are refused by name',
   },
@@ -573,16 +563,6 @@ const HOSTED_ROUTES: { method: string; path: string; why: string }[] = [
     method: 'GET',
     path: '/v2/search-casts',
     why: 'a read node keeps no search index',
-  },
-  {
-    method: 'GET',
-    path: '/v2/cast-quotes',
-    why: 'quotes of a cast are an indexer’s reverse index — a node keeps no list of the casts that embed one',
-  },
-  {
-    method: 'GET',
-    path: '/v2/user-cast',
-    why: 'a cast-hash prefix is an indexer’s lookup — your node addresses a cast by its author and its full hash',
   },
   {
     // MEASURED (the 501 sweep, 2026-10-22): this was the last endpoint in the

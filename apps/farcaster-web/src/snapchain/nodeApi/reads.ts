@@ -2048,89 +2048,6 @@ export class NodeBackedReads {
   }
 
   /**
-   * The accounts that liked one cast — its own reaction messages.
-   *
-   * MEASURED (a live public read node, 2026-10-22):
-   *
-   *   GET /v1/reactionsByCast?target_fid=37&target_hash=0x5018…&reaction_type=Like
-   *     → MESSAGE_TYPE_REACTION_ADD, reactionBody { type: REACTION_TYPE_LIKE,
-   *       targetCastId { fid: 37, hash: 0x5018… } }
-   *
-   * A node addresses a reaction at its target cast by *author and hash*, so the
-   * author has to be known before the node can be asked. That memo is filled by
-   * every cast this reader has served; when the hash has never been seen, this
-   * says so in plain words rather than guessing an author (the same rule
-   * `readThread` follows).
-   */
-  async readCastLikes({
-    castHash,
-    limit,
-    cursor,
-  }: {
-    castHash: string;
-    limit?: number;
-    cursor?: string;
-  }): Promise<{ likes: ApiCastReaction[]; cursor?: string }> {
-    const page = await this.reactionsOnCast({
-      castHash,
-      reactionType: 'Like',
-      limit,
-      cursor,
-    });
-    const reactors = await this.reactorsOf(page.messages);
-    const likes = page.messages.flatMap((message) => {
-      const reactor = reactors.get(message.fid);
-      const target = message.reaction?.targetCastId;
-      // A reaction whose account or cast could not be read is not drawn as a
-      // row: the fact is the fid, and nothing is invented to fill the gap.
-      if (reactor === undefined || target === undefined) {
-        return [];
-      }
-      return [
-        {
-          type: 'like' as const,
-          hash: message.hash,
-          reactor,
-          timestamp: fcTimestampToMs(message.timestamp),
-          castHash: target.hash,
-        },
-      ];
-    });
-    return { likes, ...this.cursorOf(page) };
-  }
-
-  /**
-   * The accounts that recast one cast — the same read, the other reaction type.
-   *
-   * MEASURED (2026-10-22, `reaction_type=Recast` against the same node): the
-   * message shape is identical apart from the variant, so the two reads share
-   * one implementation and differ only in what they return — this one answers
-   * with accounts, which is what the recasts surface draws.
-   */
-  async readCastRecasters({
-    castHash,
-    limit,
-    cursor,
-  }: {
-    castHash: string;
-    limit?: number;
-    cursor?: string;
-  }): Promise<{ users: ApiUser[]; cursor?: string }> {
-    const page = await this.reactionsOnCast({
-      castHash,
-      reactionType: 'Recast',
-      limit,
-      cursor,
-    });
-    const reactors = await this.reactorsOf(page.messages);
-    const users = page.messages.flatMap((message) => {
-      const reactor = reactors.get(message.fid);
-      return reactor === undefined ? [] : [reactor];
-    });
-    return { users, ...this.cursorOf(page) };
-  }
-
-  /**
    * One account's cast, found by the first characters of its hash.
    *
    * The hosted route takes a username and a hash prefix, and a node cannot
@@ -2182,48 +2099,6 @@ export class NodeBackedReads {
   private cursorOf(page: { nextPageToken?: string }): { cursor?: string } {
     const next = page.nextPageToken;
     return next && !isTerminalPageToken(next) ? { cursor: next } : {};
-  }
-
-  /**
-   * One reaction page on one cast, with the author resolved from the memo.
-   *
-   * Shared by the likes and the recasts read: both ask the same node route with
-   * a different `reaction_type`, and both are refused in the same plain words
-   * when the cast's author is not known to this reader yet.
-   */
-  private async reactionsOnCast({
-    castHash,
-    reactionType,
-    limit,
-    cursor,
-  }: {
-    castHash: string;
-    reactionType: 'Like' | 'Recast';
-    limit?: number;
-    cursor?: string;
-  }): Promise<NodeMessagesPage> {
-    const author = castAuthorOf(castHash);
-    if (author === undefined) {
-      throw new NodeCannotAnswerError(
-        'Your node addresses a cast by its author and its hash, and this page only has the hash. Open the cast from your feed or a profile and its reactions will load.',
-      );
-    }
-    return await this.node.reactionsByCast({
-      targetFid: author,
-      targetHash: castHash,
-      reactionType,
-      pageSize: this.pageSizeFor(limit),
-      ...(cursor === undefined ? {} : { pageToken: cursor }),
-    });
-  }
-
-  /** The accounts behind a page of reaction messages, one read each. */
-  private async reactorsOf(
-    messages: NodeMessage[],
-  ): Promise<Map<number, ApiUser>> {
-    return await this.profilesOf([
-      ...new Set(messages.map((message) => message.fid)),
-    ]);
   }
 
   /** The accounts a page of follow edges points at, with the page's cursor. */

@@ -857,39 +857,6 @@ export const createNodeBackedFetch = ({
           });
         }
 
-        // Who liked, and who recast, one cast — the node's own reaction
-        // messages. MEASURED (2026-10-22, a live public read node):
-        // `reactionsByCast` with `reaction_type=Like`/`Recast`.
-        case '/v2/cast-likes': {
-          const castHash = searchParams.get('castHash') ?? '';
-          const limit = Number(searchParams.get('limit') ?? 25);
-          const cursor = searchParams.get('cursor') ?? undefined;
-          const { likes, cursor: next } = await reader.readCastLikes({
-            castHash,
-            limit,
-            ...(cursor === undefined ? {} : { cursor }),
-          });
-          return jsonResponse({
-            result: { likes },
-            ...(next ? { next: { cursor: next } } : { next: {} }),
-          });
-        }
-
-        case '/v2/cast-recasters': {
-          const castHash = searchParams.get('castHash') ?? '';
-          const limit = Number(searchParams.get('limit') ?? 25);
-          const cursor = searchParams.get('cursor') ?? undefined;
-          const { users, cursor: next } = await reader.readCastRecasters({
-            castHash,
-            limit,
-            ...(cursor === undefined ? {} : { cursor }),
-          });
-          return jsonResponse({
-            result: { users },
-            ...(next ? { next: { cursor: next } } : { next: {} }),
-          });
-        }
-
         // A cast page reached by its own address (a username and the first
         // characters of a hash). A node shards casts by author, so the account
         // is resolved first and its casts walked — bounded, and a prefix that
@@ -1109,7 +1076,14 @@ const userCastFromAddress = async (
   Awaited<ReturnType<NodeBackedReads['readUserCastByHashPrefix']>>
 > => {
   const username = searchParams.get('username') ?? '';
-  const hashPrefix = searchParams.get('castHashPrefix') ?? '';
+  // The two routes this helper serves name the prefix differently, each after
+  // its own client signature: `useUserCast` sends `hashPrefix`
+  // (`ApiGetUserCastQueryParams`), while the cast-page thread read sends
+  // `castHashPrefix` (`ApiGetUserThreadCastsQueryParams`). Reading only the
+  // second name left `/v2/user-cast` answering 404 for every prefix page it was
+  // asked for, however real the cast was; both names are read here.
+  const hashPrefix =
+    searchParams.get('hashPrefix') ?? searchParams.get('castHashPrefix') ?? '';
   if (username.length === 0 || hashPrefix.length === 0) {
     return undefined;
   }

@@ -177,7 +177,35 @@ describe('the recasts and likes tabs, answered by a node', () => {
   });
 });
 
-describe('quotes of a cast, which no node can answer', () => {
+describe('the prefix-addressed cast page, and the read no node keeps', () => {
+  it('reads the cast a prefix page asks for from the account’s own casts', async () => {
+    const { fetch: nodeBackedFetch } = buildHarness();
+    const response = await nodeBackedFetch(
+      `${BASE}/v2/user-cast?username=dwr&hashPrefix=0x0256ae66`,
+    );
+
+    // A node shards casts by author, so the account is resolved first and its
+    // own casts walked for the prefix — the page's cast, not an invented one.
+    expect(response.status).toBe(200);
+    const body = await json(response);
+    expect((body.result as { cast: { hash: string } }).cast.hash).toBe(
+      RECORDED_CAST_HASH,
+    );
+  });
+
+  it('says in words when no cast of that account starts with those characters', async () => {
+    const { fetch: nodeBackedFetch } = buildHarness();
+    const response = await nodeBackedFetch(
+      `${BASE}/v2/user-cast?username=dwr&hashPrefix=0x${'f'.repeat(10)}`,
+    );
+
+    expect(response.status).toBe(404);
+    const [message] = await errorMessages(response);
+    expect(message).toMatch(
+      /no cast of that account starting with those characters/i,
+    );
+  });
+
   it('refuses /v2/cast-quotes with the sentence that names whose job it is', async () => {
     const { fetch: nodeBackedFetch, nodeLog } = buildHarness();
     const response = await nodeBackedFetch(
@@ -186,20 +214,13 @@ describe('quotes of a cast, which no node can answer', () => {
 
     expect(response.status).toBe(501);
     const [message] = await errorMessages(response);
-    expect(message).toMatch(/indexer/i);
+    // The sentence names the index that IS the right machine for this read, and
+    // still says what a node keeps none of: the 501 sweep reclassified quotes as
+    // an index read (`hostedRoutes.ts` INDEX_ROUTES), which is the same honest
+    // "no" in words rather than the adapter's own shrug.
+    expect(message).toMatch(/index of embeds|indexer/i);
     expect(message).not.toMatch(/no node-backed reader has been written yet/i);
     // Refused in place: nothing was asked of the node at all.
     expect(nodeLog).toEqual([]);
-  });
-
-  it('refuses the prefix-cast read with the sentence about hash prefixes', async () => {
-    const { fetch: nodeBackedFetch } = buildHarness();
-    const response = await nodeBackedFetch(
-      `${BASE}/v2/user-cast?username=dwr&hashPrefix=0x0256ae66`,
-    );
-
-    expect(response.status).toBe(501);
-    const [message] = await errorMessages(response);
-    expect(message).toMatch(/prefix is an indexer|indexer’s lookup/i);
   });
 });
