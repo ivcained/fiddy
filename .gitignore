@@ -69,3 +69,4 @@ Claude outputs/
 .together-vite-cache
 .probe-vite-cache
 .media-probe-vite-cache
+.worktrees/
