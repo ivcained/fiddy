@@ -177,8 +177,10 @@ The shell now declares, statically:
 - **and an `fc:miniapp` embed**, so the same URL is a launchable mini app card —
   `imageUrl` is `/image.png`, the manifest's own 3:2 image (measured 1200×800),
   the action is `launch_miniapp` named `fiddy` (the manifest's `name`), and the
-  splash ground is the app's own `#161715` rather than the `#6200EA` purple the
-  older manifest still carries.
+  splash ground is the app's own `#161715` — the same ground the listing
+  manifest now paints (card t_8654d91e; both are pinned by
+  `src/__tests__/wellKnownManifest.test.ts` and the release's
+  `scripts/check-manifest.mjs`).
 
 **Deliberately absent**: no static `og:url`. This one document answers for every
 route, so a static front-door `og:url` would tell an unfurler that a shared cast
@@ -259,14 +261,21 @@ previous release, unchanged** (`scripts/release-client.sh:203-206`, gated at
 - **The per-page unfurl** (§4) — not built, carded.
 
 **Also worth knowing** (measured while working): `/image.png`, `/icon.png` and
-`/splash.png` — the three assets `/.well-known/farcaster.json` points at — all
-answer 200 on the host, and the manifest IS signed (`accountAssociation` with
-header/payload/signature), so the app's own listing and the new `fc:miniapp`
-embed agree. But `/splash.png` is 512×512 where the spec asks a splash to be
-200×200, and the manifest's `splashBackgroundColor` is `#6200EA` — upstream
-Warpcast's purple, not this brand. Neither is a client-repo change (the manifest
-is served from `/var/www/fiddy-well-known/farcaster.json` on the VPS); both are
-recorded in §8.
+`/splash.png` — the three assets the manifest pointed at on 2026-10-22 — all
+answered 200 on the host, and the manifest IS signed (`accountAssociation` with
+header/payload/signature for `fiddy.fun`). But `/splash.png` was 512×512 where
+the spec asks a splash to be 200×200, the manifest's `splashBackgroundColor` was
+`#6200EA` — upstream Warpcast's purple, not this brand — and its `description`
+sold a different product ("deploy always on agents with onchain identities")
+than the shell unfurls. All three are fixed, and the manifest is no longer
+VPS-only state: card t_8654d91e moved the copy into the repo at
+`apps/farcaster-web/public/.well-known/farcaster.json`, had the release install
+it (step 7) behind the `check-manifest.mjs` gate, and pointed the splash at the
+200×200 `/fiddy-splash.png` that the shell's embed already used, so the listing
+and the link describe one product. The signed `accountAssociation` carried over
+byte-for-byte — nothing was re-signed. `docs/CLIENT-RELEASE.md` → *The listing
+manifest* is the reference, including the two assets (`/image.png`, `/icon.png`)
+still aliased into the sibling FSSC app's asset directory on the VPS.
 
 ## 8. Carded, not done
 
@@ -279,5 +288,8 @@ recorded in §8.
    refuse-by-name rule as everything else). The card asked for this to be carded
    first because it is big: what a mini app may ask an agent for is a product and
    safety decision, not a wire to fill in.
-3. **The manifest tidy-up** (an in-brand splash colour and a 200×200 splash, so
-   the app's listing matches the embed and the brand).
+3. **The listing's two remaining host-aliased assets**: `/icon.png` and
+   `/image.png` are vhost aliases into `/var/www/fiddy-fssc/assets/` — a sibling
+   app's directory, which is the shape that ends with one app showing another's
+   art. The splash is repo-owned now (t_8654d91e); these two should follow once
+   repo-owned art at 1024×1024 and 1200×800 exists.
