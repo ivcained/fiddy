@@ -33,6 +33,14 @@
 //     and how many count reads were still in flight at the paint. Those survive
 //     a loaded box, unlike absolute wall clock.
 //
+// AND THE SAME THING FOR A WARM RE-OPEN (`warm*` in the summary), which is the
+// case a KEPT feed page belongs to: the page is restored from this browser's own
+// storage, no page read happens, and before card t_43249104 no count was asked
+// for on it either. The cold case is measured and mapped first and is not
+// affected by it; the warm reads are counted in their own window, so "the kept
+// page was not re-read" is a number here (`warmPageReads.count` 0) and not an
+// assumption.
+//
 // `data-fiddy-count` is the contract this leans on: a surface that draws a count
 // says which count it is, so "has the number arrived?" is a question with an
 // answer instead of an inference from whatever text is in the block.
@@ -392,6 +400,120 @@ for (const view of VIEWS.map((width) => ({
     entry.url.includes('/v1/castsByFid'),
   );
 
+  // ── WARM: the same browser, re-opening the app on what the cold run left
+  // behind — the HTTP cache and the app's own storage both warm.
+  //
+  // THIS is the case a KEPT feed page belongs to. `~/lib/feedCache` keeps one
+  // page of `feedItems` per account and `~/contexts/FeedQueryCacheProvider`
+  // restores it, so inside the three-minute staleness window a re-open paints
+  // the stored page and reads nothing: no page read, no count wave, and — before
+  // card t_43249104 — no engagement numbers on any cast, ever. The question this
+  // case answers is the one the card turns on: does the restored page ask for its
+  // counts, and do they reach the screen?
+  //
+  // Deliberately its own window: everything above is mapped before this runs, so
+  // the cold numbers this probe has always reported are untouched by it, and the
+  // warm reads are counted from `warmStart` in `warmTimeline` below.
+  const warmStart = Date.now();
+  const warmPolls = [];
+  let warmDeferredMs = null;
+  let warmAnyMs = null;
+  try {
+    await page.goto(SITE, { waitUntil: 'domcontentloaded', timeout: 120_000 });
+    await page
+      .waitForFunction(
+        ({ link, pattern }) => {
+          const re = new RegExp(pattern, 'i');
+          return Array.from(document.querySelectorAll(link)).filter(
+            (node) =>
+              re.test(node.getAttribute('href') ?? '') &&
+              node.getBoundingClientRect().width > 0,
+          ).length;
+        },
+        { link: CAST_LINK, pattern: CAST_HREF.source },
+        { timeout: BOOT, polling: 100 },
+      )
+      .catch(() => {});
+    const warmPaintedAt = Date.now();
+    const warmCountsAtPaint = await page.evaluate(READ_COUNTS);
+
+    const warmDeadline = Date.now() + COUNT_BUDGET;
+    while (Date.now() < warmDeadline) {
+      const sample = await page.evaluate(READ_COUNTS);
+      if (warmDeferredMs === null && deferredOnScreen(sample) > 0) {
+        warmDeferredMs = sample.at - warmPaintedAt;
+      }
+      if (
+        warmAnyMs === null &&
+        sample.marks.likes.length + sample.marks.recasts.length > 0
+      ) {
+        warmAnyMs = sample.at - warmPaintedAt;
+      }
+      warmPolls.push({
+        fromPaintMs: sample.at - warmPaintedAt,
+        marksTotal: sample.marks.total,
+        byKind: sample.marks.byKind,
+        firstCastDeferred:
+          (sample.firstCast.counts.likes?.length ?? 0) +
+          (sample.firstCast.counts.recasts?.length ?? 0),
+        pageNumbers: sample.pageNumbers,
+      });
+      if (warmDeferredMs !== null && sample.marks.likes.length > 2) break;
+      await page.waitForTimeout(500);
+    }
+
+    const warmCountsAfter = await page.evaluate(READ_COUNTS);
+    // The sink's own view, for the warm case alone: this is a fresh document, so
+    // the log holds what THIS re-open's counts did and nothing from the cold run.
+    const warmSink = await page.evaluate(
+      () => globalThis.__fiddyCountsBehind ?? null,
+    );
+
+    run.warm = {
+      paintedAtEpoch: warmPaintedAt,
+      sink: warmSink,
+      paintFromCaseStartMs: warmPaintedAt - warmStart,
+      countsAtPaint: warmCountsAtPaint,
+      firstDeferredCountAfterPaintMs: warmDeferredMs,
+      firstAnyCountAfterPaintMs: warmAnyMs,
+      watchedForMs: Date.now() - warmPaintedAt,
+      polls: warmPolls.length,
+      firstPoll: warmPolls[0] ?? null,
+      lastPoll: warmPolls[warmPolls.length - 1] ?? null,
+      countsAfter: warmCountsAfter,
+      url: page.url(),
+      storage: await page.evaluate(() => {
+        const keys = Object.keys(window.localStorage);
+        return {
+          count: keys.length,
+          keys: keys.slice(0, 40),
+          bytes: keys.reduce(
+            (total, key) =>
+              total + (window.localStorage.getItem(key)?.length ?? 0),
+            0,
+          ),
+        };
+      }),
+    };
+  } catch (error) {
+    run.warm = { error: String(error).slice(0, 400), url: page.url() };
+  }
+  run.warmTimeline = timeline
+    .filter((entry) => entry.start >= warmStart)
+    .map((entry) => ({
+      method: entry.method,
+      url: entry.url,
+      fromMs: entry.start - warmStart,
+      ms: entry.end === null ? null : entry.end - entry.start,
+      status: entry.status,
+    }));
+  run.warmCountReads = run.warmTimeline.filter((entry) =>
+    entry.url.includes('/v1/reactionsByCast'),
+  );
+  run.warmPageReads = run.warmTimeline.filter((entry) =>
+    entry.url.includes('/v1/castsByFid'),
+  );
+
   result.runs.push(run);
   await context.close();
 }
@@ -414,6 +536,18 @@ const summary = result.runs.map((run) => {
   const paint = run.cold?.paintFromCaseStartMs ?? null;
   const sinkCalls = run.cold?.sink;
   const paintedAt = run.cold?.paintedAtEpoch;
+  /** One case's sink log, relative to that case's own paint. */
+  const sinkWaves = (sink, at) =>
+    Array.isArray(sink)
+      ? sink.map((entry) => ({
+          fromPaintMs: typeof at === 'number' ? entry.at - at : null,
+          received: entry.received,
+          updated: entry.updated,
+          missed: entry.missed.length,
+          retried: entry.retry === true,
+          cachedCasts: entry.cachedCasts,
+        }))
+      : null;
   return {
     viewport: run.viewport,
     error: run.cold?.error ?? null,
@@ -424,17 +558,7 @@ const summary = result.runs.map((run) => {
      * casts were in the cache at that moment. `null` when the build has no
      * `VITE_SNAPCHAIN_DEBUG=true` (a release), which is the one fact behind the
      * DOM this probe cannot read by itself. */
-    sinkCalls: Array.isArray(sinkCalls)
-      ? sinkCalls.map((entry) => ({
-          fromPaintMs:
-            typeof paintedAt === 'number' ? entry.at - paintedAt : null,
-          received: entry.received,
-          updated: entry.updated,
-          missed: entry.missed.length,
-          retried: entry.retry === true,
-          cachedCasts: entry.cachedCasts,
-        }))
-      : null,
+    sinkCalls: Array.isArray(sinkCalls) ? sinkWaves(sinkCalls, paintedAt) : null,
     // The page's own reads vs the count wave, against the paint they used to
     // hold up.
     pageReads: window_(run.pageReads ?? []),
@@ -457,6 +581,30 @@ const summary = result.runs.map((run) => {
     pageNumbersAtPaint: run.cold?.countsAtPaint?.pageNumbers ?? null,
     pageNumbersAfter: run.cold?.countsAfter?.pageNumbers ?? null,
     watchedForMs: run.cold?.watchedForMs ?? null,
+    // ── WARM: a re-open on the page this browser kept (card t_43249104). The
+    // cold numbers above are unchanged by it; these are the warm case's own.
+    warmError: run.warm?.error ?? null,
+    warmPaintFromCaseStartMs: run.warm?.paintFromCaseStartMs ?? null,
+    /** What the sink did on the re-open's own count wave. `null` on a build with
+     * no `VITE_SNAPCHAIN_DEBUG=true` (a release), where the DOM reading below is
+     * the whole evidence. */
+    warmSinkCalls: sinkWaves(run.warm?.sink, run.warm?.paintedAtEpoch),
+    /** A kept page is not re-read: `pageReads.count` 0 with the counts drawn is
+     * the shape only the restored-page path produces. */
+    warmPageReads: window_(run.warmPageReads ?? []),
+    warmCountReads: window_(run.warmCountReads ?? []),
+    warmMarksAtPaint: run.warm?.countsAtPaint?.marks ?? null,
+    warmFirstCastAtPaint: run.warm?.countsAtPaint?.firstCast ?? null,
+    warmFirstDeferredCountAfterPaintMs:
+      run.warm?.firstDeferredCountAfterPaintMs ?? null,
+    warmFirstAnyCountAfterPaintMs: run.warm?.firstAnyCountAfterPaintMs ?? null,
+    warmMarksAfter: run.warm?.countsAfter?.marks ?? null,
+    warmFirstCastAfter: run.warm?.countsAfter?.firstCast ?? null,
+    warmPageNumbersAtPaint: run.warm?.countsAtPaint?.pageNumbers ?? null,
+    warmPageNumbersAfter: run.warm?.countsAfter?.pageNumbers ?? null,
+    warmWatchedForMs: run.warm?.watchedForMs ?? null,
+    warmStorageKeys: run.warm?.storage?.keys ?? null,
+    warmStorageBytes: run.warm?.storage?.bytes ?? null,
     out: OUT,
   };
 });

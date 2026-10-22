@@ -21,6 +21,10 @@ import { baseApiUrl, localApiEnabled, wsUrl } from '~/constants/api';
 import { isDev } from '~/constants/env';
 import { useRecentFetch } from '~/contexts/RecentFetchProvider';
 import { useCountsBehindSink } from '~/hooks/data/useCountsBehindSink';
+import {
+  RestoredFeedCountsProvider,
+  type RestoredFeedCountsReader,
+} from '~/hooks/data/useRestoredFeedCounts';
 import { askForPostingKey } from '~/snapchain/accounts/postingKeyApproval';
 import { isNodeBackedClientEnabled } from '~/snapchain/nodeApi';
 import type { CastCountsSink } from '~/snapchain/nodeApi/reads';
@@ -120,7 +124,7 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
      * that switch exists to serve the shell from a mock, and quietly rerouting
      * it to the node would make the mock lie about what it is showing.
      */
-    const nodeBackedFetch = useMemo(() => {
+    const nodeBackedHandle = useMemo(() => {
       if (localApiEnabled || !isNodeBackedClientEnabled()) {
         return undefined;
       }
@@ -149,7 +153,7 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         // are read behind the paint, landing on the casts already rendered
         // (see above, and `~/hooks/data/useCountsBehindSink`).
         onCountsRead,
-      }).fetch;
+      });
       // The address the build was configured with is the only input that can
       // change under a running tab and needs the adapter rebuilt; the live
       // provider is read per request, above. `nodeChoice` is read through the
@@ -157,6 +161,35 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
       // follow — it is still the input that decides the fallback address.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [nodeChoice]);
+
+    const nodeBackedFetch = nodeBackedHandle?.fetch;
+
+    /**
+     * What a RESTORED feed page asks with — see
+     * `~/hooks/data/useRestoredFeedCounts` for the whole of it.
+     *
+     * A page this browser kept (`~/lib/feedCache`) carries no engagement counts
+     * and is not re-read, so it never has a count wave: the one thing missing
+     * from it is the numbers. This is where the two halves are joined, in the
+     * one component that owns both — the seam's own `readCastCounts` (a node
+     * read for casts this browser already holds) and the sink their numbers land
+     * in.
+     *
+     * `null` when this build has no node-backed client at all (the fork's mock
+     * API, or the switch off): there is no node to ask, and the pages such a
+     * build restores carry their counts, because the API it reads answers pages
+     * with them.
+     */
+    const restoredFeedCountsReader = useMemo<RestoredFeedCountsReader | null>(
+      () =>
+        nodeBackedHandle
+          ? {
+              readCounts: nodeBackedHandle.readCastCounts,
+              sink: countsBehind,
+            }
+          : null,
+      [countsBehind, nodeBackedHandle],
+    );
 
     const onFetchStart: OnFetchStart = useCallback(() => {
       trackFetch();
@@ -195,7 +228,12 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         getDeviceId={Analytics.getDeviceId}
         getSessionId={Analytics.getSessionId}
       >
-        {children}
+        {/* A restored feed page asks for its counts from inside here: this is
+            the component that owns the seam a count is read through and the
+            sink it lands in (see `restoredFeedCountsReader` above). */}
+        <RestoredFeedCountsProvider reader={restoredFeedCountsReader}>
+          {children}
+        </RestoredFeedCountsProvider>
       </FarcasterApiClientProvider>
     );
   });
