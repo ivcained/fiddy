@@ -26,7 +26,7 @@ app's. Everything else is refused by name.
 | ask | what the app gets back | where the reader decides | what the agent actually does |
 | --- | --- | --- | --- |
 | `draft` — "draft a cast about this" | `drafted` (the words stay in Fiddy) | one ask card in the mini app window, then the shell's own composer | one chat message to the paired agent; its answer becomes a draft in the composer |
-| `post` — "ask my agent to post this" | `posted` / `unknown` / `declined` | the ask card **plus** the shell's own composer, **plus** the existing posting-key approval if this device holds no key | nothing until the reader has read the final words in Fiddy's own composer and pressed Cast; the write then goes through the same seam every other write uses |
+| `post` — "ask my agent to post this" | `posted` / `unknown` / `failed` / `declined` | the ask card **plus** the shell's own composer, **plus** the existing posting-key approval if this device holds no key | nothing until the reader has read the final words in Fiddy's own composer and pressed Cast; the write then goes through the same seam every other write uses |
 | `remind` — "tell my agent to remind me" | `asked` (the agent's answer stays with its owner) | the ask card, and the record the agent surface already keeps | one chat message, in the same words the Scheduled tasks tab already uses |
 | `read-answer` — "read my agent's last answer" | `not_permitted` | nowhere: it is not offered | — |
 | anything else | `invalid` | nowhere | — |
@@ -163,8 +163,8 @@ Write the draft. Do not post anything.
 **What the reader sees.** The ask card (§5), then — on approval — their own
 composer open over the mini app window, prefilled with the draft, exactly where
 `composeCast` already puts a suggestion (`ComposeCastModal`). Casting is still
-the reader's press. If the agent is unreachable, the composer is not opened and
-one sentence says so.
+the reader's press. If the agent is unreachable, the composer is not opened, one
+sentence says so, and the app is told `failed`.
 
 **Where consent lives.** The ask card, once per app per window. After a first
 approval, later `draft` asks inside the budget run without a second card —
@@ -199,9 +199,10 @@ seam would be a second chance to get it wrong.
 **What the app gets.** `posted` only when the seam's own evidence says the
 message landed and the node reads it back — the same proof every other write
 reports. A write the node accepted but does not yet show is `unknown`, with the
-sentence the client already uses for that case. A refusal is `declined`, and the
-app cannot tell "the reader said no" from "the reader's network said no" unless
-the sentence says so.
+sentence the client already uses for that case. An attempt that was approved and
+then did not land is `failed`; a reader who said no is `declined`. Two states,
+because "the person refused" and "it did not land" are different facts, and an
+app deciding whether to offer a retry needs to know which one it got.
 
 **Decided against, and worth naming:** the app does not learn the cast's hash.
 `composeCast` does hand a hash back today, so this is a deliberate asymmetry —
@@ -227,7 +228,8 @@ scheduling is the agent's own machine's job (`CLIENT-AGENT-SURFACE.md` §2: a
 request log is not a scheduler, and the copy says `sent · waiting`, never
 `running`).
 
-**What the app gets.** `asked`. The agent's answer is the reader's (it may name
+**What the app gets.** `asked`, or `failed` if the message could not be sent. The
+agent's answer is the reader's (it may name
 channels, people, times, or judgement calls), and a reminder is a small effect:
 one message on the reader's agent, one line in a log the reader owns.
 
@@ -394,6 +396,7 @@ shrug:
 | `posted` | `Fiddy's owner approved it, and Fiddy's own node shows the cast.` |
 | `unknown` | `Fiddy's owner approved it, but nothing on the network shows it yet, so Fiddy will not say it went out.` |
 | `asked` | `Your agent was asked; the answer stays with its owner.` |
+| `failed` | `Fiddy tried, and could not — the person using Fiddy has been told.` |
 
 `no_agent` is the one the card asked about by name, and it is a *state*, not an
 error: the app asked something real and there is no agent in this browser to
@@ -478,8 +481,8 @@ chrome, the mute affordance, and the two effectful asks that end in the composer
 `draft` (one chat message → the draft in `ComposeCastModal`'s own route; the app
 gets `drafted`) and `post` (the same composer, then the write seam, then the
 existing posting-key approval if this device holds no key; the app gets `posted`
-/ `unknown` / `declined`, never a hash). Depends on S1 and S4 — it is an approval
-surface, so the wire it sits on is pinned first.
+/ `unknown` / `failed` / `declined`, never a hash). Depends on S1 and S4 — it is
+an approval surface, so the wire it sits on is pinned first.
 
 **S3 — `remind`.** The third ask: the ask card's words, one chat message in
 `AgentPage.tsx:545-548`'s own phrasing, the record in `lib/agentSchedules.ts`,
