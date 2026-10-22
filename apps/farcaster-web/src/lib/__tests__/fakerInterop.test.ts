@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 
+// eslint-disable-next-line no-restricted-imports -- `~` names src/, and the alias target lives in config/
 import fakerModule from '../../../config/fakerInterop.mjs';
 
 type Walkable = { [key: string]: Walkable } & ((...args: unknown[]) => unknown);
@@ -29,7 +30,9 @@ const fakerCallsInCore = (): string[] => {
   // `@farcaster/core` is not this app's own dependency — it arrives through the
   // workspace package, so resolve it from there.
   const fromNodeClient = dirname(require_.resolve('farcaster-node-client'));
-  const entry = require_.resolve('@farcaster/core', { paths: [fromNodeClient] });
+  const entry = require_.resolve('@farcaster/core', {
+    paths: [fromNodeClient],
+  });
   const source = readFileSync(entry, 'utf8');
   const paths = new Set<string>();
   for (const match of source.matchAll(/faker\.[A-Za-z0-9_.]+/g)) {
