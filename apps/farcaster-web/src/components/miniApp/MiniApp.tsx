@@ -141,6 +141,7 @@ import { useExternalNavigate } from '~/hooks/navigation/useExternalNavigate';
 import { useNavigateToConversation } from '~/hooks/navigation/useNavigateToConversation';
 import { useSolanaMiniAppProvider } from '~/hooks/useSolanaMiniAppProvider';
 import { ComposeCastModal } from '~/lazy/components';
+import { keepSchedule, newScheduleId } from '~/lib/agentSchedules';
 import {
   AgentServiceSession,
   chatWithAgent,
@@ -639,11 +640,14 @@ function InnerMiniAppContent({
   );
 
   /**
-   * `draft` and `post`, and nothing else (S3 answers `remind`). Everything the
-   * handler needs is the shell's own: the paired session this browser holds, one
-   * chat message to the agent that session is for, the composer above, and the
-   * write seam's own evidence — which is what tells `posted` from `unknown` from
-   * `failed`, and is never a guess (`~/snapchain/nodeApi/writeEvidenceWatch`).
+   * `draft`, `post` and `remind` — the three asks this shell has a path for.
+   * Everything the handler needs is the shell's own: the paired session this
+   * browser holds, one chat message to the agent that session is for, the
+   * composer above, the write seam's own evidence — which is what tells `posted`
+   * from `unknown` from `failed`, and is never a guess
+   * (`~/snapchain/nodeApi/writeEvidenceWatch`) — and the reader's own request
+   * log, which is where a `remind` and the agent's answer to it live
+   * (`~/lib/agentSchedules`, the same rows the Scheduled tasks tab shows).
    */
   const agentAskHandlers = useMemo(
     () =>
@@ -674,6 +678,7 @@ function InnerMiniAppContent({
           ),
         composer: openAskComposer,
         writes: { observe: observeWriteEvidence },
+        schedules: { newId: newScheduleId, keep: keepSchedule },
       }),
     [agentAskApproval, openAskComposer],
   );
@@ -727,10 +732,11 @@ function InnerMiniAppContent({
   // nothing at all — not even a refusal, because a reply is itself an oracle.
   //
   // The answer goes back to the frame's own origin, the way `createIframeEndpoint`
-  // above addresses this app. `draft` and `post` are answered by the handlers
-  // above, in their own time (a reader's decision, a chat message, the reader's
-  // own composer); every other well-formed ask is still answered `unavailable`,
-  // which is the honest state for a shell that has no path for it yet.
+  // above addresses this app. `draft`, `post` and `remind` are answered by the
+  // handlers above, in their own time (a reader's decision, a chat message, the
+  // reader's own composer, the reader's own log); any other well-formed ask is
+  // still answered `unavailable`, the honest state for a shell with no path for
+  // it.
   useEffect(() => {
     const iframe = iframeLoaderRef.current?.iframe;
     if (!iframe || !url) {
@@ -749,7 +755,8 @@ function InnerMiniAppContent({
       answerAsk: (envelope, deferral) => {
         if (!agentAskHandlers.answers(envelope.ask)) {
           // Nothing here has a path for it: this channel's own `unavailable`
-          // stands, which is S1's honest answer and S3's to replace.
+          // stands — the honest answer for an ask this shell has no route for,
+          // which is every ask outside §3's three.
           return false;
         }
         // The channel says nothing for this ask; the handlers answer it when

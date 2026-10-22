@@ -279,6 +279,35 @@ describe('paired with a running agent', () => {
     expect(screen.getByText('Scheduled for 09:00 every day.')).toBeTruthy();
   });
 
+  it('says where a request came from when an app, not the owner, asked', async () => {
+    // A `remind` a mini app made through the reader's own approval
+    // (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.4): it lands in this same log,
+    // with the app's own words and the app's domain on the row, so the log never
+    // makes somebody else's words look like the owner's.
+    scheduleStore.set('a1', [
+      {
+        id: 's-app',
+        agentId: 'a1',
+        prompt: 'remind me at nine every morning',
+        domain: 'beep.works',
+        state: 'answered',
+        createdAt: 1_792_000_000_000,
+        reply: 'Done — nine every morning.',
+      },
+    ]);
+
+    render(<AgentPage />);
+    fireEvent.click(
+      await screen.findByRole('tab', { name: 'Scheduled tasks' }),
+    );
+
+    expect(
+      await screen.findByText('remind me at nine every morning'),
+    ).toBeTruthy();
+    expect(screen.getByText(/from beep\.works/)).toBeTruthy();
+    expect(screen.getByText('agent answered')).toBeTruthy();
+  });
+
   it('requires an approval click before a channel can be connected', async () => {
     render(<AgentPage />);
     fireEvent.click(await screen.findByRole('tab', { name: 'Channels' }));
