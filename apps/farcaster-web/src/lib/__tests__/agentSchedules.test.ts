@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  keepSchedule,
   loadSchedules,
   newScheduleId,
   saveSchedules,
@@ -48,6 +49,19 @@ describe('schedule records', () => {
     await expect(loadSchedules('a2')).resolves.toEqual([]);
   });
 
+  it('keeps a request an app made, with the app’s domain on the row', async () => {
+    // A `remind` from a mini app (`CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.4): the
+    // app's own words, and where they came from.
+    const fromApp = schedule({
+      prompt: 'remind me at nine every morning',
+      domain: 'beep.works',
+    });
+
+    await saveSchedules('a1', [fromApp]);
+
+    await expect(loadSchedules('a1')).resolves.toEqual([fromApp]);
+  });
+
   it('drops rows that storage cannot vouch for', async () => {
     store.set('fiddy.agent.schedules.a1', [
       schedule(),
@@ -83,6 +97,45 @@ describe('upsertSchedule', () => {
     expect(next[0]).toEqual(answered);
     // The log must not lose the prompt when the reply lands.
     expect(next[0].prompt).toBe(schedule().prompt);
+  });
+});
+
+describe('keepSchedule', () => {
+  it('writes the request, then replaces the same row with what came of it', async () => {
+    const asked = schedule({ domain: 'beep.works' });
+
+    await keepSchedule('a1', asked);
+    await expect(loadSchedules('a1')).resolves.toEqual([asked]);
+
+    const answered = schedule({
+      domain: 'beep.works',
+      state: 'answered',
+      reply: 'Nine every morning.',
+    });
+    await keepSchedule('a1', answered);
+
+    // One row, the app's own words still on it, and the answer beside them.
+    await expect(loadSchedules('a1')).resolves.toEqual([answered]);
+    expect(answered.prompt).toBe(asked.prompt);
+  });
+
+  it('keeps history: a second request is a second row', async () => {
+    await keepSchedule('a1', schedule({ id: 's1' }));
+    await keepSchedule(
+      'a1',
+      schedule({ id: 's2', prompt: 'and again at six' }),
+    );
+
+    await expect(loadSchedules('a1')).resolves.toEqual([
+      schedule({ id: 's2', prompt: 'and again at six' }),
+      schedule({ id: 's1' }),
+    ]);
+  });
+
+  it('is the reader’s own agent’s log, and nobody else’s', async () => {
+    await keepSchedule('a1', schedule({ agentId: 'a1' }));
+
+    await expect(loadSchedules('a2')).resolves.toEqual([]);
   });
 });
 
