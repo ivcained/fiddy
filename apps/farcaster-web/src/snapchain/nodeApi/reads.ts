@@ -49,6 +49,8 @@ import {
   SnapchainNodeClient,
 } from 'farcaster-node-client';
 
+import { fetchCastAuthorFromOrigin } from '~/snapchain/providers/castAuthorHandoff';
+
 import {
   createEmbedCardResolver,
   type EmbedCard,
@@ -178,6 +180,14 @@ export interface NodeBackedReadsOptions {
    * test can answer without a network.
    */
   embedCards?: EmbedCardResolver;
+  /**
+   * Which account wrote a cast, when this reader has never served it — the
+   * shared-link case (`castAuthorHandoff.ts`). Defaults to the real thing: one
+   * same-origin read of this host's own author index. Injectable so a test can
+   * answer without a server, and so a build with no such service can be wired
+   * to answer `undefined` rather than reaching for one.
+   */
+  resolveCastAuthor?: (hash: string) => Promise<number | undefined>;
 }
 
 interface CacheEntry<T> {
@@ -223,6 +233,11 @@ export class NodeBackedReads {
   private readonly embedKinds: EmbedKindResolver;
   private readonly embedCards: EmbedCardResolver;
 
+  /** The author index for a hash this reader has never served. */
+  private readonly resolveCastAuthor: (
+    hash: string,
+  ) => Promise<number | undefined>;
+
   private readonly userCache = new Map<number, CacheEntry<ApiUser>>();
   private readonly userPromiseCache = new Map<number, Promise<ApiUser>>();
   private readonly countCache = new Map<string, CacheEntry<NodeCount>>();
@@ -236,6 +251,7 @@ export class NodeBackedReads {
     countCap = DEFAULT_COUNT_CAP,
     embedKinds = createEmbedKindResolver(),
     embedCards,
+    resolveCastAuthor,
   }: NodeBackedReadsOptions) {
     this.node = node;
     this.nodeBaseUrl = nodeBaseUrl.replace(/\/$/, '');
@@ -246,6 +262,11 @@ export class NodeBackedReads {
     // The page reads go through the same fetch seam as everything else, so a
     // test that fakes the node's fetch does not quietly reach the open web.
     this.embedCards = embedCards ?? createEmbedCardResolver({ fetchImpl });
+    // The author index goes through that same seam: it is this origin, but it
+    // is still a read, and a test that fakes reads must not reach it either.
+    this.resolveCastAuthor =
+      resolveCastAuthor ??
+      ((hash: string) => fetchCastAuthorFromOrigin({ hash, fetchImpl }));
   }
 
   /**
@@ -999,8 +1020,11 @@ export class NodeBackedReads {
    *
    * The request carries only a hash. A Snapchain node shards by FID, so a hash
    * alone cannot be looked up — the author comes from the memo filled by every
-   * cast this reader has served (your feed, a profile, a channel). When the
-   * hash has never been seen, that is reported in plain words.
+   * cast this reader has served (your feed, a profile, a channel), or, when
+   * this page IS the first thing the reader has opened (a shared cast link),
+   * from this origin's own index of authors (`castAuthorHandoff.ts`), which is
+   * the server half of the same fact that drew the link's card. When neither
+   * can say who wrote it, that is reported in plain words.
    */
   async readThread({
     castHash,
@@ -1011,12 +1035,16 @@ export class NodeBackedReads {
     limit?: number;
     replyPreviewLimit?: number;
   }): Promise<ApiThreadResult> {
-    const fid = castAuthorOf(castHash);
+    const fid =
+      castAuthorOf(castHash) ?? (await this.resolveCastAuthor(castHash));
     if (fid === undefined) {
       throw new NodeCannotAnswerError(
         'Your node addresses a cast by its author and its hash, and this page only has the hash. Open the cast from your feed or a profile and it will load.',
       );
     }
+    // Remembered for the rest of the session: every reaction, reply and quote
+    // read of this thread would otherwise ask the same question again.
+    rememberCastAuthor(castHash, fid);
 
     const root = await this.castById(fid, castHash);
     if (!root?.castAdd) {

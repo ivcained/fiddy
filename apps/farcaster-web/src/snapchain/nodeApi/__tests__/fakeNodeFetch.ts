@@ -51,6 +51,27 @@ const recordedPageFor = (
   return read(name);
 };
 
+/**
+ * The hash the recording is about — and so the one hash this origin knows an
+ * author for (see `CAST_AUTHOR_PATH`).
+ */
+const RECORDED_CAST_HASH =
+  (read('castById.sample.json') as { hash?: string }).hash ?? '';
+
+/**
+ * This origin's own cast→author index, at the path the client asks it on.
+ *
+ * A shared fiddy.fun cast link is opened by a reader who has served nothing, so
+ * `readThread` cannot know whose cast a bare hash is, and asks THIS ORIGIN
+ * (`~/snapchain/providers/castAuthorHandoff.ts`). That request goes through the
+ * same fetch seam as the node's — the host's CSP is `connect-src 'self'`, and a
+ * test that fakes reads must not reach the open web — so the fake answers it
+ * too: the recorded cast belongs to the fixture account, fid 3, and any other
+ * hash is a 404, which is what the real service answers for a hash no index
+ * knows.
+ */
+export const CAST_AUTHOR_PATH = '/unfurl/cast-author/';
+
 export const TERMINAL_PAGE_TOKEN = 'W251bGwsbnVsbF0=';
 
 export interface FakeNodeRequest {
@@ -81,6 +102,15 @@ export const createFixtureNodeFetch = ({
   const route = (request: FakeNodeRequest): Json | undefined => {
     const { path, params } = request;
     const key = `${path}?${params.toString()}`;
+
+    // This origin's cast→author index, not the node's: it is asked by the
+    // client's shared-link path through the same seam (see CAST_AUTHOR_PATH).
+    if (path.startsWith(CAST_AUTHOR_PATH)) {
+      const hash = path.slice(CAST_AUTHOR_PATH.length).toLowerCase();
+      return hash === RECORDED_CAST_HASH.toLowerCase()
+        ? { hash, fid: 3 }
+        : undefined;
+    }
 
     // A request that carries a page token is asking for the page AFTER the
     // recorded one. The recording is one page, so the honest answer is an

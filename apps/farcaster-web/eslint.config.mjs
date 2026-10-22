@@ -184,4 +184,37 @@ export default [
       ],
     },
   },
+  {
+    // The per-page unfurl service (server/unfurl/, shipped by the release and
+    // run by fiddy-unfurl.service): Node's own globals, not the page's. It is
+    // outside src because it is not part of the bundle — the host runs it — so
+    // the `~` alias (which points at src) does not reach it and its tests
+    // import it by relative path instead (see the block below).
+    files: ['server/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        AbortSignal: 'readonly',
+        Buffer: 'readonly',
+        clearTimeout: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        process: 'readonly',
+        setTimeout: 'readonly',
+        URL: 'readonly',
+      },
+    },
+    rules: {
+      'no-empty': ['error', { allowEmptyCatch: true }],
+    },
+  },
+  {
+    // The app's tests of that service import its modules by path on purpose:
+    // they are not under `~/` (that alias is src, which the browser bundle
+    // owns), and a test that drove a copy would prove nothing about the code
+    // the host runs.
+    files: ['src/__tests__/unfurlService.test.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
 ];
