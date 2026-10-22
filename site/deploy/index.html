@@ -82,10 +82,23 @@ bin/fiddy node up --local</span></pre>
     </div>
 
     <div class="provider">
+      <div class="phead"><strong>AWS</strong><span class="price">~$285/mo · default cloud path</span></div>
+      <p class="dim prow">Open <a href="https://console.aws.amazon.com" target="_blank" rel="noopener">console.aws.amazon.com</a> → the <strong>CloudShell</strong> icon (<code style="font-family:var(--mono)">&gt;_</code> top bar) — pre-authenticated. One line:</p>
+      <pre class="pcmd"><span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span></pre>
+      <p class="dim prow" style="font-size:13px"><strong>Why AWS is the default:</strong> Hetzner caps new accounts at 1024 GB of volume
+      storage — a resize past that is refused with <code style="font-family:var(--mono)">resource_limit_exceeded</code>,
+      which is not enough for an unmodified node restore. A brand-new Hetzner account cannot follow this tutorial
+      to the end. AWS lets the root volume simply be 2 TB, so the default is AWS.</p>
+    </div>
+
+    <div class="provider">
       <div class="phead"><strong>Hetzner</strong><span class="price">~€120/mo · cheapest cloud</span></div>
       <p class="dim prow">Get an API token at <a href="https://console.hetzner.cloud" target="_blank" rel="noopener">console.hetzner.cloud</a> (project → Security → API tokens), then:</p>
       <pre class="pcmd"><span class="k">export HCLOUD_TOKEN=…
 git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/hetzner-deploy.sh</span></pre>
+      <p class="dim prow" style="font-size:13px">Roughly a third of AWS's price and fully supported <em>once your account's
+      volume quota has been raised past 1024 GB</em> — new accounts are capped below what the node needs
+      (see the AWS note above).</p>
     </div>
 
     <div class="provider">
@@ -96,15 +109,22 @@ git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/ovh-depl
     </div>
 
     <div class="provider">
-      <div class="phead"><strong>AWS</strong><span class="price">~$285/mo · official-docs path</span></div>
-      <p class="dim prow">Open <a href="https://console.aws.amazon.com" target="_blank" rel="noopener">console.aws.amazon.com</a> → the <strong>CloudShell</strong> icon (<code style="font-family:var(--mono)">&gt;_</code> top bar) — pre-authenticated. One line:</p>
-      <pre class="pcmd"><span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span></pre>
-    </div>
-
-    <div class="provider">
       <div class="phead"><strong>Google Cloud</strong><span class="price">~$350/mo · we tested this one · $300 free credit for new accounts</span></div>
       <p style="margin:10px 0 4px"><a class="btn" href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener">Open in Cloud Shell ↗</a></p>
       <p class="dim prow" style="margin-top:8px">True one click: Cloud Shell opens pre-authenticated, the walkthrough runs itself. Set a reminder to delete the VM before the credit ends.</p>
+    </div>
+
+    <div class="provider">
+      <div class="phead"><strong>Budget VPS — manual order</strong><span class="price">from ~€24/mo · no API, so no one-click</span></div>
+      <p class="dim prow">Cheapest machines anywhere, but you order through their website (10 minutes of form-filling),
+      then one command does the rest: <code style="font-family:var(--mono)">bin/fiddy provision --ssh root@&lt;your-ip&gt;</code>.
+      <strong>Mind the disk:</strong> a mainnet node needs ~2 TB — most budget plans ship far under it.</p>
+      <p class="dim prow" style="font-size:13px">
+      • <a href="https://clients.mivocloud.com/cart.php?a=confproduct&i=0" target="_blank" rel="noopener">MivoCloud S8 — €40/mo</a> (Moldova): add "Disk 2 · 1TB HDD" (+€5) to reach 2 TB.<br>
+      • <a href="https://advinservers.com/vps" target="_blank" rel="noopener">Advin Servers — $24/mo</a>: 8 vCPU/16 GB but 256 GB disk — too small unless you upgrade storage.<br>
+      • <a href="https://contabo.com/en/vps/cloud-vps-core-8" target="_blank" rel="noopener">Contabo VPS 8 — €14/mo</a>: 8 vCPU/24 GB, 300 GB — needs their storage add-on to fit 2 TB.<br>
+      • <a href="https://billing.luxvps.net/cart.php?a=confproduct&i=0" target="_blank" rel="noopener">LuxVPS EPYC</a>: 6 vCPU/32 GB, 340 GB — too small as listed.<br>
+      <span class="wait">HDD is fine — bootstrap is just slower. <code style="font-family:var(--mono)">fiddy provision --ssh</code> measures the disk and refuses loudly if a box can't hold the node.</span></p>
     </div>
 
     <p class="dim prow" style="font-size:13px">Already have a server? Skip ahead — any Ubuntu box with 4 vCPU / 16 GB / 2 TB works.

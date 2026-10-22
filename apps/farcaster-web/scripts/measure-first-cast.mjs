@@ -51,12 +51,18 @@ const VIEWS = (process.env.MEASURE_VIEWS ?? '390,1440')
   .filter((width) => Number.isFinite(width) && width > 0);
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-/** The permalink every cast in the feed paints: `/<username>/<0x…>`, the
- * timestamp link inside each cast. A cast is on screen when one of those has a
- * real box. Kept as one expression so the cold and warm waits cannot drift
- * apart. */
+/** The permalink every cast in the feed paints: `/~/conversations/<full hash>`,
+ * the timestamp link inside each cast. A cast is on screen when one of those has
+ * a real box. Kept as one expression so the cold and warm waits cannot drift
+ * apart.
+ *
+ * It used to be the `/<handle>/<0x prefix>` route, which the node-backed client
+ * answers with "This page isn't on your node" — that is the read
+ * `/v2/user-thread-casts` and a Snapchain node cannot address a hash prefix at
+ * all. The feed now paints the full-hash route (card t_5068bb26), so this
+ * detector names the page a node can answer rather than one it cannot. */
 const CAST_LINK = 'a[href]';
-const CAST_HREF = /^\/[^/]+\/0x[0-9a-f]{8,}$/i;
+const CAST_HREF = /^\/~\/conversations\/0x[0-9a-f]{8,}$/i;
 
 const account = privateKeyToAccount(
   '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',

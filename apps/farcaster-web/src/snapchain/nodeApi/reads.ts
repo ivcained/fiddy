@@ -242,6 +242,27 @@ export const channelParentUrlFor = (key: string): string => {
 };
 
 /**
+ * The spelling a set of cast hashes holds `hash` under, if it holds it at all.
+ *
+ * The node serves hashes as lowercase hex, and a hash this session wrote comes
+ * from the message that very node served, so the two match exactly in practice.
+ * This is belt and braces for the comparisons below: a reaction the viewer just
+ * pressed must never be missed, or drawn twice, over a difference in casing.
+ */
+const heldHash = (hashes: Set<string>, hash: string): string | undefined => {
+  if (hashes.has(hash)) {
+    return hash;
+  }
+  const wanted = hash.toLowerCase();
+  for (const held of hashes) {
+    if (held.toLowerCase() === wanted) {
+      return held;
+    }
+  }
+  return undefined;
+};
+
+/**
  * Reads the hosted API's answers out of a Snapchain node, with the caches a
  * browser client needs (one page of feed asks for ~25 authors).
  */
@@ -278,6 +299,16 @@ export class NodeBackedReads {
   private readonly viewerReactionPromiseCache = new Map<
     'Like' | 'Recast',
     Promise<Set<string>>
+  >();
+  /**
+   * The reactions written through this client since it was built — see
+   * `noteViewerReaction`, which the write half of the seam calls. Applied ON TOP
+   * of `viewerReactionCache`, never instead of it, so the minute of reuse still
+   * pays for itself.
+   */
+  private readonly writtenReactions = new Map<
+    'Like' | 'Recast',
+    Map<string, boolean>
   >();
 
   constructor({
@@ -766,9 +797,18 @@ export class NodeBackedReads {
    * paging the viewer's WHOLE reaction log — 2000 messages per page, measured at
    * 1.4–5.5s — and every page read and every thread read used to ask it again
    * from scratch, twice (once per reaction type). The set only grows as the
-   * viewer likes things, and a like made in this session invalidates the query
-   * cache that draws it, so a minute of reuse is invisible and pays for itself
-   * on the second read of any page.
+   * viewer likes things, and a minute of reuse pays for itself on the second
+   * read of any page.
+   *
+   * WHAT KEEPS THAT MINUTE HONEST — and this is the part a comment here got
+   * wrong once (t_4c990a3b): nothing invalidates this cache. The fork's like and
+   * recast hooks paint the heart optimistically and call the API; they run in
+   * another package, know nothing about a node-side reader, and clear no query
+   * key this cache answers. So a write is folded in HERE instead, by
+   * `noteViewerReaction`, which the write half of the seam calls once the node
+   * has really merged the reaction. Without that fold, liking a cast and opening
+   * its conversation inside the minute rebuilt `viewerContext.reacted` from the
+   * pre-like set and drew the heart un-liked while the like itself had landed.
    */
   private async viewerReactionHashes(
     reactionType: 'Like' | 'Recast',
@@ -780,12 +820,15 @@ export class NodeBackedReads {
 
     const cached = this.viewerReactionCache.get(reactionType);
     if (cached && Date.now() - cached.at < VIEWER_REACTION_CACHE_MS) {
-      return cached.value;
+      return this.withSessionWrites(reactionType, cached.value);
     }
 
     const inFlight = this.viewerReactionPromiseCache.get(reactionType);
     if (inFlight) {
-      return inFlight;
+      // A read that was already on its way when this session wrote a reaction
+      // answers with the pre-write log; folding here is what stops the write
+      // disappearing for the life of the window.
+      return this.withSessionWrites(reactionType, await inFlight);
     }
 
     const promise = (async () => {
@@ -814,10 +857,74 @@ export class NodeBackedReads {
 
     this.viewerReactionPromiseCache.set(reactionType, promise);
     try {
-      return await promise;
+      return this.withSessionWrites(reactionType, await promise);
     } finally {
       this.viewerReactionPromiseCache.delete(reactionType);
     }
+  }
+
+  /**
+   * The memoised set, with the reactions THIS session has written folded in.
+   *
+   * The overlay is last-write-wins per hash, and it is applied to whichever base
+   * a read got — the cached set, an in-flight fetch, or a page just read — so a
+   * reaction written while a read was on its way is drawn too. No writes is the
+   * common case: one comparison, and the base set is returned as it was.
+   */
+  private withSessionWrites(
+    reactionType: 'Like' | 'Recast',
+    base: Set<string>,
+  ): Set<string> {
+    const written = this.writtenReactions.get(reactionType);
+    if (written === undefined || written.size === 0) {
+      return base;
+    }
+    const answer = new Set(base);
+    for (const [hash, added] of written) {
+      const held = heldHash(answer, hash);
+      if (added) {
+        if (held === undefined) {
+          answer.add(hash);
+        }
+      } else if (held !== undefined) {
+        answer.delete(held);
+      }
+    }
+    return answer;
+  }
+
+  /**
+   * Note a like or recast THIS SESSION has just written, so the set above draws
+   * it before the node's own log is read again.
+   *
+   * Called by the write half of the seam (`nodeBackedFetch`) once the node has
+   * really merged the reaction — never before, and never for a write that
+   * failed. The node's `/v1/reactionsByFid` log stays the source of truth and is
+   * read again when the window above runs out; this only closes the gap between
+   * the write and that re-read, which is up to a minute wide. Both directions
+   * matter: un-liking a cast and opening it inside the window must not draw a
+   * heart the person just took back.
+   *
+   * A session fact, not a node fact, so it lives as long as this reader does and
+   * a sign-out drops it with the caches (see `clearCaches`).
+   */
+  noteViewerReaction({
+    castHash,
+    reactionType,
+    added,
+  }: {
+    castHash: string;
+    reactionType: 'Like' | 'Recast';
+    /** True for the reaction written, false for the one taken back. */
+    added: boolean;
+  }): void {
+    if (castHash.length === 0) {
+      return;
+    }
+    const written =
+      this.writtenReactions.get(reactionType) ?? new Map<string, boolean>();
+    written.set(castHash, added);
+    this.writtenReactions.set(reactionType, written);
   }
 
   /** Resolve one node cast into the API's cast shape, with its counts. */
@@ -1644,6 +1751,10 @@ export class NodeBackedReads {
     this.authorPromiseCache.clear();
     this.viewerReactionCache.clear();
     this.viewerReactionPromiseCache.clear();
+    // A sign-out must not carry this account's writes into the next one: the
+    // overlay is session state, and the log behind it is read again from the
+    // node anyway.
+    this.writtenReactions.clear();
     forgetCastAuthors();
   }
 }
