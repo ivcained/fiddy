@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { createNodeBackedFetch } from '~/snapchain/nodeApi';
+import { createNodeBackedFetch, forgetCastAuthors } from '~/snapchain/nodeApi';
 
 import { offlineEmbedKinds } from './fakeEmbedKinds';
 import {
@@ -221,7 +221,11 @@ describe('the node-backed fetch', () => {
       // Nothing has been read yet: this is a reader who just opened a link —
       // exactly the case the memo cannot cover, and the reason the origin has
       // an author index at all (`castAuthorHandoff.ts`, served by
-      // `server/unfurl/` in the release).
+      // `server/unfurl/` in the release). The memo is module-wide and the tests
+      // above filled it by reading their feeds, so it is emptied first: a test
+      // that claimed "a reader who has served nothing" without doing this would
+      // pass on somebody else's read.
+      forgetCastAuthors();
       const { fetch: nodeBackedFetch, log } = buildHarness();
 
       const hash = messagesOf('castsByFid.fid3.json')[0]!.hash;

@@ -42,6 +42,7 @@ import {
 } from 'farcaster-client-data';
 import {
   fetchFollowing,
+  isMissingOnNode,
   isTerminalPageToken,
   mapWithConcurrency,
   type NodeCastAddBody,
@@ -81,8 +82,17 @@ export class NodeCannotAnswerError extends Error {
 
 const DEFAULT_COUNT_CAP = 6000;
 const COUNT_PAGE_SIZE = 1000;
-/** How many quotes/names to resolve per response, to keep fan-out bounded. */
-const RESOLVE_CONCURRENCY = 12;
+/**
+ * How many reads this reader keeps in flight at once.
+ *
+ * MEASURED (2026-10-22, the live client against a public read node, 10-core
+ * laptop under load ~9): a home feed's first page is ~62 per-author reads and
+ * they answer in p50 ~250ms / p95 ~1s, so the fan-out is where the first cast's
+ * wall clock goes — and 12 at a time turns 62 reads into six waves of waiting
+ * for no reason. 24 halves the waves; the fan-out stays bounded, and the node
+ * is asked no more often than before.
+ */
+const RESOLVE_CONCURRENCY = 24;
 /** Walk at most this far up a thread looking for its root. */
 const MAX_ANCESTOR_HOPS = 20;
 
@@ -197,6 +207,17 @@ interface CacheEntry<T> {
 
 const USER_CACHE_MS = 60_000;
 const COUNT_CACHE_MS = 60_000;
+/**
+ * How long the viewer's own reaction logs are reused.
+ *
+ * MEASURED (2026-10-22, the live client, box load ~5): `/v1/reactionsByFid` at
+ * `pageSize: 1000` answers with 2000 messages and took 1.4–5.5s, and it was
+ * asked TWICE per feed read and twice again per thread — every read of a page
+ * paid for the viewer's whole like and recast history to answer one question
+ * per cast ("did I like this one?"). The answer to that question is stable on
+ * the order of a page read, so it is read once and reused.
+ */
+const VIEWER_REACTION_CACHE_MS = 60_000;
 
 /**
  * A channel's parent URL from its key.
@@ -240,8 +261,24 @@ export class NodeBackedReads {
 
   private readonly userCache = new Map<number, CacheEntry<ApiUser>>();
   private readonly userPromiseCache = new Map<number, Promise<ApiUser>>();
+  /**
+   * The cast-shaped account cache. Separate from `userCache` on purpose: the two
+   * hold different answers (see `readAuthor`), and a cast-shaped read must never
+   * satisfy a profile-shaped one.
+   */
+  private readonly authorCache = new Map<number, CacheEntry<ApiUser>>();
+  private readonly authorPromiseCache = new Map<number, Promise<ApiUser>>();
   private readonly countCache = new Map<string, CacheEntry<NodeCount>>();
   private readonly castCache = new Map<string, CacheEntry<NodeMessage>>();
+  /** The viewer's own like/recast hashes, one entry per reaction type. */
+  private readonly viewerReactionCache = new Map<
+    'Like' | 'Recast',
+    CacheEntry<Set<string>>
+  >();
+  private readonly viewerReactionPromiseCache = new Map<
+    'Like' | 'Recast',
+    Promise<Set<string>>
+  >();
 
   constructor({
     node,
@@ -400,8 +437,13 @@ export class NodeBackedReads {
   }
 
   /**
-   * A profile. Counts are counted by paging the follow graph, so they are exact
-   * below the cap and a floor above it — `NodeCount.isFloor` says which.
+   * A PROFILE-shaped account: the one a profile header, a search result or
+   * `useUser` shows. Counts are counted by paging the follow graph, so they are
+   * exact below the cap and a floor above it — `NodeCount.isFloor` says which.
+   *
+   * Cast-shaped surfaces (a card in the feed, a thread, a notification's actor)
+   * must NOT come here: see `readAuthor` for what they need, and for the
+   * measurement that says why counting followers is not part of drawing a cast.
    */
   async readUser(fid: number): Promise<ApiUser> {
     const cached = this.userCache.get(fid);
@@ -421,11 +463,8 @@ export class NodeBackedReads {
         this.countLinkDirection({ fid }),
       ]);
 
-      const viewerFid = this.getSignedInFid();
-      const viewerContext =
-        viewerFid !== undefined && viewerFid !== fid
-          ? { following: await this.isFollowing({ viewerFid, targetFid: fid }) }
-          : undefined;
+      const following = await this.viewerFollows(fid);
+      const viewerContext = following === undefined ? undefined : { following };
 
       const user = apiUserFromNode({
         fid,
@@ -444,6 +483,95 @@ export class NodeBackedReads {
       return await promise;
     } finally {
       this.userPromiseCache.delete(fid);
+    }
+  }
+
+  /**
+   * Is there a follow edge from the viewer to this account?
+   *
+   * `/v1/linkById` asks the question itself, so the answer is one small message
+   * or a "no such link". This used to page `/v1/linksByFid` with
+   * `pageSize: 1000` and look for the target among the links that came back —
+   * which is both a large response per account (the node treats `pageSize` as a
+   * minimum and answers 2000) and wrong for a viewer who follows more accounts
+   * than one page holds. A not-found link is `false`; a node that cannot answer
+   * at all leaves the field out rather than claiming either way.
+   */
+  private async viewerFollows(targetFid: number): Promise<boolean | undefined> {
+    const viewerFid = this.getSignedInFid();
+    if (viewerFid === undefined || viewerFid === targetFid) {
+      return undefined;
+    }
+    try {
+      await this.node.linkById({
+        fid: viewerFid,
+        targetFid,
+        linkType: 'follow',
+      });
+      return true;
+    } catch (error) {
+      // A missing edge is the answer "no"; anything else leaves the field out.
+      return isMissingOnNode(error) ? false : undefined;
+    }
+  }
+
+  /**
+   * An account as a CAST-SHAPED surface needs it: who they are, and whether the
+   * viewer follows them. Never the follower/following counts.
+   *
+   * WHY THIS EXISTS (MEASURED, 2026-10-22, the live client, a real follow graph)
+   *
+   * The counts are not free: the node serves them as a *paged log*, so counting
+   * a popular account's followers means several responses of 2000 links each,
+   * and `pageSize` is a minimum. Building a 25-cast home feed through the
+   * profile-shaped read therefore cost, before this change, 98
+   * `/v1/linksByTargetFid` and 120 `/v1/linksByFid` requests — 232 seconds of
+   * request time across the run, and the slowest account's count paging was
+   * still in flight when the first cast finally painted at 29.4s. Nothing on a
+   * cast card (or in a notification, or on a quoted cast) renders either count;
+   * the surfaces that do — a profile header, a search result, `useUser` — read
+   * the account through `readUser`, which is unchanged and still counts for
+   * real.
+   *
+   * The consequence is deliberate and worth stating: the account object this
+   * returns carries `0` for both counts, because the fork's `ApiUser` type has
+   * no way to say "not read". A surface that renders a count must therefore use
+   * `readUser`, never a cast's author.
+   */
+  async readAuthor(fid: number): Promise<ApiUser> {
+    const cached = this.authorCache.get(fid);
+    if (cached && Date.now() - cached.at < USER_CACHE_MS) {
+      return cached.value;
+    }
+
+    const inFlight = this.authorPromiseCache.get(fid);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = (async () => {
+      // Two small reads, together: the account's own user data, and the one
+      // follow edge the viewer may or may not have to them.
+      const [userData, following] = await Promise.all([
+        this.userDataMessages(fid),
+        this.viewerFollows(fid),
+      ]);
+
+      const user = apiUserFromNode({
+        fid,
+        userData,
+        ...(following !== undefined ? { viewerContext: { following } } : {}),
+      });
+
+      this.authorCache.set(fid, { at: Date.now(), value: user });
+      return user;
+    })();
+
+    this.authorPromiseCache.set(fid, promise);
+    try {
+      return await promise;
+    } finally {
+      this.authorPromiseCache.delete(fid);
     }
   }
 
@@ -474,7 +602,7 @@ export class NodeBackedReads {
       RESOLVE_CONCURRENCY,
       async (fid) => {
         try {
-          return [fid, await this.readUser(fid)] as const;
+          return [fid, await this.readAuthor(fid)] as const;
         } catch {
           return undefined;
         }
@@ -491,29 +619,6 @@ export class NodeBackedReads {
   /** Every FID a set of casts mentions, page order preserved. */
   private static mentionedFidsOf(messages: NodeMessage[]): number[] {
     return messages.flatMap((message) => message.castAdd?.mentions ?? []);
-  }
-
-  private async isFollowing({
-    viewerFid,
-    targetFid,
-  }: {
-    viewerFid: number;
-    targetFid: number;
-  }): Promise<boolean> {
-    // One page is enough to answer this for real: the question is "is there a
-    // follow link from me to them", and the node serves the links themselves.
-    try {
-      const page = await this.node.linksByFid({
-        fid: viewerFid,
-        linkType: 'follow',
-        pageSize: COUNT_PAGE_SIZE,
-      });
-      return page.messages.some(
-        (message) => message.link?.targetFid === targetFid,
-      );
-    } catch {
-      return false;
-    }
   }
 
   async readUserByUsername(username: string): Promise<ApiUser | undefined> {
@@ -654,7 +759,17 @@ export class NodeBackedReads {
     return value;
   }
 
-  /** Which casts the signed-in account has already liked / recast. */
+  /**
+   * Which casts the signed-in account has already liked / recast.
+   *
+   * Cached, because the question ("which of my likes do I hold?") is answered by
+   * paging the viewer's WHOLE reaction log — 2000 messages per page, measured at
+   * 1.4–5.5s — and every page read and every thread read used to ask it again
+   * from scratch, twice (once per reaction type). The set only grows as the
+   * viewer likes things, and a like made in this session invalidates the query
+   * cache that draws it, so a minute of reuse is invisible and pays for itself
+   * on the second read of any page.
+   */
   private async viewerReactionHashes(
     reactionType: 'Like' | 'Recast',
   ): Promise<Set<string>> {
@@ -662,19 +777,46 @@ export class NodeBackedReads {
     if (fid === undefined) {
       return new Set();
     }
+
+    const cached = this.viewerReactionCache.get(reactionType);
+    if (cached && Date.now() - cached.at < VIEWER_REACTION_CACHE_MS) {
+      return cached.value;
+    }
+
+    const inFlight = this.viewerReactionPromiseCache.get(reactionType);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = (async () => {
+      try {
+        const page = await this.node.reactionsByFid({
+          fid,
+          reactionType,
+          pageSize: COUNT_PAGE_SIZE,
+        });
+        const hashes = new Set(
+          page.messages
+            .map((message) => message.reaction?.targetCastId?.hash)
+            .filter((hash): hash is string => typeof hash === 'string'),
+        );
+        this.viewerReactionCache.set(reactionType, {
+          at: Date.now(),
+          value: hashes,
+        });
+        return hashes;
+      } catch {
+        // A node that cannot answer must not be remembered as "you liked
+        // nothing": the empty set is for this read only.
+        return new Set<string>();
+      }
+    })();
+
+    this.viewerReactionPromiseCache.set(reactionType, promise);
     try {
-      const page = await this.node.reactionsByFid({
-        fid,
-        reactionType,
-        pageSize: COUNT_PAGE_SIZE,
-      });
-      return new Set(
-        page.messages
-          .map((message) => message.reaction?.targetCastId?.hash)
-          .filter((hash): hash is string => typeof hash === 'string'),
-      );
-    } catch {
-      return new Set();
+      return await promise;
+    } finally {
+      this.viewerReactionPromiseCache.delete(reactionType);
     }
   }
 
@@ -732,7 +874,7 @@ export class NodeBackedReads {
         : this.resolveMentionUsers(body.mentions);
 
     const [author, reactions, recasts, mentioned] = await Promise.all([
-      this.readUser(message.fid),
+      this.readAuthor(message.fid),
       withCounts
         ? this.countReactions({
             targetFid: message.fid,
@@ -761,7 +903,7 @@ export class NodeBackedReads {
         if (!quotedMessage?.castAdd) {
           return undefined;
         }
-        const quotedAuthor = await this.readUser(quotedMessage.fid);
+        const quotedAuthor = await this.readAuthor(quotedMessage.fid);
         return {
           hash: quotedMessage.hash,
           threadHash: quotedMessage.hash,
@@ -809,23 +951,40 @@ export class NodeBackedReads {
     }: { withCounts?: boolean; withViewer?: boolean } = {},
   ): Promise<ApiCast[]> {
     this.rememberCasts(messages);
-    // The page's embed URLs are asked about together, before any cast is built:
-    // a photo is drawn as a photo on the first paint rather than after a reload,
-    // and a link's own title, picture and mini-app card are in hand before the
-    // card is drawn (`preparedEmbeds`).
-    await this.classifyEmbeds(messages);
-    // ...and so is every account the page mentions, for the same reason: a
-    // mention is drawn as a handle on the first paint, once per distinct FID for
-    // the whole page rather than once per cast.
-    const mentionUsers = await this.resolveMentionUsers(
-      NodeBackedReads.mentionedFidsOf(messages),
-    );
-    const [likedHashes, recastHashes] = withViewer
-      ? await Promise.all([
-          this.viewerReactionHashes('Like'),
-          this.viewerReactionHashes('Recast'),
-        ])
-      : [undefined, undefined];
+    // Three independent questions about the page, asked together.
+    //
+    // They used to be answered one after another, and each one has its own
+    // bounded wait, so a page's first paint paid the SUM of three network waits
+    // that have nothing to do with each other:
+    //
+    //   - what each embed URL IS and what each link SAYS (`classifyEmbeds`,
+    //     bounded probes of pages this client does not own);
+    //   - who the accounts the page mentions are (`resolveMentionUsers`);
+    //   - which of the page's casts the viewer has already liked / recast
+    //     (`viewerReactionHashes`, which reads the viewer's whole reaction log).
+    //
+    // MEASURED (2026-10-22, the live client, box load ~11): the embeds' bounded
+    // waits (1.5s + 2s) ran to their deadline first, the viewer's two reaction
+    // logs only STARTED at 12.6s and each took 5.3s — and the first cast painted
+    // at 17.4s. Nothing below depends on the others, so they run at once and the
+    // wait is the slowest of the three, not their sum.
+    const [mentionUsers, [likedHashes, recastHashes]] = await Promise.all([
+      this.resolveMentionUsers(NodeBackedReads.mentionedFidsOf(messages)),
+      withViewer
+        ? Promise.all([
+            this.viewerReactionHashes('Like'),
+            this.viewerReactionHashes('Recast'),
+          ])
+        : Promise.resolve([undefined, undefined] as [
+            Set<string> | undefined,
+            Set<string> | undefined,
+          ]),
+      // The page's embed URLs are asked about together, before any cast is built:
+      // a photo is drawn as a photo on the first paint rather than after a
+      // reload, and a link's own title, picture and mini-app card are in hand
+      // before the card is drawn (`preparedEmbeds`).
+      this.classifyEmbeds(messages),
+    ]);
 
     const casts = await mapWithConcurrency(
       messages,
@@ -1274,7 +1433,7 @@ export class NodeBackedReads {
         RESOLVE_CONCURRENCY,
         async (message) => {
           const cast = await this.buildCast({ message, withCounts: false });
-          const actor = await this.readUser(message.fid);
+          const actor = await this.readAuthor(message.fid);
           if (!cast) {
             return undefined;
           }
@@ -1311,7 +1470,7 @@ export class NodeBackedReads {
         RESOLVE_CONCURRENCY,
         async (message) => {
           const cast = await this.buildCast({ message, withCounts: false });
-          const actor = await this.readUser(message.fid);
+          const actor = await this.readAuthor(message.fid);
           if (!cast) {
             return undefined;
           }
@@ -1360,7 +1519,7 @@ export class NodeBackedReads {
           withCounts: false,
         });
         const reactionMessage = entry.messages[0]!;
-        const actor = await this.readUser(reactionMessage.fid);
+        const actor = await this.readAuthor(reactionMessage.fid);
         if (!cast) {
           continue;
         }
@@ -1404,7 +1563,7 @@ export class NodeBackedReads {
         followMessages.slice(0, 3),
         RESOLVE_CONCURRENCY,
         async (message) => {
-          const actor = await this.readUser(message.fid);
+          const actor = await this.readAuthor(message.fid);
           return {
             type: 'follow' as const,
             id: `follow:${message.fid}`,
@@ -1481,6 +1640,10 @@ export class NodeBackedReads {
     this.userPromiseCache.clear();
     this.countCache.clear();
     this.castCache.clear();
+    this.authorCache.clear();
+    this.authorPromiseCache.clear();
+    this.viewerReactionCache.clear();
+    this.viewerReactionPromiseCache.clear();
     forgetCastAuthors();
   }
 }

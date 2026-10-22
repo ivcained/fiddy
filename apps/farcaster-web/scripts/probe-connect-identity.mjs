@@ -105,13 +105,13 @@ const readEverythingStored = (page) =>
   page.evaluate(async () => {
     const dump = {};
     const databases =
-      typeof indexedDB.databases === 'function'
-        ? await indexedDB.databases()
+      typeof globalThis.indexedDB.databases === 'function'
+        ? await globalThis.indexedDB.databases()
         : [];
     for (const info of databases) {
       if (!info.name) continue;
       const db = await new Promise((resolve, reject) => {
-        const request = indexedDB.open(info.name);
+        const request = globalThis.indexedDB.open(info.name);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -297,6 +297,22 @@ const open = async ({ label, width }) => {
     { timeout: 60_000 },
   );
 
+  // The front door paints before its sign-in button does (the shell and its
+  // providers land first), so WAIT for the button instead of clicking whatever
+  // is on screen at that instant. Measured 2026-10-22: a desktop context that
+  // clicked one paint too early never signed in, and the run then failed five
+  // checks later as "not signed in" — a harness race reported as a product bug.
+  await page
+    .waitForFunction(
+      () =>
+        Array.from(document.querySelectorAll('button, a, [role=button]')).some(
+          (el) => /go social/i.test((el.innerText || '').replace(/\s+/g, ' ')),
+        ),
+      undefined,
+      { timeout: 120_000 },
+    )
+    .catch(() => undefined);
+
   const social = await findButton(page, 'go social');
   if (social) {
     await social.element.click();
@@ -315,11 +331,11 @@ const open = async ({ label, width }) => {
   await page
     .waitForFunction(
       async () => {
-        const databases = await indexedDB.databases();
+        const databases = await globalThis.indexedDB.databases();
         for (const info of databases) {
           if (!info.name) continue;
           const db = await new Promise((resolve) => {
-            const request = indexedDB.open(info.name);
+            const request = globalThis.indexedDB.open(info.name);
             request.onsuccess = () => resolve(request.result);
           });
           for (const storeName of Array.from(db.objectStoreNames)) {

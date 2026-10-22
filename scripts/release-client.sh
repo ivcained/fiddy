@@ -27,6 +27,9 @@
 #      a dropped route string is a release that quietly loses a feature) — and
 #      the built shell must carry no inline script, because the host serves
 #      script-src 'self' (the theme bootstrap lives at public/shell-bootstrap.js);
+#      and the app-list manifest the release installs must be signed, spec-sized,
+#      and say the same thing about the app as the shell does
+#      (apps/farcaster-web/scripts/check-manifest.mjs);
 #   4. assemble the release tree the vhost expects — web/ (the client) plus
 #      server/ (the read-only preview's API, which systemd runs from
 #      /var/www/fiddy.fun/current/server/server.mjs, so a release without it
@@ -39,10 +42,14 @@
 #   6. a DISK gate on the VPS: grep the extracted web root (not the deploy
 #      command's exit code);
 #   7. cut over by symlink ONLY (ln -sfn … && mv -T), with the previous
-#      release left in place; any failure after the swap rolls back by itself;
-#      then RESTART fiddy-unfurl (it answers a cast or profile URL with the
-#      shell of the release `current` points at) and prove, over the loopback,
-#      that the shell it serves is this release's shell, byte for byte;
+#      release left in place; any failure after the swap rolls back by itself.
+#      Just before the swap, the app-list manifest is installed from this
+#      build's web root into /var/www/fiddy-well-known/farcaster.json — domain
+#      state the vhost serves by alias, outside any release directory, written
+#      with the owner's existing accountAssociation carried through unchanged.
+#      After the swap, RESTART fiddy-unfurl (it answers a cast or profile URL
+#      with the shell of the release `current` points at) and prove, over the
+#      loopback, that the shell it serves is this release's shell, byte for byte;
 #   8. a SERVED gate that asks the ORIGIN: the built shell and the entry chunk
 #      this build produced, compared byte-for-byte against what the host
 #      answers when no cache can stand in for it; then one cache-busted fetch
@@ -198,6 +205,20 @@ echo "  together ok (route literal; no laptop fallback in the chunks, api = '${T
 CHECK_SHELL="$STAGE/base/apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs"
 node "$CHECK_SHELL" "$APP/index.html" \
   || { echo "REFUSING to ship: the built shell needs script-src 'unsafe-inline'" >&2; exit 1; }
+# The listing manifest is the app's SECOND front door, and it is shared VPS
+# state: the vhost serves /.well-known/farcaster.json from
+# /var/www/fiddy-well-known/farcaster.json, which step 7 installs from THIS
+# build. So it is checked here, on the built tree, before anything is uploaded.
+# Installing an unsigned or mis-sized manifest over a working one takes the app
+# out of the app list; a description that sells a different product than the
+# shared link is how the two surfaces drifted (measured 2026-10-22, card
+# t_8654d91e: a 512x512 splash where the spec asks 200x200, the splash painted
+# in upstream Warpcast purple #6200EA, and "deploy always on agents with onchain
+# identities" on the listing while the shell unfurls "a Farcaster client with an
+# agent"). Like the shell checker above, it is taken from the FROZEN tree.
+CHECK_MANIFEST="$STAGE/base/apps/farcaster-web/scripts/check-manifest.mjs"
+node "$CHECK_MANIFEST" "$APP" \
+  || { echo "REFUSING to ship: the app-list manifest is not shippable" >&2; exit 1; }
 # The entry chunk the release ships, resolved from the shell THIS BUILD wrote.
 # Never from a served shell: a served `index.html` may belong to another release
 # (or to a CDN's copy of one), and a path derived from it names a file this build
@@ -221,7 +242,11 @@ rsync -a "$HOST:$PRIOR/web/index.html" "$STAGE/prior-index.html"
 rsync -a "$HOST:$PRIOR/server/" "$STAGE/server/"
 mkdir -p "$WEB/preview" "$STAGE/release/server"
 # The preview keeps the URLs that are already live under the release root…
-for f in fiddy-card.png fiddy-splash.png fiddy-icon.png fiddy-mark-180.png fiddy-favicon.svg fiddy-baby.glb ROBOT-HEADS-NOTICE.txt; do
+# …and only the ones this repo no longer builds: `fiddy-splash.png` left this
+# list when the app-list manifest's splash moved into `public/` (card
+# t_8654d91e) — a carried-forward copy would WIN over the repo's, so an updated
+# splash would never ship while the release still reported success.
+for f in fiddy-card.png fiddy-icon.png fiddy-mark-180.png fiddy-favicon.svg fiddy-baby.glb ROBOT-HEADS-NOTICE.txt; do
   rsync -a "$HOST:$PRIOR/web/$f" "$WEB/$f"
 done
 # …and moves to /preview/, with its own asset references made relative so both
@@ -261,6 +286,8 @@ ssh_ "set -e
   fi
   test -f $RELEASES/$SHA/web/preview/index.html
   test -f $RELEASES/$SHA/server/server.mjs
+  test -f $RELEASES/$SHA/web/.well-known/farcaster.json
+  grep -q '\"signature\"' $RELEASES/$SHA/web/.well-known/farcaster.json
   test -f $RELEASES/$SHA/server/unfurl/server.mjs
   test -f $RELEASES/$SHA/server/unfurl/render-card.py
   # The card renderer is Pillow, which the host has and the release does not
@@ -273,7 +300,7 @@ ssh_ "set -e
   grep -q 'snapchain-api' /etc/nginx/sites-available/fiddy.fun
   grep -q 'location ^~ /preview/' /etc/nginx/sites-available/fiddy.fun
   grep -q 'proxy_pass http://127.0.0.1:8787;' /etc/nginx/sites-available/fiddy.fun
-  echo '  disk gate ok: bundle (adapter, media, node, together), preview, server, unfurl (renderer, unit, locations), vhost locations'"
+  echo '  disk gate ok: bundle (adapter, media, node, together), preview, server, unfurl (renderer, unit, locations), vhost locations, listing manifest'"
 
 if [ "$NO_CUTOVER" = "--no-cutover" ]; then
   say "staged at $RELEASES/$SHA (not cut over)"
@@ -283,9 +310,23 @@ fi
 
 say "7/8 cut over (symlink only; the previous release stays where it is)"
 PREV_TARGET=$(ssh_ "readlink -f $CURRENT")
+# The listing manifest is installed from this build's web root, then the release
+# is cut over. It goes first on purpose: the manifest is DOMAIN state (the vhost
+# serves it from /var/www/fiddy-well-known/, outside any release directory), so
+# if installing it fails the release must not cut over — and if the swap then
+# fails, only the listing's copy has moved, which is recoverable by releasing
+# again. Only the `miniapp` block is ever written here: the accountAssociation
+# is the owner's cryptographic approval of the domain, carried through
+# unchanged, never regenerated (re-signing is a phone QR and a human, and it is
+# needed only if the domain itself changes).
 # Swap and reload in one call: the vhost was already replaced and tested, so the
 # window where nginx still holds the old config is the length of one command.
-ssh_ "ln -sfn $RELEASES/$SHA $CURRENT.new && mv -Tf $CURRENT.new $CURRENT && nginx -t && systemctl reload nginx"
+ssh_ "set -e
+  install -m 0644 $RELEASES/$SHA/web/.well-known/farcaster.json /var/www/fiddy-well-known/.farcaster.json.new
+  mv -Tf /var/www/fiddy-well-known/.farcaster.json.new /var/www/fiddy-well-known/farcaster.json
+  cmp -s $RELEASES/$SHA/web/.well-known/farcaster.json /var/www/fiddy-well-known/farcaster.json
+  echo '  listing manifest installed from this build'
+  ln -sfn $RELEASES/$SHA $CURRENT.new && mv -Tf $CURRENT.new $CURRENT && nginx -t && systemctl reload nginx"
 echo "  $CURRENT -> $(ssh_ "readlink -f $CURRENT")"
 
 # The service reads the shell through `current`, so the cutover already changed

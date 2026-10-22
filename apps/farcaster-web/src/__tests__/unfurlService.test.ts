@@ -21,10 +21,9 @@
  *      the same card.
  */
 
-import { execFile as execFileCallback } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 
@@ -36,9 +35,22 @@ import {
   renderPageHtml,
 } from '../../server/unfurl/shellMeta.mjs';
 
-const execFile = promisify(execFileCallback);
 const webRoot = path.resolve(__dirname, '../..');
 const shell = readFileSync(path.join(webRoot, 'index.html'), 'utf8');
+
+/**
+ * Pillow — the card renderer's one real dependency — or an honest skip: without
+ * it no card can be drawn on this machine, and this file must not claim one
+ * was. The answer is decided once, here, so the skip shows up as a named test.
+ */
+const pillowReady = (() => {
+  try {
+    execFileSync('python3', ['-c', 'import PIL.Image'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 const ORIGIN = 'https://fiddy.fun';
 
 const siteCard = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -295,7 +307,16 @@ describe('the pages this service cannot read', () => {
 
   it('answers a path it does not own with a 404, and a POST with a 405', async () => {
     expect((await read('/index.html')).status).toBe(404);
-    expect((await read('/~/conversations')).status).toBe(404);
+    expect((await read('/robots.txt')).status).toBe(404);
+    // The route FAMILIES without an id are not pages the service has facts for,
+    // but they are still the app's own prefix — the answer is the shell, which
+    // is what the host served for them before this service existed.
+    for (const url of ['/~/conversations', '/~/profiles', '/~/']) {
+      const { status, body, headers } = await read(url);
+      expect(status).toBe(200);
+      expect(headers['x-unfurl']).toBe('shell');
+      expect(body).toBe(shell);
+    }
     const posted = (await handler().handle({ method: 'POST', path: '/' })) as {
       status: number;
     };
@@ -407,57 +428,47 @@ describe('the card renderer, against the real thing', () => {
     mascotPath: path.join(webRoot, 'public', 'fiddy-mark-poster.png'),
   }).render;
 
-  /** Pillow, or an honest skip: the card cannot be drawn without it. */
-  const hasPillow = async () => {
-    try {
-      await execFile('python3', ['-c', 'import PIL.Image']);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
   // Three cards, three python3 processes, and a Pillow check: this one is a
-  // subprocess test, not a unit test, and it gets its own budget.
-  it('draws 1200x630 for two different casts and one profile, and they differ', async () => {
-    if (!(await hasPillow())) {
-      console.warn(
-        'skipping: no python3 with Pillow on this machine, so no card can be drawn here',
-      );
-      return;
-    }
-    const casthash = '0xec0c8a227d7f34ad3e2243ae098b46459b7d1847';
-    const other = '0x' + 'e'.repeat(40);
-    const cards = [
-      await render({
-        kind: 'cast',
-        hash: casthash,
-        text: 'Neat',
-        username: 'dwr',
-        displayName: 'Dan Romero',
-        fid: 3,
-      }),
-      await render({
-        kind: 'cast',
-        hash: other,
-        text: 'A different cast, with different words in it.',
-        username: 'someone',
-        fid: 12,
-      }),
-      await render({
-        kind: 'profile',
-        fid: 3,
-        username: 'dwr',
-        displayName: 'Dan Romero',
-        bio: 'Interested in technology and other stuff.',
-      }),
-    ];
-    for (const png of cards) {
-      expect(pngSize(png)).toEqual({ width: 1200, height: 630 });
-    }
-    expect(cards[0].equals(cards[1])).toBe(false);
-    expect(cards[0].equals(cards[2])).toBe(false);
-  }, 60_000);
+  // subprocess test, not a unit test, and it gets its own budget. Without
+  // Pillow no card can be drawn at all, so the test is skipped BY NAME rather
+  // than passing quietly — a green run must never mean "did not run".
+  it.skipIf(!pillowReady)(
+    'draws 1200x630 for two different casts and one profile, and they differ',
+    async () => {
+      const casthash = '0xec0c8a227d7f34ad3e2243ae098b46459b7d1847';
+      const other = '0x' + 'e'.repeat(40);
+      const cards = [
+        await render({
+          kind: 'cast',
+          hash: casthash,
+          text: 'Neat',
+          username: 'dwr',
+          displayName: 'Dan Romero',
+          fid: 3,
+        }),
+        await render({
+          kind: 'cast',
+          hash: other,
+          text: 'A different cast, with different words in it.',
+          username: 'someone',
+          fid: 12,
+        }),
+        await render({
+          kind: 'profile',
+          fid: 3,
+          username: 'dwr',
+          displayName: 'Dan Romero',
+          bio: 'Interested in technology and other stuff.',
+        }),
+      ];
+      for (const png of cards) {
+        expect(pngSize(png)).toEqual({ width: 1200, height: 630 });
+      }
+      expect(cards[0].equals(cards[1])).toBe(false);
+      expect(cards[0].equals(cards[2])).toBe(false);
+    },
+    60_000,
+  );
 
   it('refuses a card that is not 1200x630', async () => {
     const render = createCardRenderer({
