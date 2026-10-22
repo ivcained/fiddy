@@ -105,13 +105,13 @@ const readEverythingStored = (page) =>
   page.evaluate(async () => {
     const dump = {};
     const databases =
-      typeof indexedDB.databases === 'function'
-        ? await indexedDB.databases()
+      typeof globalThis.indexedDB.databases === 'function'
+        ? await globalThis.indexedDB.databases()
         : [];
     for (const info of databases) {
       if (!info.name) continue;
       const db = await new Promise((resolve, reject) => {
-        const request = indexedDB.open(info.name);
+        const request = globalThis.indexedDB.open(info.name);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -331,11 +331,11 @@ const open = async ({ label, width }) => {
   await page
     .waitForFunction(
       async () => {
-        const databases = await indexedDB.databases();
+        const databases = await globalThis.indexedDB.databases();
         for (const info of databases) {
           if (!info.name) continue;
           const db = await new Promise((resolve) => {
-            const request = indexedDB.open(info.name);
+            const request = globalThis.indexedDB.open(info.name);
             request.onsuccess = () => resolve(request.result);
           });
           for (const storeName of Array.from(db.objectStoreNames)) {
