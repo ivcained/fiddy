@@ -11,7 +11,15 @@ set -euo pipefail
 [ -n "${BASH_VERSION:-}" ] || { echo "fiddy needs bash (bash bin/fiddy …)" >&2; exit 1; }
 
 FIDDY_HOME="${FIDDY_HOME:-$HOME/.fiddy}"
-FIDDY_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks (e.g. /usr/local/bin/fiddy → repo/bin/fiddy) so FIDDY_REPO
+# is the real checkout, not the symlink's directory.
+FIDDY_SRC="${BASH_SOURCE[0]}"
+while [ -L "$FIDDY_SRC" ]; do
+  FIDDY_DIR="$(cd -P "$(dirname "$FIDDY_SRC")" && pwd)"
+  FIDDY_SRC="$(readlink "$FIDDY_SRC")"
+  case "$FIDDY_SRC" in /*) ;; *) FIDDY_SRC="$FIDDY_DIR/$FIDDY_SRC" ;; esac
+done
+FIDDY_REPO="$(cd -P "$(dirname "$FIDDY_SRC")/.." && pwd)"
 export FIDDY_HOME FIDDY_REPO
 
 source "$FIDDY_REPO/cli/lib/common.sh"
