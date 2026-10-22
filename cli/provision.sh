@@ -82,6 +82,8 @@ EOF
       echo "  4. Google Cloud (~\$350/mo, TESTED by us):    fiddy provision --gcp"
       echo "     …or one click in Cloud Shell: https://fiddy.fun/client#step0"
       echo "  5. Any server you have:                    fiddy provision --ssh user@host"
+      echo "     (budget VPS from ~€24/mo — MivoCloud, Advin, Contabo, LuxVPS —"
+      echo "     are order-manually paths: see https://fiddy.fun/client/deploy/)"
       echo ""
       echo "Hetzner and OVH are scripted against their API docs but not yet"
       echo "battle-tested (they fail loudly); GCP is the path our own node ran."
