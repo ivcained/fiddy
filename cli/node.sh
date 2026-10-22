@@ -170,8 +170,13 @@ node_install_local() {
         curl -fsSL https://get.docker.com | sudo sh >/tmp/fiddy-docker-install.log 2>&1 \
           && sudo usermod -aG docker "$USER" \
           || die "Docker install failed — see /tmp/fiddy-docker-install.log"
-        # The group change applies to NEW sessions; run the rest via sudo for this one.
-        warn "installed. Log out and back in (or run: newgrp docker) so '$USER' can use Docker without sudo, then re-run: bin/fiddy node up --local"
+        # Group membership applies to new shells; re-exec ourselves inside one
+        # (sg) so the user never has to run the command twice.
+        warn "Docker installed. Continuing with the docker group active…"
+        if command -v sg >/dev/null 2>&1; then
+          exec sg docker -c "'$FIDDY_REPO/bin/fiddy' node up --local $*"
+        fi
+        warn "log out and back in (or run: newgrp docker), then re-run: fiddy node up --local"
         exit 0
       else
         die "Docker missing and sudo needs a password. Run: curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER — then log out/in and re-run."
