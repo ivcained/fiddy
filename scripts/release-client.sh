@@ -93,12 +93,24 @@ MEDIA_URL=${FIDDY_BUILD_MEDIA_URL:-https://fiddy.fun}
 # the header (an undefined value is the laptop fallback).
 TOGETHER_URL=${FIDDY_BUILD_TOGETHER_API_URL-}
 # Strings only this client build has (the adapter's sentence and our media path).
-# The adapter's own fallback, as the client words it now: the 501 sweep
-# (2026-10-22) replaced the programmer-facing sentence ('no node-backed reader
-# has been written for this endpoint yet') with the two a reader can act on, so
-# the gate matches either — its point is that the adapter IS in the bundle, not
-# which of its sentences is.
-GATE_ADAPTER='has no data source yet|has no reader wired up in this app'
+#
+# The adapter sentence is the refusal THIS build writes for a read it has no
+# reader for — a string the hosted-API build never produces, which is what makes
+# it evidence that the shipped bundle is the node-backed client. Two things keep
+# it honest, both MEASURED on the release of 9102562 (2026-10-23):
+#
+#   * it must name a sentence the SHIPPED JavaScript carries, so every check of
+#     it is `--include='*.js'`. The 501 sweep (PR #32, merge 11a27e1) replaced
+#     "no node-backed reader has been written" with two new sentences, and the
+#     old text survives only in a sourcemap (`index-*.js.map` carries the
+#     ORIGINAL source — the trap the Together gate below already names). Step 3
+#     kept passing on that map while step 6, over the extracted files that
+#     actually ship, refused EVERY release from that merge on: a plain grep over
+#     `assets/` is not evidence about the code that ships;
+#   * it must be a sentence the app really writes today, which the old text is
+#     not — it is in neither this build nor the live 11a27e1 release, while the
+#     sweep's replacements are in both.
+GATE_ADAPTER='has no reader wired up in this app'
 GATE_MEDIA='api/fiddy/media'
 # The Together surface's route literal, and the fallback that must never ship.
 GATE_TOGETHER='/together'
@@ -172,7 +184,7 @@ say "2/8 vite build (node $NODE_URL, media $MEDIA_URL, together '${TOGETHER_URL}
 
 say "3/8 local gate: the bundle carries the adapter, the media path and Together"
 APP="$STAGE/base/apps/farcaster-web/dist"
-grep -rqsE "$GATE_ADAPTER" "$APP/assets" || { echo "MISSING adapter sentence in the build" >&2; exit 1; }
+grep -rqs --include='*.js' "$GATE_ADAPTER" "$APP/assets" || { echo "MISSING adapter sentence in the build" >&2; exit 1; }
 grep -rqs "$GATE_MEDIA" "$APP/assets" || { echo "MISSING media path in the build" >&2; exit 1; }
 grep -rqs "$NODE_URL" "$APP/assets" || { echo "MISSING the configured node in the build" >&2; exit 1; }
 # `--include='*.js'`: vite writes a sourcemap per chunk and a sourcemap carries
@@ -285,7 +297,7 @@ scp -q "$STAGE/fiddy-client-$SHORT.tar.gz" "$HOST:/var/www/fiddy.fun/"
 
 say "6/8 disk gate on the VPS (the extracted web root, and the vhost it needs)"
 ssh_ "set -e
-  grep -rqsE '$GATE_ADAPTER' $RELEASES/$SHA/web/assets
+  grep -rqs --include='*.js' '$GATE_ADAPTER' $RELEASES/$SHA/web/assets
   grep -rqs '$GATE_MEDIA' $RELEASES/$SHA/web/assets
   grep -rqs '$NODE_URL' $RELEASES/$SHA/web
   grep -rqs --include='*.js' '$GATE_TOGETHER' $RELEASES/$SHA/web/assets
@@ -488,7 +500,7 @@ cmp -s "$STAGE/origin-entry.js" "$APP$BUILT_ASSET" \
 # The served chunk IS the release's own bytes (cmp above), so the strings are
 # read on the bytes a browser actually downloads.
 for s in "$GATE_ADAPTER" "$GATE_MEDIA" "$NODE_URL"; do
-  grep -Eq "$s" "$STAGE/origin-entry.js" || gate_fail "the served entry chunk does not carry '$s'"
+  grep -q "$s" "$STAGE/origin-entry.js" || gate_fail "the served entry chunk does not carry '$s'"
 done
 if grep -q "$GATE_TOGETHER_FALLBACK" "$STAGE/origin-entry.js"; then
   gate_fail "the served entry chunk carries $GATE_TOGETHER_FALLBACK"
