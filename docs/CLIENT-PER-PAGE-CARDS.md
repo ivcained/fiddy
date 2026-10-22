@@ -39,6 +39,13 @@ never a broken page, never an invented fact.
   environment by `scripts/install-fiddy-unfurl-service.sh`; without it a cast
   page still answers, as the shell, and says so in the log.
 
+The node answers a cast as a MESSAGE — `/v1/castById` gives
+`{"data":{"castAddBody":{"text":…}}}` — so the reader reads the text out of
+`data.castAddBody` (`reader.mjs`). Reading it one level up finds nothing on the
+real node while every fixture-shaped test still passes, and every cast page then
+answers the shell; that is what shipped once (2026-10-22), and the reader test
+against the node's own envelope is what pins it.
+
 No follower counts, no avatars, no engagement: a card is a claim about a page,
 and a claim has to come from somewhere.
 
@@ -51,6 +58,14 @@ and Pillow, which the host has, from the same language: ground `#161715`, ink
 `#eef0e8`, dim `#9ba193`, chartreuse `#d4ff3f`, the same mascot still
 (`fiddy-mark-poster.png`, out of the release's own web root) in the same corner.
 Both files carry the fuller story in their headers.
+
+A page's own card is checked by the PICTURE, not by its size: the site card is
+1200×630 as well, so `handler.mjs` hands the renderer a resolved payload (a
+promise there is `{}`, the renderer answers `unknown card kind: None`, and every
+page silently falls back to the site card — measured live 2026-10-22) and both
+`self-check.mjs` and the release's served gate require the note the service
+sends: `x-unfurl: card:cast` / `card:profile`, and bytes that are not the site
+card.
 
 Emoji are dropped rather than drawn as empty boxes: the only emoji face on the
 host is a colour bitmap font FreeType will not scale to a 54px line honestly.
@@ -93,12 +108,19 @@ script, and the hostile values escaped.
 Live, the way a crawler asks:
 
     curl -s -A 'facebookexternalhit/1.1' https://fiddy.fun/~/profiles/3 | grep -o 'og:[a-z:]*" content="[^"]*"'
-    curl -sI https://fiddy.fun/unfurl/cards/profile/3.png          # 200 image/png
+    curl -sI https://fiddy.fun/unfurl/cards/profile/3.png          # 200 image/png, x-unfurl: card:profile
     curl -s http://127.0.0.1:3220/unfurl/health                    # on the host
 
+The `x-unfurl` header is the service saying which answer it gave — `page:cast`,
+`page:profile`, `card:cast`, `card:profile`, or `shell`/`card:site` when it fell
+back. A card's SIZE proves nothing (the site card is 1200×630 too); the note and
+the bytes are what say the page got its own picture.
+
 The release ritual's step 8 asks the origin for `/~/profiles/3` and requires that
-page's own `og:url`, then fetches the card and requires a 1200×630 PNG — so a
-release that breaks the per-page half does not stay live.
+page's own `og:url`, then fetches the card and requires a 1200×630 PNG THAT PAGE
+DREW (`x-unfurl: card:profile`), so a release that breaks the per-page half does
+not stay live. Step 3 renders both cards locally from the build, with the real
+renderer, and refuses to ship if either is the site card.
 
 ## Host state this needs (once, then it outlives any release)
 

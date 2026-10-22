@@ -19,7 +19,11 @@
  *      shell (that host serves `script-src 'self'`), so a tag that would be
  *      refused in a browser cannot ship;
  *   5. values that came off the network cannot close an attribute — a cast whose
- *      text contains a quote and a handle built out of angle brackets.
+ *      text contains a quote and a handle built out of angle brackets;
+ *   6. the CARD each page promises is drawn by the real renderer, from this
+ *      build's own mascot, and is not the site card — the picture, not just the
+ *      pixels. A page's `og:image` is a promise to a platform, and the site card
+ *      is also 1200x630 (see the note at the card checks).
  *
  * The rendered documents are written to `<outDir>/` so the ritual (and a person)
  * can grep what will actually be served.
@@ -30,7 +34,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createUnfurlHandler } from './handler.mjs';
-import { pngSize, CARD_WIDTH, CARD_HEIGHT } from './cards.mjs';
+import {
+  createCardRenderer,
+  pngSize,
+  CARD_WIDTH,
+  CARD_HEIGHT,
+} from './cards.mjs';
 
 const webRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -80,11 +89,24 @@ const fixtures = {
   },
 };
 
+// The card the SITE uses, read once: it is both the fallback the handler may
+// answer with and the picture a page's card must NOT be.
+const siteCardBytes = readFileSync(
+  path.join(webRoot, 'public', 'fiddy-share-card.png'),
+);
+
 const handler = createUnfurlHandler({
   origin,
   shellSource: () => shell,
-  siteCard: Buffer.alloc(0),
-  renderCard: async () => Buffer.alloc(0),
+  siteCard: siteCardBytes,
+  renderCard: createCardRenderer({
+    pythonPath: process.env.PYTHON ?? 'python3',
+    scriptPath: path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      'render-card.py',
+    ),
+    mascotPath: path.join(webRoot, 'public', 'fiddy-mark-poster.png'),
+  }).render,
   reader: {
     cast: async (hash) =>
       hash.toLowerCase() === CAST_HASH ? fixtures.cast : undefined,
@@ -188,17 +210,61 @@ for (const [file, answer] of Object.entries(pages)) {
   }
 }
 
-// The size the tags PROMISE, read out of a PNG the same way the service reads it.
-const cardSize = pngSize(
-  readFileSync(path.join(webRoot, 'public', 'fiddy-share-card.png')),
+// THE PICTURES. Each page's `og:image` names a card drawn for THAT page, so the
+// card route is asked the way a crawler asks it and the answer is judged by the
+// picture — not only by its size. The site card is 1200x630 too, so a size-only
+// check passes on a service that answers the front door's card for every URL:
+// measured 2026-10-22 (card t_1efd7e2e), the handler handed the renderer an
+// unresolved promise, every card fell back to the site card, and the release
+// gate (pixels, and this file's own card-free self-check) let it ship.
+const cards = {
+  cast: await handler.handle({
+    method: 'GET',
+    path: `/unfurl/cards/cast/${CAST_HASH}.png`,
+  }),
+  profile: await handler.handle({
+    method: 'GET',
+    path: '/unfurl/cards/profile/3.png',
+  }),
+};
+const cardBytes = {};
+for (const [kind, answer] of Object.entries(cards)) {
+  cardBytes[kind] = answer.body;
+  check(
+    `${kind} card is that page's own card`,
+    answer.status === 200 && answer.headers['x-unfurl'] === `card:${kind}`,
+    `${answer.status} ${answer.headers['x-unfurl']}`,
+  );
+  const size = pngSize(answer.body);
+  check(
+    `${kind} card is ${CARD_WIDTH}x${CARD_HEIGHT}`,
+    size?.width === CARD_WIDTH && size?.height === CARD_HEIGHT,
+    size ? `${size.width}x${size.height}` : 'not a PNG',
+  );
+  check(
+    `${kind} card is not the site card`,
+    Buffer.isBuffer(answer.body) && !answer.body.equals(siteCardBytes),
+  );
+  if (Buffer.isBuffer(answer.body)) {
+    writeFileSync(path.join(outDir, `card-${kind}.png`), answer.body);
+  }
+}
+check(
+  'the two pages do not draw the same picture',
+  Buffer.isBuffer(cardBytes.cast) &&
+    Buffer.isBuffer(cardBytes.profile) &&
+    !cardBytes.cast.equals(cardBytes.profile),
 );
+
+// The size the tags PROMISE, read out of a PNG the same way the service reads it.
+const cardSize = pngSize(siteCardBytes);
 check(
   'the site card is the size the per-page tags declare',
   cardSize?.width === CARD_WIDTH && cardSize?.height === CARD_HEIGHT,
   cardSize ? `${cardSize.width}x${cardSize.height}` : 'not a PNG',
 );
 
-note(`wrote ${Object.keys(pages).join(', ')} to ${outDir}`);
+note(`wrote ${Object.keys(pages).join(', ')}, both cards to ${outDir}`);
 
 if (failures.length > 0) {
   console.error('unfurl self-check failed:');
@@ -208,5 +274,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  "  unfurl self-check ok: both pages carry their own card over this build's own shell",
+  "  unfurl self-check ok: both pages carry their own card and their own tags, drawn over this build's own shell",
 );

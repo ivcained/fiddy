@@ -85,7 +85,13 @@ export const createUnfurlHandler = ({
     const key = `${kind}:${id}`;
     const entry = await cached(cardCache, key, cardTtlMs, async () => {
       try {
-        return { ok: true, png: await renderCard(buildPayload()) };
+        // `buildPayload` is a function returning a PROMISE of this page's card
+        // description (`reader.cast(hash).then(…)`), so it is awaited here: the
+        // renderer takes a payload, and handing it an unresolved promise is a
+        // card the renderer cannot read a kind out of — every page then answers
+        // the SITE card while sounding like it drew its own.
+        const payload = await buildPayload();
+        return { ok: true, png: await renderCard(payload) };
       } catch (error) {
         return {
           ok: false,
