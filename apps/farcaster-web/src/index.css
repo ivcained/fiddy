@@ -703,3 +703,36 @@ em-emoji-picker {
     color: #7cb518;
     fill: #7cb518;
   }
+
+/*
+ * A video that is one tile of a media strip fills its tile.
+ *
+ * A strip gives every tile the same height, and an image tile covers its own —
+ * a video used to be sized from its own ratio inside that tile, so it sat
+ * letterboxed in a box of empty space. The player now covers the tile while it
+ * is at rest, and switches to `contain` only while it is actually playing, so
+ * playback is never cropped. `[data-playing]` is vidstack's own play state,
+ * reflected on the player element (`div[data-media-player]`), and vidstack's
+ * default fit is a zero-specificity `:where()` rule, so these win.
+ *
+ * Borrowed from backmeupplz/quilcast (MIT), 0.10.13 `3bc542d90a63`:
+ *   .strip .vid { min-height: 200px }
+ *   .strip .vid video { position: absolute; inset: 0; width: 100%; height: 100%;
+ *                       object-fit: cover }
+ *   .strip .vid video:playing { object-fit: contain }
+ */
+.fiddy-video-tile video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fiddy-video-tile .vds-poster img {
+  object-fit: cover;
+}
+
+.fiddy-video-tile[data-playing] video {
+  object-fit: contain;
+}

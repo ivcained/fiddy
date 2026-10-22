@@ -289,6 +289,18 @@ const useCastAttachment = ({
     const { width, height, effectiveAR, carouselMaxHeight, mediaTileHeight } =
       layout;
 
+    /**
+     * The strip's ONE tile height, for every tile in it.
+     *
+     * A strip (a cast carrying several carousel-eligible embeds) gives every
+     * tile the tallest one's height — quilcast 0.10.7 `0abf1de11fba`, MIT. Its
+     * 0.10.13 `3bc542d90a63` fixed the video leg of it: a video used to be
+     * sized from the row while the image tiles were sized to the shared tile,
+     * so the video sat letterboxed in a box that did not match its tile. Both
+     * now read the same number, and `VideoAttachment` fills the tile with it.
+     */
+    const mediaTile = mediaTileHeight ?? height;
+
     if (
       renderableEmbeds.filter((o) => o.type === 'image').length !== 0 &&
       text.endsWith(
@@ -387,6 +399,7 @@ const useCastAttachment = ({
                         : undefined
                     }
                     renderHeight={height}
+                    tileHeight={needsCarousel ? mediaTile : undefined}
                   />
                 );
               })}
@@ -406,7 +419,7 @@ const useCastAttachment = ({
                         !needsCarousel &&
                         effectiveAR !== 'vertical-media'
                           ? undefined
-                          : (mediaTileHeight ?? height)
+                          : mediaTile
                       }
                       width={undefined}
                       maxWidth={
@@ -472,6 +485,7 @@ const useCastAttachment = ({
                         : undefined
                     }
                     renderHeight={height}
+                    tileHeight={needsCarousel ? mediaTile : undefined}
                   />
                 );
               })}
@@ -491,7 +505,7 @@ const useCastAttachment = ({
                         !needsCarousel &&
                         effectiveAR !== 'vertical-media'
                           ? undefined
-                          : (mediaTileHeight ?? height)
+                          : mediaTile
                       }
                       width={carouselHasNonMedia ? width : undefined}
                       maxWidth={
