@@ -33,7 +33,9 @@
 #   4. assemble the release tree the vhost expects — web/ (the client) plus
 #      server/ (the read-only preview's API, which systemd runs from
 #      /var/www/fiddy.fun/current/server/server.mjs, so a release without it
-#      kills that service on its next restart) and web/preview/ (the preview
+#      kills that service on its next restart), server/unfurl/ (the per-page
+#      unfurl service, shipped from THIS repo — the one part of server/ the
+#      ritual builds rather than carries forward) and web/preview/ (the preview
 #      page itself, kept byte-identical and reachable at /preview/);
 #   5. copy the artifact to the VPS and extract it into a NEW immutable
 #      releases/<sha>/ — the running release is never written to;
@@ -44,7 +46,10 @@
 #      Just before the swap, the app-list manifest is installed from this
 #      build's web root into /var/www/fiddy-well-known/farcaster.json — domain
 #      state the vhost serves by alias, outside any release directory, written
-#      with the owner's existing accountAssociation carried through unchanged;
+#      with the owner's existing accountAssociation carried through unchanged.
+#      After the swap, RESTART fiddy-unfurl (it answers a cast or profile URL
+#      with the shell of the release `current` points at) and prove, over the
+#      loopback, that the shell it serves is this release's shell, byte for byte;
 #   8. a SERVED gate that asks the ORIGIN: the built shell and the entry chunk
 #      this build produced, compared byte-for-byte against what the host
 #      answers when no cache can stand in for it; then one cache-busted fetch
@@ -177,6 +182,16 @@ if grep -rqs --include='*.js' "$GATE_TOGETHER_FALLBACK" "$APP/assets"; then
   echo "REFUSING to ship: the built JavaScript carries $GATE_TOGETHER_FALLBACK, so VITE_TOGETHER_API_URL was never set" >&2
   exit 1
 fi
+# The per-page unfurl service answers a cast or profile URL with THIS build's
+# shell plus that page's own og: tags and a card drawn for it. Rendered here
+# from the build under release, with no network, and held to the rules the shell
+# itself just passed (its own tags, byte-identical body, no inline script). A
+# page that would ship wrong is a release that does not ship.
+UNFURL_CHECK="$STAGE/base/apps/farcaster-web/server/unfurl/self-check.mjs"
+UNFURL_OUT="$STAGE/unfurl-self-check"
+node "$UNFURL_CHECK" "$APP/index.html" "$UNFURL_OUT" \
+  || { echo "REFUSING to ship: the per-page unfurl pages do not hold against this build" >&2; exit 1; }
+
 echo "  adapter  ok"
 echo "  media    ok"
 echo "  node     ok ($NODE_URL)"
@@ -239,6 +254,16 @@ done
 sed 's#"/assets/#"assets/#g' "$STAGE/prior-index.html" > "$WEB/preview/index.html"
 rsync -a --delete "$HOST:$PRIOR/web/assets/" "$WEB/preview/assets/"
 cp -a "$STAGE/server/." "$STAGE/release/server/"
+# The per-page unfurl service is the one piece of server/ that comes from THIS
+# repo: the preview API next to it is built by legitmate-farcaster and carried
+# forward, and this one must not be (a carried-forward copy is a copy of
+# whatever the PREVIOUS release happened to ship, which for a service is a
+# release that changes nothing). Sources only: no __pycache__, no editor files.
+UNFURL_SRC="$STAGE/base/apps/farcaster-web/server/unfurl"
+rm -rf "$STAGE/release/server/unfurl"
+mkdir -p "$STAGE/release/server/unfurl"
+( cd "$UNFURL_SRC" && find . \( -name '__pycache__' -o -name '*.pyc' \) -prune -o -type f -print | tar -cf - -T - ) \
+  | tar -xf - -C "$STAGE/release/server/unfurl"
 rm -rf "$STAGE/preview-assets" "$STAGE/prior-index.html"
 printf 'User-agent: *\nDisallow: /api/\n' > "$WEB/robots.txt"
 printf '{"revision":"%s","mode":"node-backed-client","node":"%s","media":"%s"}\n' \
@@ -263,10 +288,19 @@ ssh_ "set -e
   test -f $RELEASES/$SHA/server/server.mjs
   test -f $RELEASES/$SHA/web/.well-known/farcaster.json
   grep -q '\"signature\"' $RELEASES/$SHA/web/.well-known/farcaster.json
+  test -f $RELEASES/$SHA/server/unfurl/server.mjs
+  test -f $RELEASES/$SHA/server/unfurl/render-card.py
+  # The card renderer is Pillow, which the host has and the release does not
+  # ship (no browser, no npm install): refuse now rather than serve a page
+  # whose card cannot be drawn.
+  python3 -c 'import PIL.Image' || { echo 'the unfurl card renderer has no Pillow on this host'; exit 1; }
+  systemctl cat fiddy-unfurl.service > /dev/null || { echo 'fiddy-unfurl.service is not installed'; exit 1; }
+  grep -q 'proxy_pass http://127.0.0.1:3220;' /etc/nginx/sites-available/fiddy.fun
+  grep -q 'location ^~ /unfurl/' /etc/nginx/sites-available/fiddy.fun
   grep -q 'snapchain-api' /etc/nginx/sites-available/fiddy.fun
   grep -q 'location ^~ /preview/' /etc/nginx/sites-available/fiddy.fun
   grep -q 'proxy_pass http://127.0.0.1:8787;' /etc/nginx/sites-available/fiddy.fun
-  echo '  disk gate ok: bundle (adapter, media, node, together), preview, server, vhost locations, listing manifest'"
+  echo '  disk gate ok: bundle (adapter, media, node, together), preview, server, unfurl (renderer, unit, locations), vhost locations, listing manifest'"
 
 if [ "$NO_CUTOVER" = "--no-cutover" ]; then
   say "staged at $RELEASES/$SHA (not cut over)"
@@ -294,6 +328,20 @@ ssh_ "set -e
   echo '  listing manifest installed from this build'
   ln -sfn $RELEASES/$SHA $CURRENT.new && mv -Tf $CURRENT.new $CURRENT && nginx -t && systemctl reload nginx"
 echo "  $CURRENT -> $(ssh_ "readlink -f $CURRENT")"
+
+# The service reads the shell through `current`, so the cutover already changed
+# what it CAN serve; the restart is what makes it serve the new CODE. Then the
+# gate: a request for a cast that does not exist answers with the shell
+# unchanged, and that answer must be this release's shell byte for byte — which
+# is also how a service left running on a previous release's code is caught.
+say "7.5/8 fiddy-unfurl serves this release"
+ssh_ "systemctl restart fiddy-unfurl && sleep 1 && systemctl is-active --quiet fiddy-unfurl" \
+  || { echo "fiddy-unfurl is not running after its restart" >&2; exit 1; }
+LOOPBACK_CODE=$(ssh_ "curl -s -o /tmp/fiddy-unfurl-shell.html -w '%{http_code}' http://127.0.0.1:3220/~/conversations/0x0000000000000000000000000000000000000000")
+[ "$LOOPBACK_CODE" = 200 ] || { echo "fiddy-unfurl answered HTTP $LOOPBACK_CODE over the loopback" >&2; exit 1; }
+ssh_ "cmp -s /tmp/fiddy-unfurl-shell.html $RELEASES/$SHA/web/index.html" \
+  || { echo "fiddy-unfurl is not serving this release's shell (ssh $HOST 'diff <(curl -s http://127.0.0.1:3220/~/) $RELEASES/$SHA/web/index.html')" >&2; exit 1; }
+echo "  loopback /~/conversations/0x000… → 200, byte-identical to this release's shell"
 echo "  previous release kept: $PREV_TARGET"
 echo "  rollback: $0 --rollback   (or: ssh $HOST 'ln -sfn $PREV_TARGET $CURRENT.new && mv -Tf $CURRENT.new $CURRENT')"
 
@@ -396,6 +444,21 @@ cmp -s "$STAGE/origin-index.html" "$APP/index.html" \
 node "$CHECK_SHELL" "$STAGE/origin-index.html" \
   || gate_fail "the origin's shell needs script-src 'unsafe-inline'"
 echo "  origin shell: byte-identical to the built shell, no inline script"
+
+# 1b. The per-page half. A cast or profile URL is answered by fiddy-unfurl with
+#     the shell this release ships plus that page's own og: tags and a card
+#     drawn for it. Asked the way a crawler asks — a plain GET, no JavaScript —
+#     because that is the whole point of the service.
+origin_get "/~/profiles/3" "$STAGE/origin-profile.html" \
+  || gate_fail "the origin did not answer GET /~/profiles/3"
+grep -q "og:url\" content=\"https://$ORIGIN_HOST/~/profiles/3\"" "$STAGE/origin-profile.html" \
+  || gate_fail "the origin's /~/profiles/3 does not carry that page's own og:url (asked http://127.0.0.1:3220/unfurl/health on the host for the reason)"
+origin_get "/unfurl/cards/profile/3.png" "$STAGE/origin-profile-card.png" \
+  || gate_fail "the origin did not answer GET /unfurl/cards/profile/3.png"
+node -e 'const b=require("fs").readFileSync(process.argv[1]);process.exit(b.length>24&&b.readUInt32BE(16)===1200&&b.readUInt32BE(20)===630?0:1)' \
+  "$STAGE/origin-profile-card.png" \
+  || gate_fail "the origin's profile card is not a 1200x630 PNG"
+echo "  origin GET /~/profiles/3 → that page's own og:url, card 1200x630"
 
 # 2. The entry chunk at the path THIS BUILD produced, from the origin, compared
 #    byte-for-byte. This is the heart of the check.

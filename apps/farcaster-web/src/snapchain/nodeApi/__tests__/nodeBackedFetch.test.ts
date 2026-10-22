@@ -14,10 +14,14 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { createNodeBackedFetch } from '~/snapchain/nodeApi';
+import { createNodeBackedFetch, forgetCastAuthors } from '~/snapchain/nodeApi';
 
 import { offlineEmbedKinds } from './fakeEmbedKinds';
-import { createFixtureNodeFetch, TERMINAL_PAGE_TOKEN } from './fakeNodeFetch';
+import {
+  CAST_AUTHOR_PATH,
+  createFixtureNodeFetch,
+  TERMINAL_PAGE_TOKEN,
+} from './fakeNodeFetch';
 
 type Json = Record<string, unknown>;
 
@@ -213,6 +217,29 @@ describe('the node-backed fetch', () => {
       expect(casts.length).toBeGreaterThan(1);
     });
 
+    it('opens a shared cast link by asking this origin who wrote it', async () => {
+      // Nothing has been read yet: this is a reader who just opened a link —
+      // exactly the case the memo cannot cover, and the reason the origin has
+      // an author index at all (`castAuthorHandoff.ts`, served by
+      // `server/unfurl/` in the release). The memo is module-wide and the tests
+      // above filled it by reading their feeds, so it is emptied first: a test
+      // that claimed "a reader who has served nothing" without doing this would
+      // pass on somebody else's read.
+      forgetCastAuthors();
+      const { fetch: nodeBackedFetch, log } = buildHarness();
+
+      const hash = messagesOf('castsByFid.fid3.json')[0]!.hash;
+      const response = await nodeBackedFetch(
+        `https://farcaster.xyz/~api/v2/thread-casts?castHash=${hash}&limit=15`,
+      );
+
+      expect(log).toContain(`${CAST_AUTHOR_PATH}${hash}`);
+      expect(response.status).toBe(200);
+      const body = await json(response);
+      const casts = (body.result as { casts: { hash: string }[] }).casts;
+      expect(casts.some((cast) => cast.hash === hash)).toBe(true);
+    });
+
     it('says why a hash it has never served cannot be opened', async () => {
       const { fetch: nodeBackedFetch } = buildHarness();
       const response = await nodeBackedFetch(
@@ -222,6 +249,20 @@ describe('the node-backed fetch', () => {
       expect(response.status).toBe(501);
       const body = await json(response);
       expect(JSON.stringify(body)).toContain(
+        'addresses a cast by its author and its hash',
+      );
+    });
+
+    it('says the same when the hash is real but no index knows it', async () => {
+      const { fetch: nodeBackedFetch, log } = buildHarness();
+      const response = await nodeBackedFetch(
+        `https://farcaster.xyz/~api/v2/thread-casts?castHash=0x${'9'.repeat(40)}&limit=15`,
+      );
+
+      // Asked, answered 404, and reported in words rather than as a blank page.
+      expect(log).toContain(`${CAST_AUTHOR_PATH}0x${'9'.repeat(40)}`);
+      expect(response.status).toBe(501);
+      expect(JSON.stringify(await json(response))).toContain(
         'addresses a cast by its author and its hash',
       );
     });
