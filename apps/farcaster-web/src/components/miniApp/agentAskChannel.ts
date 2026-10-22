@@ -6,11 +6,12 @@
  * §4 where consent lives, §5 identity, §6 the sentences and the order that
  * decides between them. This file is S1 of the four slices that doc cards: the
  * channel, the budget, the mute, and every refusal. It raises no UI and calls
- * nothing. A well-formed ask from a real app is answered `unavailable` here,
- * until the slices that can do the work land behind their own approval (S2
- * `draft`/`post`, S3 `remind`) — the honest state for a shell that has no path
- * for something yet, instead of a pretend success. Those slices reach this
- * channel through the one optional seam below, `answerAsk`: the ask arrives
+ * nothing. A well-formed ask from a real app is answered `unavailable` here when
+ * no slice has a path for it; the slices that *can* do the work answer behind
+ * their own approval instead (S2 `draft`/`post`, S3 `remind`), and the ask they
+ * refuse to take is answered `unavailable` — the honest state for a shell that
+ * has no path for something, instead of a pretend success. Those slices reach
+ * this channel through the one optional seam below, `answerAsk`: the ask arrives
  * validated, counted and addressed, and the answer comes back in their own
  * time. Every rule of this file still holds for it — the pin, the envelope, the
  * one-shot id, the duplicate window, the budget, the mute and the sentences.
@@ -609,10 +610,10 @@ export const createAgentAskChannel = (
       state.asksUsed += 1;
 
       // The ask is real, counted and addressed. If a slice has a path for it
-      // (S2's `draft`/`post`), it takes the ask and answers in its own time,
-      // with its own state word; otherwise this slice's whole answer stands —
-      // `unavailable`, the honest state for a shell that has no path for
-      // something yet, which is the right answer until S3 answers `remind`.
+      // (S2's `draft`/`post`, S3's `remind`), it takes the ask and answers in
+      // its own time, with its own state word; otherwise this slice's whole
+      // answer stands — `unavailable`, the honest state for a shell that has no
+      // path for something yet.
       //
       // The record is written *before* the handler is handed the ask, with no
       // state: §4's duplicate window then treats a second send of it as the

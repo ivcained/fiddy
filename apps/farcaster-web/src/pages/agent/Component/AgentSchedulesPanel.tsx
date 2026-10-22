@@ -104,6 +104,19 @@ export const AgentSchedulesPanel = memo<AgentSchedulesPanelProps>(
                       {' '}
                       · asked {formatWhen(schedule.createdAt)}
                     </span>
+                    {schedule.domain ? (
+                      // A request a mini app made through the reader's own
+                      // approval (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.4):
+                      // the row says where it came from, so the log never makes
+                      // somebody else's words look like the owner's.
+                      <span
+                        className="text-muted"
+                        data-fiddy="agent-schedule-domain"
+                      >
+                        {' '}
+                        · from {schedule.domain}
+                      </span>
+                    ) : null}
                   </p>
                   {schedule.reply ? (
                     <p className="mt-2 whitespace-pre-wrap rounded-lg bg-[#1d1e1c] p-2 text-xs text-muted">

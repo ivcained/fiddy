@@ -9,6 +9,12 @@
  * the agent answered.
  *
  * The record is a request log, not a scheduler. It says "asked", never "running".
+ *
+ * A request is not always the owner's own words: a mini app may ask this
+ * reader's agent to be reminded (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.4),
+ * behind the reader's own approval. That request lands in this same log, with
+ * the app's text and its domain on the row, so where a request came from is
+ * never guessed from its wording.
  */
 
 import { deleteItem, getItem, setItem } from '~/utils/storageUtils';
@@ -20,12 +26,19 @@ export type ScheduleState = 'requested' | 'answered' | 'failed';
 export interface ScheduleRequest {
   id: string;
   agentId: string;
-  /** What the owner asked for, in their own words. */
+  /** What the owner asked for, in their own words — or an app's, verbatim. */
   prompt: string;
   state: ScheduleState;
   createdAt: number;
   /** The agent's reply, trimmed — the only evidence the schedule was written. */
   reply?: string;
+  /**
+   * The app's domain, when a mini app asked for this rather than the owner
+   * typing it (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.4). Absent for the
+   * owner's own requests, and shown wherever the row is shown: a request that
+   * came from somebody else's page says so in the reader's own log.
+   */
+  domain?: string;
 }
 
 const keyFor = (agentId: string): string => `${NAMESPACE}.${agentId}`;
@@ -40,6 +53,7 @@ const isSchedule = (value: unknown): value is ScheduleRequest => {
     typeof item.agentId === 'string' &&
     typeof item.prompt === 'string' &&
     typeof item.createdAt === 'number' &&
+    (item.domain === undefined || typeof item.domain === 'string') &&
     (item.state === 'requested' ||
       item.state === 'answered' ||
       item.state === 'failed')
@@ -81,4 +95,22 @@ export const upsertSchedule = (
   const copy = schedules.slice();
   copy[index] = next;
   return copy;
+};
+
+/**
+ * Keep one request in the reader's own log, in one step: the row goes in while
+ * the request is being sent, and the same row is replaced by its outcome when
+ * the agent answers or the send fails. Read, merge and write happen together so
+ * a caller that only has the request in hand needs one call per state change —
+ * `agentAskHandlers` (S3's `remind`) is that caller.
+ *
+ * Keyed by the `agentId` it is handed — the agent the request was sent to, so
+ * a row can never be written under another agent's key and go unread.
+ */
+export const keepSchedule = async (
+  agentId: string,
+  request: ScheduleRequest,
+): Promise<void> => {
+  const current = await loadSchedules(agentId);
+  await saveSchedules(agentId, upsertSchedule(current, request));
 };
