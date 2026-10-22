@@ -475,22 +475,43 @@ for (const view of VIEWS.map((width) => ({
    * marker of its own).
    *
    * `null` when neither appears inside the budget — a feed that paints early and
-   * shows no engagement numbers at all is not the fix this measures, so the wait
-   * has to be able to say so rather than time out silently.
+   * shows no engagement numbers at all is not the fix this measures, so the
+   * wait has to be able to say so rather than time out silently.
+   *
+   * POLLED with `page.evaluate`, and never `page.waitForFunction` with a string
+   * predicate: a string is evaluated with `eval` in the page, and the deployed
+   * client's CSP has no `unsafe-eval`, so the wait died 260 ms after the paint
+   * with "EvalError: Evaluating a string as JavaScript violates the following
+   * Content Security Policy directive" — measured against live, twice
+   * (2026-10-23, card t_b0291522). It reported `countsAfterPaintMs: null` and
+   * then sampled the DOM ~300 ms after the paint, which is BEFORE the counts
+   * (they land 1.5–2.0 s behind the paint), so a working feed read as a feed
+   * that never drew a number. This instrument and
+   * `probe-counts-behind-paint.mjs` disagree about what a user sees no longer:
+   * a real function is passed over CDP (`Runtime.callFunctionOn`), which no CSP
+   * blocks, and that is how the probe has always asked.
    */
   const waitForCountAfterPaint = async (budgetMs) => {
     const started = Date.now();
     const args = { link: CAST_LINK, pattern: CAST_HREF.source };
     try {
-      await page.waitForFunction(
-        `(() => { const r = (${COUNTS_DETECT.toString()})(${JSON.stringify(args)}); return r.likes.length + r.recasts.length > 0; })()`,
-        undefined,
-        { timeout: budgetMs, polling: 250 },
+      while (Date.now() - started < budgetMs) {
+        const sample = await page.evaluate(COUNTS_DETECT, args);
+        if ((sample?.likes?.length ?? 0) + (sample?.recasts?.length ?? 0) > 0) {
+          return Date.now() - started;
+        }
+        await page.waitForTimeout(250);
+      }
+    } catch (error) {
+      note(
+        `counts wait after paint: gave up after ${Date.now() - started} ms — ${String(error).slice(0, 140)}`,
       );
-      return Date.now() - started;
-    } catch {
       return null;
     }
+    note(
+      `counts wait after paint: no deferred count on screen after ${Date.now() - started} ms`,
+    );
+    return null;
   };
 
   /** When the feed stopped asking for things after that first paint. */
@@ -522,9 +543,14 @@ for (const view of VIEWS.map((width) => ({
     const countsAtPaint = await countsSample();
     const countsAfterPaintMs = await waitForCountAfterPaint(COUNT_BUDGET);
     const countsAfterPaint = await countsSample();
+    const sink = await page.evaluate(
+      () => globalThis.__fiddyCountsBehind ?? null,
+    );
     const settled = await waitForSettled();
     const signedInAt = signIns.length ? signIns[signIns.length - 1] : null;
     run.cold = {
+      paintedAtEpoch: paintedAt,
+      sink,
       readyMs: clickedAt - coldStart,
       signInCompletedMs: signedInAt ? signedInAt - clickedAt : null,
       firstCastMs: paintedAt - clickedAt,
@@ -562,8 +588,13 @@ for (const view of VIEWS.map((width) => ({
     const countsAtPaint = await countsSample();
     const countsAfterPaintMs = await waitForCountAfterPaint(COUNT_BUDGET);
     const countsAfterPaint = await countsSample();
+    const sink = await page.evaluate(
+      () => globalThis.__fiddyCountsBehind ?? null,
+    );
     const settled = await waitForSettled();
     run.warm = {
+      paintedAtEpoch: paintedAt,
+      sink,
       firstCastMs: paintedAt - warmStart,
       countsAtPaint,
       countsAfterPaintMs,
@@ -655,6 +686,28 @@ const readOrdering = ({ timeline: list, paintMs }) => {
   };
 };
 
+/** What the counts sink did, per call, relative to the paint it belongs to.
+ *
+ * `updated` is what the sink filled; `missed` counts are the ones it could not
+ * place because the cast was not in the query cache at that moment. Read from
+ * `window.__fiddyCountsBehind`, which only a build with
+ * `VITE_SNAPCHAIN_DEBUG=true` fills — `null` on a release, and that is a note
+ * rather than a failure. */
+const sinkSummary = (sample) => {
+  const calls = sample?.sink;
+  if (!Array.isArray(calls)) {
+    return null;
+  }
+  const paintedAt = sample?.paintedAtEpoch;
+  return calls.map((entry) => ({
+    fromPaintMs: typeof paintedAt === 'number' ? entry.at - paintedAt : null,
+    received: entry.received,
+    updated: entry.updated,
+    missed: entry.missed.length,
+    cachedCasts: entry.cachedCasts,
+  }));
+};
+
 const summary = result.runs.map((run) => {
   const nodeAt = (list) =>
     list.filter((entry) => isNodeRead(entry.url)).map((entry) => entry.fromMs);
@@ -675,6 +728,11 @@ const summary = result.runs.map((run) => {
     coldCountsAtPaint: run.cold.countsAtPaint ?? null,
     coldCountsAfterPaintMs: run.cold.countsAfterPaintMs,
     coldCountsAfterPaint: run.cold.countsAfterPaint ?? null,
+    /** The sink's own view: what the count wave was handed, how much of it
+     * landed, and how many casts were cached when it ran. A wave that arrives
+     * before the feed has cached its page reports `missed > 0` here — the
+     * numbers never reach the screen and only this says why. */
+    coldSink: sinkSummary(run.cold),
     /** How many counts the whole feed is drawing at the paint and after
      * waiting, by kind — a feed whose every number is absent at the paint and
      * present later is the shape this card claims. */
@@ -692,6 +750,7 @@ const summary = result.runs.map((run) => {
     warmCountsAtPaint: run.warm.countsAtPaint ?? null,
     warmCountsAfterPaintMs: run.warm.countsAfterPaintMs,
     warmCountsAfterPaint: run.warm.countsAfterPaint ?? null,
+    warmSink: sinkSummary(run.warm),
     warmPageAtPaint: run.warm.countsAtPaint?.page ?? null,
     warmPageAfter: run.warm.countsAfterPaint?.page ?? null,
     warmText: run.warm.sample?.text ?? null,

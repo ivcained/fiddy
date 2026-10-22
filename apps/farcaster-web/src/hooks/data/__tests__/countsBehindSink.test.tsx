@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 /**
  * A late count lands on the cast the feed is ALREADY rendering.
  *
@@ -19,12 +21,18 @@
  *     includes the flag), so both are filled when both exist.
  */
 
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { renderHook } from '@testing-library/react';
 import { ApiCast } from 'farcaster-client-data';
 import { buildGloballyCachedCastKey } from 'farcaster-client-hooks';
-import { describe, expect, it } from 'vitest';
+import type { ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeCastCountsIntoGloballyCachedCasts } from '~/hooks/data/useCountsBehindSink';
+import {
+  mergeCastCounts,
+  mergeCastCountsIntoGloballyCachedCasts,
+  useCountsBehindSink,
+} from '~/hooks/data/useCountsBehindSink';
 
 const castFixture = (hash: string, overrides: Partial<ApiCast> = {}): ApiCast =>
   ({
@@ -153,5 +161,135 @@ describe('a page’s counts merge into the casts already cached', () => {
     });
 
     expect(updated).toBe(3);
+  });
+
+  it('names the counts that found no cast, so a miss is not silent', () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(castKey('0xhere'), castFixture('0xhere'));
+
+    const { updated, missed } = mergeCastCounts({
+      queryClient,
+      counts: ['0xhere', '0xabsent'].map(countsFor),
+    });
+
+    expect(updated).toBe(1);
+    expect(missed.map((count) => count.hash)).toEqual(['0xabsent']);
+  });
+});
+
+/**
+ * The counts arrive when they arrive; the cast is cached when the feed caches
+ * it. A delivery that needs those two in one order is a delivery that loses a
+ * number whenever the other order happens — and the wave that has nothing left
+ * to read (`reads.ts` `countCache`) can answer before its page is merged.
+ *
+ * MEASURED before this (card t_b0291522): a wave that answered first was
+ * merged onto nothing and dropped for good, and the feed kept no numbers for
+ * those casts for the life of the tab.
+ */
+describe('a count that answers before its cast is cached', () => {
+  const wrapper =
+    (queryClient: QueryClient) =>
+    ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    delete (globalThis as { __fiddyCountsBehind?: unknown })
+      .__fiddyCountsBehind;
+  });
+
+  it('lands when the feed caches the cast, instead of being dropped', () => {
+    const queryClient = new QueryClient();
+    const hash = '0xlate';
+    const { result } = renderHook(() => useCountsBehindSink(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    // The wave answers first: nothing is cached yet, so nothing can be filled.
+    result.current([countsFor(hash)]);
+    expect(queryClient.getQueryData(castKey(hash))).toBeUndefined();
+
+    // The feed caches its page a moment later; the count lands on it.
+    queryClient.setQueryData(castKey(hash), castFixture(hash));
+
+    const cast = queryClient.getQueryData<ApiCast>(castKey(hash))!;
+    expect(cast.reactions).toEqual({ count: 7 });
+    expect(cast.recasts).toEqual({ count: 2 });
+    // Still a count arriving, not a page: the rest of the cast is untouched.
+    expect(cast.text).toBe('a cast with no counts yet');
+  });
+
+  it('fills a recast entry too, whichever key the cache gains first', () => {
+    const queryClient = new QueryClient();
+    const hash = '0xlateRecast';
+    const { result } = renderHook(() => useCountsBehindSink(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    result.current([countsFor(hash)]);
+    queryClient.setQueryData(
+      castKey(hash, true),
+      castFixture(hash, { recast: true }),
+    );
+
+    expect(
+      queryClient.getQueryData<ApiCast>(castKey(hash, true))!.reactions,
+    ).toEqual({ count: 7 });
+  });
+
+  it('does not create a cast for a count whose cast never appears', () => {
+    const queryClient = new QueryClient();
+    const { result } = renderHook(() => useCountsBehindSink(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    result.current([countsFor('0xnobody')]);
+
+    expect(queryClient.getQueryCache().getAll().length).toBe(0);
+  });
+
+  it('says what happened on __fiddyCountsBehind: the miss, then the retry', () => {
+    vi.stubEnv('VITE_SNAPCHAIN_DEBUG', 'true');
+    const queryClient = new QueryClient();
+    const hash = '0xlogged';
+    const { result } = renderHook(() => useCountsBehindSink(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    result.current([countsFor(hash)]);
+    queryClient.setQueryData(castKey(hash), castFixture(hash));
+
+    const log = (
+      globalThis as { __fiddyCountsBehind?: Array<Record<string, unknown>> }
+    ).__fiddyCountsBehind;
+    expect(log).toHaveLength(2);
+    expect(log![0]).toMatchObject({
+      received: 1,
+      updated: 0,
+      missed: [hash],
+      retry: false,
+    });
+    expect(log![1]).toMatchObject({
+      received: 1,
+      updated: 1,
+      missed: [],
+      retry: true,
+    });
+  });
+
+  it('writes nothing to the log when no build asked for it', () => {
+    const queryClient = new QueryClient();
+    const hash = '0xquiet';
+    const { result } = renderHook(() => useCountsBehindSink(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    result.current([countsFor(hash)]);
+
+    expect(
+      (globalThis as { __fiddyCountsBehind?: unknown }).__fiddyCountsBehind,
+    ).toBeUndefined();
   });
 });

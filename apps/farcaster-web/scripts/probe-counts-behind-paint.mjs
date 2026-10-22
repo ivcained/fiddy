@@ -351,8 +351,18 @@ for (const view of VIEWS.map((width) => ({
       await page.waitForTimeout(500);
     }
     const countsAfter = await page.evaluate(READ_COUNTS);
+    // The sink's own view of the delivery (`window.__fiddyCountsBehind`, filled
+    // only when the build sets `VITE_SNAPCHAIN_DEBUG=true`): what the count wave
+    // was handed, what landed, and how many casts were cached when it ran. The
+    // DOM cannot tell "the counts have not arrived yet" from "the counts were
+    // delivered onto nothing", and this is the difference.
+    const sink = await page.evaluate(
+      () => globalThis.__fiddyCountsBehind ?? null,
+    );
 
     run.cold = {
+      paintedAtEpoch: paintedAt,
+      sink,
       paintFromCaseStartMs: paintedAt - start,
       countsAtPaint,
       firstDeferredCountAfterPaintMs: firstDeferredCountMs,
@@ -402,12 +412,29 @@ const window_ = (reads) => ({
 
 const summary = result.runs.map((run) => {
   const paint = run.cold?.paintFromCaseStartMs ?? null;
+  const sinkCalls = run.cold?.sink;
+  const paintedAt = run.cold?.paintedAtEpoch;
   return {
     viewport: run.viewport,
     error: run.cold?.error ?? null,
     release: result.release?.revision ?? result.release?.note ?? null,
     hostLoad: result.host.load,
     paintFromCaseStartMs: paint,
+    /** What the sink did, per count wave: handed / filled / missed, and how many
+     * casts were in the cache at that moment. `null` when the build has no
+     * `VITE_SNAPCHAIN_DEBUG=true` (a release), which is the one fact behind the
+     * DOM this probe cannot read by itself. */
+    sinkCalls: Array.isArray(sinkCalls)
+      ? sinkCalls.map((entry) => ({
+          fromPaintMs:
+            typeof paintedAt === 'number' ? entry.at - paintedAt : null,
+          received: entry.received,
+          updated: entry.updated,
+          missed: entry.missed.length,
+          retried: entry.retry === true,
+          cachedCasts: entry.cachedCasts,
+        }))
+      : null,
     // The page's own reads vs the count wave, against the paint they used to
     // hold up.
     pageReads: window_(run.pageReads ?? []),
