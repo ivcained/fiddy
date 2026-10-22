@@ -1176,7 +1176,6 @@ const ComposerInner = React.forwardRef<
                   onClick={() => {
                     navigateToConversation({
                       castHash: firstResult.cast.hash,
-                      authorUsername: firstResult.cast.author.username,
                     });
                   }}
                 >
