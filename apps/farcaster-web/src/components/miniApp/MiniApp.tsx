@@ -91,7 +91,6 @@ import {
   LegacyWalletProvider,
 } from '~/components/miniApp/legacyWalletChannel';
 import { MiniAppQualityButton } from '~/components/miniApp/MiniAppQualityButton';
-import { ComposeCastModal } from '~/components/modals/ComposeCastModal';
 import { MiniAppQualityModal } from '~/components/modals/MiniAppQualityModal';
 import {
   FavoriteFrameProvider,
@@ -120,6 +119,7 @@ import { useUserLevel } from '~/hooks/data/useUserLevel';
 import { useExternalNavigate } from '~/hooks/navigation/useExternalNavigate';
 import { useNavigateToConversation } from '~/hooks/navigation/useNavigateToConversation';
 import { useSolanaMiniAppProvider } from '~/hooks/useSolanaMiniAppProvider';
+import { ComposeCastModal } from '~/lazy/components';
 import { cn } from '~/lib/utils';
 import { CastComposerIntent } from '~/types';
 import { trackError } from '~/utils/errorUtils';
@@ -1423,15 +1423,20 @@ function InnerMiniAppContent({
               }}
             />
             {castIntentAndPromise && (
-              <ComposeCastModal
-                onClose={(cast) => {
-                  castIntentAndPromise.onSuccess?.({
-                    cast: cast !== undefined ? cast : null,
-                  });
-                  setCastIntentAndPromise(undefined);
-                }}
-                intent={castIntentAndPromise.castIntent}
-              />
+              /* The editor's own chunk (see `~/lazy/components`): a mini app
+                 that asked the host to post a cast is the only thing here that
+                 needs a composer. */
+              <React.Suspense fallback={null}>
+                <ComposeCastModal
+                  onClose={(cast) => {
+                    castIntentAndPromise.onSuccess?.({
+                      cast: cast !== undefined ? cast : null,
+                    });
+                    setCastIntentAndPromise(undefined);
+                  }}
+                  intent={castIntentAndPromise.castIntent}
+                />
+              </React.Suspense>
             )}
           </>
         )}
