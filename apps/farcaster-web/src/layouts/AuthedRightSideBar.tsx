@@ -7,14 +7,31 @@ import {
   MinimizableWindowHostVariant,
 } from '~/components/MinimizableWindowHost';
 import { ClankerSpotlight } from '~/components/news/ClankerSpotlight';
-import { LiveNowSpaces } from '~/components/rightSidebar/LiveNowSpaces';
 import { MiniApps } from '~/components/rightSidebar/MiniApps';
 import { TrendingTopics } from '~/components/rightSidebar/TrendingTopics';
 import { Search } from '~/components/search/Search';
 import { useCurrentRoute } from '~/hooks/navigation/useCurrentRoute';
 import { RightSideBar } from '~/layouts/RightSideBar';
 import { SupportAndTermsLinks } from '~/layouts/SupportAndTermsLinks';
+import { lazyWithPreload } from '~/lazy/helpers';
 import { cn } from '~/lib/utils';
+
+/**
+ * The "live now" card, loaded on its own.
+ *
+ * It asks the Space context whether any audio room is live, and that context
+ * holds `livekit-client` — MEASURED (2026-10-22): 1.1 MB of source, and a
+ * static import here put the whole WebRTC client inside the ENTRY chunk, which
+ * defeated the lazy `SpaceProvider` in `AuthedLayout` (that file's own comment
+ * says the provider is lazy precisely because livekit is sizeable). A card that
+ * shows nothing on a quiet day has no business in the bundle that paints the
+ * feed.
+ */
+const LiveNowSpaces = lazyWithPreload(() =>
+  import('~/components/rightSidebar/LiveNowSpaces').then((module) => ({
+    default: module.LiveNowSpaces,
+  })),
+);
 
 const AuthedRightSideBar: FC = memo(() => {
   const currentRoute = useCurrentRoute();
