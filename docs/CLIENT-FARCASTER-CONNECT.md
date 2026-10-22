@@ -90,15 +90,28 @@ wrong-account outcome the next section exists to refuse.
 
 ## 4. Whose account a connection becomes — the identity rule
 
-**Status of the two halves.** The client half is in the client release
-(`t_e9657ffb-connect-identity`): it binds every connect request to the FID this
-browser is signed in as, and it refuses to enter a connection that is not the
-person's own. The service half is specified below and **is not deployed yet** —
-the control plane on the VPS still reports whatever account approved the request
-(`lib/fiddy-connect.ts` at `c91acff`). A client alone cannot stop the service
-from *holding* a key for the app account; it can only refuse to become it, which
-is what this release does. The service-side rule is followed up on its own card
-rather than half-deployed here.
+**Status of the two halves.** Both halves are in. The client half is in the
+client release (`t_e9657ffb-connect-identity`): it binds every connect request to
+the FID this browser is signed in as, and it refuses to enter a connection that
+is not the person's own. The service half is **deployed** on the control plane
+(`legitmate-farcaster` main `0ab9f386`, PR #4): the same proof now travels with
+the request and is checked *before* anything is created, a request is keyed with
+the FID it proved, an approval for Fiddy's own account — or for an account the
+request was not started for — is answered `wrong_account` with the key removed at
+Neynar rather than forgotten, and a request that is not the person's own is never
+handed back to them.
+
+Measured after the cutover (2026-10-22, `fiddy-auth` on
+`/opt/fiddy-auth/releases/0ab9f386…`): `GET https://fiddy.fun/api/fiddy/connect`
+with no cookie answers `{ok:true,state:'none',approvalUrl:null,fid:null,username:null,forFid:null,refused:null,attempt:null,machine:false}`
+(200, not 500); the live store was upgraded in place — `for_fid`, `attempt` and
+`refused` added to the table that was already there — and holds no row whose `fid`
+is the app account (`3356372`), the three rows it holds being the two
+`pending_approval` requests and the one `approved` connection belonging to the
+person's own FID; and in a real browser with nobody signed in, a tab's own label
+came back on its next read (`POST {attempt}` → the waiting request was reused, no
+signer minted → `GET` echoed the same `attempt`), which is what makes
+`startedHere` work on a device that never signed in.
 
 One tap can bind a browser to a Farcaster account, so the question "whose?" is
 answered twice, with evidence, and never by assertion.
@@ -226,6 +239,7 @@ write is handed to the service that holds it instead of being signed here.
    `NEYNAR_API_KEY`, `FIDDY_CONNECT_APP_FID`, `FIDDY_CONNECT_APP_KEY` in
    `/etc/fiddy-auth/app.env`, an nginx location for `/api/fiddy/connect` (the
    vhost lists each `/api/fiddy/*` path explicitly), and the release deployed.
+   All four are in place as of 2026-10-22 (see §4).
 3. **A dedicated app account.** `@fiddy-one` works and is configured; a
    purpose-built app account (its own FID, its own key, its own name on the
    approval screen) is a nicer long-term answer and costs only two env values.
