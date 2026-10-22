@@ -163,21 +163,36 @@ node_install_local() {
   preflight_verdict "$force"
 
   if ! command -v docker >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
-    local answer=""
-    if [ -t 0 ]; then
-      printf 'Docker is required for the node. Install Docker Desktop now? [y/N] '
-      read -r answer || true
+    if [ "$(uname -s)" = "Linux" ]; then
+      # Headless Linux: there is no Docker Desktop here. Install the engine.
+      log "Docker missing — installing the engine via get.docker.com…"
+      if sudo -n true 2>/dev/null; then
+        curl -fsSL https://get.docker.com | sudo sh >/tmp/fiddy-docker-install.log 2>&1 \
+          && sudo usermod -aG docker "$USER" \
+          || die "Docker install failed — see /tmp/fiddy-docker-install.log"
+        # The group change applies to NEW sessions; run the rest via sudo for this one.
+        warn "installed. Log out and back in (or run: newgrp docker) so '$USER' can use Docker without sudo, then re-run: bin/fiddy node up --local"
+        exit 0
+      else
+        die "Docker missing and sudo needs a password. Run: curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER — then log out/in and re-run."
+      fi
+    else
+      local answer=""
+      if [ -t 0 ]; then
+        printf 'Docker is required for the node. Install Docker Desktop now? [y/N] '
+        read -r answer || true
+      fi
+      case "$answer" in
+        [yY]*) open -a Docker 2>/dev/null || true
+               log "waiting for Docker Desktop…"
+               local i
+               for ((i = 1; i <= 60; i++)); do
+                 docker info >/dev/null 2>&1 && break
+                 sleep 5
+               done ;;
+        *) die "install Docker first: https://docs.docker.com/get-docker/  (or run: fiddy node up --ssh-target …)" ;;
+      esac
     fi
-    case "$answer" in
-      [yY]*) open -a Docker 2>/dev/null || true
-             log "waiting for Docker Desktop…"
-             local i
-             for ((i = 1; i <= 60; i++)); do
-               docker info >/dev/null 2>&1 && break
-               sleep 5
-             done ;;
-      *) die "install Docker first: https://docs.docker.com/get-docker/  (or run: fiddy node up --ssh-target …)" ;;
-    esac
   fi
 
   mkdir -p "$FIDDY_HOME/snapchain"
