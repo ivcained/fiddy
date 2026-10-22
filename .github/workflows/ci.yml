@@ -66,9 +66,11 @@ jobs:
   # The microsite's own gate. Separate job because it is a separate tree: `site/`
   # is deployed by scripts/deploy-microsite.sh into /var/www/fiddy-client/, not
   # by a client release, and what it checks is what that deploy uploads — every
-  # page's fc:miniapp against the pictures the tree really carries, and the
-  # splash's pixels against the colour the page paints behind it. Node's own
-  # modules only: no install, no browser, seconds.
+  # page's fc:miniapp against the pictures the tree really carries, the splash's
+  # pixels against the colour the page paints behind it, and every page's unfurl
+  # card (og:image/twitter:*) against a picture this tree really carries at the
+  # size the page states. Node's own modules only: no install, no browser,
+  # seconds.
   microsite:
     name: microsite (site/)
     runs-on: ubuntu-latest

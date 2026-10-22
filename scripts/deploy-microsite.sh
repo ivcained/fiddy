@@ -21,8 +21,9 @@
 #   2. a LOCAL gate over that tree (`scripts/check-microsite-assets.mjs`): every
 #      page's `fc:miniapp` must name pictures this tree really carries, at the
 #      sizes the spec asks, with the splash's ground matching the colour the
-#      page declares and its drawing centred in its own square. A tree that
-#      fails it is never uploaded;
+#      page declares and its drawing centred in its own square; and every page's
+#      unfurl card must name an `og:image` this tree really carries at the size
+#      the page states. A tree that fails either half is never uploaded;
 #   3. upload by tar over ssh, ADDITIVE — `site/` is not the whole of
 #      /var/www/fiddy-client/ (the page's own `fiddy-59s.mp4` and `.vtt` live
 #      there and are not in this repo), so nothing is deleted;
