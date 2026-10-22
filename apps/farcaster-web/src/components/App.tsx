@@ -1,10 +1,5 @@
 import { HelmetProvider } from '@dr.pogodin/react-helmet';
-import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import {
-  persistQueryClient,
-  PersistQueryClientOptions,
-} from '@tanstack/react-query-persist-client';
 import { BlockedDomainsProvider, PubSubProvider } from 'farcaster-client-hooks';
 import React, { FC, ReactNode, Suspense, useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
@@ -15,13 +10,13 @@ import { Router } from '~/components/routing/Router';
 import { AnalyticsProvider } from '~/contexts/AnalyticsProvider';
 import { AuthProvider, useAuth } from '~/contexts/AuthProvider';
 import { DirectCastToTakeActionProvider } from '~/contexts/DirectCastToTakeActionProvider';
+import { FeedQueryCacheProvider } from '~/contexts/FeedQueryCacheProvider';
 import { GlobalKeyPressProvider } from '~/contexts/GlobalKeyPressProvider';
 import { HasUnmountedProvider } from '~/contexts/HasUnmountedProvider';
 import { LinkDetailsPopoverManagerProvider } from '~/contexts/LinkDetailsPopoverManagerProvider';
 import { LinkifyProvider } from '~/contexts/LinkifyProvider';
 import { MiniAppProvider } from '~/contexts/MiniAppProvider';
 import { MinimizableWindowProvider } from '~/contexts/MinimizableWindowProvider';
-import { PersistQueryClientInstanceProvider } from '~/contexts/PersistQueryClientInstanceProvider';
 import { PopStateProvider } from '~/contexts/PopStateProvider';
 import { RecentFetchProvider } from '~/contexts/RecentFetchProvider';
 import { ScrollProvider } from '~/contexts/ScrollProvider';
@@ -62,18 +57,18 @@ const queryClient = new QueryClient({
   },
 });
 
-const localStoragePersister = createSyncStoragePersister({
-  storage: window.localStorage,
-});
-
-// This obviously busts the cache on every load but we are not built
-// to handle that well for many surfaces such as threads and Direct Casts.
-localStoragePersister.removeClient();
-
-persistQueryClient({
-  queryClient: queryClient,
-  persister: localStoragePersister,
-} as unknown as PersistQueryClientOptions);
+/* The persisted query cache is not installed here.
+ *
+ * It used to be, at module scope, and it was DELETED on every load
+ * (`localStoragePersister.removeClient()`) because the fork's surfaces are not
+ * all built to see a restored page — so a re-open paid a full read again.
+ * MEASURED (2026-10-22): a warm re-open took 23.7s at 1440 / 24.4s at 390 to
+ * paint a cast, against 29.4s / 27.1s cold, i.e. keeping nothing bought nothing.
+ *
+ * `FeedQueryCacheProvider` installs the narrow version of it instead — the
+ * feeds only, for the account that read them, for a day — and it can only do
+ * that once that account is known. See `~/lib/feedCache` for the policy.
+ */
 
 /** The id the document gives the shell it paints before the app runs. */
 const SHELL_SKELETON_ID = 'shell-skeleton';
@@ -137,31 +132,33 @@ const App: FC = () => {
       {/* This needs to be outside QueryClientProvider so that Wagmi uses a basic queryClient rather than our normal one with suspense */}
       <WagmiProvider config={wagmiConfig}>
         <QueryClientProvider client={queryClient}>
-          {/* Unfortunately, PersistQueryClientProvider does not seem to epxose the persister. We use our own provider to get access to the persister in the event that we need to remove storage (e.g. during signout). */}
-          <PersistQueryClientInstanceProvider
-            localStoragePersister={localStoragePersister}
-          >
-            <PopStateProvider>
-              <HasUnmountedProvider>
-                <ScrollProvider>
-                  <StandaloneModeProvider>
-                    <GlobalKeyPressProvider>
-                      <LinkDetailsPopoverManagerProvider>
-                        <RecentFetchProvider>
-                          {/* The shell is meant to be on screen whatever the
+          <PopStateProvider>
+            <HasUnmountedProvider>
+              <ScrollProvider>
+                <StandaloneModeProvider>
+                  <GlobalKeyPressProvider>
+                    <LinkDetailsPopoverManagerProvider>
+                      <RecentFetchProvider>
+                        {/* The shell is meant to be on screen whatever the
                               feed is doing, and this boundary sits above every
                               provider in it: anything that suspends up here
                               falls back to the shell and its loading column,
                               never to an empty page. The same shell is what the
                               document itself paints, so the reader sees one
                               shape from the first paint onwards. */}
-                          <Suspense fallback={<ShellSkeleton />}>
-                            <QueryClientProvider client={queryClient}>
-                              {/* FullScreenErrorBoundary must be a child of QueryClientProvider */}
-                              <FullScreenErrorBoundary>
-                                <LinkifyProvider>
-                                  {/* WebFarcasterApiClientProvider must be a child of QueryClientProvider, AuthProvider, and RecentFetchProvider */}
-                                  <WebFarcasterApiClientProvider>
+                        <Suspense fallback={<ShellSkeleton />}>
+                          <QueryClientProvider client={queryClient}>
+                            {/* FullScreenErrorBoundary must be a child of QueryClientProvider */}
+                            <FullScreenErrorBoundary>
+                              <LinkifyProvider>
+                                {/* WebFarcasterApiClientProvider must be a child of QueryClientProvider, AuthProvider, and RecentFetchProvider */}
+                                <WebFarcasterApiClientProvider>
+                                  {/* The kept feeds are restored for the
+                                        account this session belongs to, so the
+                                        provider needs the session and has to
+                                        sit above AuthProvider (which removes
+                                        that storage on sign-out). */}
+                                  <FeedQueryCacheProvider>
                                     {/* AuthProvider must be a child of QueryClientProvider, AuthProvider, WebFarcasterApiClientProvider, and FeatureFlagProvider */}
                                     <AuthProvider>
                                       <AuthGatedBlockedDomainsProvider>
@@ -205,19 +202,19 @@ const App: FC = () => {
                                         </ThemeProvider>
                                       </AuthGatedBlockedDomainsProvider>
                                     </AuthProvider>
-                                  </WebFarcasterApiClientProvider>
-                                </LinkifyProvider>
-                              </FullScreenErrorBoundary>
-                            </QueryClientProvider>
-                          </Suspense>
-                        </RecentFetchProvider>
-                      </LinkDetailsPopoverManagerProvider>
-                    </GlobalKeyPressProvider>
-                  </StandaloneModeProvider>
-                </ScrollProvider>
-              </HasUnmountedProvider>
-            </PopStateProvider>
-          </PersistQueryClientInstanceProvider>
+                                  </FeedQueryCacheProvider>
+                                </WebFarcasterApiClientProvider>
+                              </LinkifyProvider>
+                            </FullScreenErrorBoundary>
+                          </QueryClientProvider>
+                        </Suspense>
+                      </RecentFetchProvider>
+                    </LinkDetailsPopoverManagerProvider>
+                  </GlobalKeyPressProvider>
+                </StandaloneModeProvider>
+              </ScrollProvider>
+            </HasUnmountedProvider>
+          </PopStateProvider>
         </QueryClientProvider>
       </WagmiProvider>
     </HelmetProvider>
