@@ -1,6 +1,7 @@
 # A phone signs in in one tap, and a Mini App signs itself in
 
-Status: **implemented on branch `t_eb10ef8a-mobile-deeplink`**. This file is the
+Status: **shipped**. Merged to `main` as `7a8c6e174f29f42951870ce4c6721faf906181a8`
+(PR ivcained/fiddy#10), CI green, and released to fiddy.fun. This file is the
 design record for the two ways in that never involve scanning a code with the
 phone that is displaying it — what was measured against the live network, what
 was built, what the probe proved, and what is still unproven.
@@ -204,3 +205,44 @@ Nothing here can half-sign anybody in.
   nothing to pre-fill: they land in the client with a real local session
   (`hasCompletedRegistration: true`, name, handle, avatar) and the wizard's
   state is left alone.
+---
+
+## 7. Shipped
+
+**Landed.** PR ivcained/fiddy#10, merged into `main` as
+`7a8c6e174f29f42951870ce4c6721faf906181a8`. CI on the branch head
+(`4688ba01`, run 39694012894) and on the merge (`7a8c6e17`, run 39694746266):
+lint, typecheck and test all green.
+
+**Released.** `bash scripts/release-client.sh
+7a8c6e174f29f42951870ce4c6721faf906181a8`, exit 0 — every gate in the script
+passed, including step 8's served gate: the origin's shell is byte-identical to
+the built one and its entry chunk (`/assets/index-_VP6gFRZ.js`, 8 025 791 bytes,
+sha256 `5555fa3e7cd629af…`) is the one this build produced, and
+`https://fiddy.fun/release.json` names the full 40-character sha. The first
+attempt at this release was refused by that same step-8 check and rolled itself
+back: it ran a copy of `release-client.sh` that wrote the *short* sha into
+`release.json` (the defect `t_0b9dc099` fixed on main) while the gate compared
+against the full one. The artifact was never served — the script's rollback
+put `7ee0f24455961200baaf85af4b1dd47dd6e86339` back before anyone saw it.
+
+**Re-verified on the landed tree**, in this pass, not carried over:
+
+- `npx vitest run src/lib/__tests__/miniAppSession.test.ts
+  src/components/login/__tests__/LoginQRCodeWithInstructions.test.tsx
+  src/components/session/__tests__/MiniAppAutoSignIn.test.tsx` — 3 files, **26
+  passed**;
+- `scripts/verify-miniapp-autologin.mjs` against a dev server — **12/12**, and
+  **12/12** again with the node-backed configuration
+  (`VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com`), where B3's text is
+  the client itself: `Home Public Cast Home Following Feed Agent Wallet
+  Settings`, signed in as `@probe-host · fid 191554` (screenshots:
+  `t_eb10ef8a-shots-run2/`, `t_eb10ef8a-shots-node-run2/`);
+- the **live** release, in a real Chrome at 390x844 with an iPhone UA
+  (`t_eb10ef8a-shots-live/phone-login-live.png`): the modal leads with *Open in
+  Farcaster on this phone* → `https://farcaster.xyz/~/siwf?channelToken=MXVGBEQU`
+  (a channel the real relay issued in that run), **0** canvases on screen, and
+  exactly one after pressing *Show QR code for another device*.
+
+The limits in §6 stand: a real phone's tap and a real Warpcast host were not
+observed from this machine, and the fid↔address binding is still unchecked.
