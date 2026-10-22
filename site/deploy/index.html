@@ -57,6 +57,8 @@ a { color: var(--lime); text-decoration: none; }
 .price { font: 12.5px var(--mono); color: var(--lime-deep); }
 .prow { font-size: 13.5px; margin: 6px 0; }
 .pcmd { margin-top: 8px; }
+.abtn { font: 600 14px var(--sans); color: var(--ink); background: var(--glass); border: 1px solid rgba(255 255 255 / 0.12); border-radius: 999px; padding: 9px 16px; cursor: pointer; }
+.abtn:active { transform: translateY(1px); }
 </style>
 </head>
 <body>
@@ -132,6 +134,21 @@ git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/ovh-depl
   </div>
 
   <div class="card">
+    <h2><span class="n">✦</span>Hand it to your AI agent</h2>
+    <p class="dim" style="font-size:14.5px">Don't want to drive the terminal yourself? Tap your agent — it copies a complete,
+    self-contained setup prompt and opens the agent. Paste, send, follow along.</p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 4px">
+      <button class="abtn" data-agent="https://claude.ai">Claude</button>
+      <button class="abtn" data-agent="https://chatgpt.com">ChatGPT</button>
+      <button class="abtn" data-agent="https://grok.com">Grok</button>
+      <button class="abtn" data-agent="https://gemini.google.com">Gemini</button>
+      <button class="abtn" data-agent="">Hermes</button>
+      <button class="abtn" data-agent="">Just copy it</button>
+    </p>
+    <p class="dim prow" id="agentNote" style="font-size:13px"></p>
+  </div>
+
+  <div class="card">
     <h2><span class="n">2</span>Paste your node's IP</h2>
     <p class="dim" style="font-size:14.5px">The script prints it. Paste it here — the rest of the commands build themselves.</p>
     <input id="ip" inputmode="decimal" placeholder="34.101.…" autocomplete="off">
@@ -190,6 +207,38 @@ $('copy').addEventListener('click', () => {
   navigator.clipboard?.writeText(text).then(() => {
     $('copy').textContent = 'Copied';
     setTimeout(() => $('copy').textContent = 'Copy commands', 1200);
+  });
+});
+
+// "Hand it to your AI agent" — one self-contained prompt, any agent.
+const AGENT_PROMPT = `Set me up with my own Farcaster read node and the Fiddy client, following the tutorial at https://fiddy.fun/client/ (repo: https://github.com/ivcained/fiddy).
+
+Do it step by step, asking me before anything that spends money:
+1. Help me pick compute. Options: my own machine (free, needs ~2TB free disk + Docker), or a cloud — AWS is the default (~$285/mo, root volume can be 2TB), Hetzner is cheapest (~€120/mo but new accounts are capped at 1024GB volumes until quota is raised), GCP ~$350/mo (tested by the authors; $300 new-user credit), or a budget VPS I order manually then hand you the IP for.
+2. Clone the repo: git clone https://github.com/ivcained/fiddy && cd fiddy
+3. Provision: bin/fiddy provision --aws (or --hetzner / --gcp / --ovh / --ssh user@host for a machine I give you).
+4. Node: bin/fiddy node up, then bin/fiddy node status. The snapshot is ~470GB and bootstraps overnight — warn me, don't wait on it.
+5. Verify: bin/fiddy node verify must print all green.
+6. Client: bin/fiddy client up, then give me the localhost URL.
+Rules: never ask me for a seed phrase in chat — the tutorial has a test-accounts-only policy; point me at its #safety section. If a command fails, run bin/fiddy doctor and show me the output.`;
+
+document.querySelectorAll('.abtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const note = $('agentNote');
+    navigator.clipboard?.writeText(AGENT_PROMPT).then(() => {
+      const url = btn.dataset.agent;
+      if (url) {
+        window.open(url, '_blank', 'noopener');
+        note.textContent = `Copied — paste it into ${btn.textContent} and send.`;
+      } else if (btn.textContent === 'Hermes') {
+        note.textContent = 'Copied — paste it into a new Hermes chat (or any agent with shell access) and send.';
+      } else {
+        note.textContent = 'Copied — paste it into any AI agent that can run shell commands.';
+      }
+      btn.textContent = 'Copied ✓';
+      setTimeout(() => { btn.textContent = btn.dataset.label || btn.textContent; }, 1200);
+    });
+    btn.dataset.label = btn.dataset.label || btn.textContent;
   });
 });
 
