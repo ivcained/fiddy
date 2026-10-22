@@ -17,8 +17,12 @@
  * identities" — a different product than the one `index.html` unfurls as.
  *
  * This checks the BUILT tree (dist/), not the sources: what must be right is
- * what ships. It reads the PNG's own header for the splash size, so a
- * mis-sized asset cannot pass on its name. It never touches the signature: the
+ * what ships. It reads the PNG's own header for each picture's size, so a
+ * mis-sized asset cannot pass on its name, and it holds all three of the URLs
+ * the listing names (splash, icon, embed image) to the same rule: a file this
+ * repo built, at the size the spec asks — measured 2026-10-22 (card t_90a2eee2),
+ * the icon and the embed were nginx aliases into the sibling FSSC app's asset
+ * directory and carried its art. It never touches the signature: the
  * domain association is the owner's cryptographic approval — carried through
  * unchanged, never regenerated.
  *
@@ -128,40 +132,64 @@ if (action.splashBackgroundColor !== app.splashBackgroundColor) {
     `the splash colour disagrees: shell ${action.splashBackgroundColor}, listing ${app.splashBackgroundColor}`,
   );
 }
+// The embed card in the feed and the listing's own image are one picture: a
+// cast that launches one app and an app list that shows another is the drift
+// this gate exists to catch.
+if (embed?.imageUrl !== app.imageUrl) {
+  refuse(
+    `the shell embeds ${embed?.imageUrl} while the listing shows ${app.imageUrl}`,
+  );
+}
 if (metaContent('property', 'og:description') !== app.description) {
   refuse(
     'the unfurl sentence and the listing description are not the same sentence',
   );
 }
 
-// The splash is painted before any of our code runs, so it must be an asset
-// this repo owns — a URL the host aliases into another app's asset directory is
-// another product's art waiting to happen.
-let splashUrl;
-try {
-  splashUrl = new URL(app.splashImageUrl);
-} catch {
-  refuse(`the splash URL is not a URL: ${app.splashImageUrl}`);
-}
-const splash = path.join(root, splashUrl.pathname);
-let png;
-try {
-  png = readFileSync(splash);
-} catch {
-  refuse(
-    `the build carries no ${splashUrl.pathname} for the splash it asks for`,
-  );
-}
+// Every picture the listing names is painted before or beside any of our code:
+// the splash covers the transition and the icon and the embed card are what a
+// client shows in the app list and in a cast. Each must be an asset THIS repo
+// owns at the size the spec asks — a URL the host aliases into another app's
+// asset directory is another product's art waiting to happen (measured
+// 2026-10-22, card t_90a2eee2: the icon and the embed both came out of
+// /var/www/fiddy-fssc/assets/, the sibling FSSC app's directory, and carried
+// its judge-baby art). Sizes are read from the PNG's own IHDR, so a mis-sized
+// asset cannot pass on its name.
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-if (PNG_MAGIC.some((byte, at) => png[at] !== byte)) {
-  refuse(`${splash} is not a PNG`);
-}
-const width = png.readUInt32BE(16);
-const height = png.readUInt32BE(20);
-if (width !== 200 || height !== 200) {
-  refuse(`the splash is ${width}x${height}; the spec asks 200x200`);
-}
+const ownedPng = (urlString, label, [wantWidth, wantHeight]) => {
+  let url;
+  try {
+    url = new URL(urlString);
+  } catch {
+    refuse(`the ${label} URL is not a URL: ${urlString}`);
+  }
+  if (url.origin !== 'https://fiddy.fun') {
+    refuse(`the ${label} is served from ${url.origin}, not https://fiddy.fun`);
+  }
+  const file = path.join(root, url.pathname);
+  let png;
+  try {
+    png = readFileSync(file);
+  } catch {
+    refuse(`the build carries no ${url.pathname} for the ${label} it asks for`);
+  }
+  if (PNG_MAGIC.some((byte, at) => png[at] !== byte)) {
+    refuse(`${file} is not a PNG`);
+  }
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  if (width !== wantWidth || height !== wantHeight) {
+    refuse(
+      `the ${label} is ${width}x${height}; the spec asks ${wantWidth}x${wantHeight}`,
+    );
+  }
+  return { pathname: url.pathname, width, height };
+};
+
+const splash = ownedPng(app.splashImageUrl, 'splash', [200, 200]);
+const icon = ownedPng(app.iconUrl, 'icon', [1024, 1024]);
+const embedImage = ownedPng(app.imageUrl, 'embed image', [1200, 800]);
 
 console.log(
-  `  manifest ok  ${app.name} "${app.description}" — signed, splash ${app.splashImageUrl} (${width}x${height} on ${app.splashBackgroundColor}), shell and listing agree`,
+  `  manifest ok  ${app.name} "${app.description}" — signed; splash ${splash.pathname} (${splash.width}x${splash.height} on ${app.splashBackgroundColor}), icon ${icon.pathname} (${icon.width}x${icon.height}), embed ${embedImage.pathname} (${embedImage.width}x${embedImage.height}) — every one of them a file in this build, shell and listing agree`,
 );

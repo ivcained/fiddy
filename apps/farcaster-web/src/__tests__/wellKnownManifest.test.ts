@@ -174,14 +174,30 @@ describe('the fiddy.fun app-list manifest', () => {
     );
   });
 
-  it('asks for the splash the spec asks for, from an asset this repo owns', () => {
+  it('names its pictures in this repo, at the sizes the spec asks for', () => {
+    // A URL the host aliases into another app's asset directory is another
+    // product's art waiting to happen — measured 2026-10-22 (card t_90a2eee2),
+    // /icon.png and /image.png were exactly that, both served out of the
+    // sibling FSSC app's assets. Every picture the listing names is a file in
+    // `public/`, measured from its own PNG header.
+    const pictures: [string, string | undefined, [number, number]][] = [
+      ['splash', app.splashImageUrl, [200, 200]],
+      ['icon', app.iconUrl, [1024, 1024]],
+      ['embed image', app.imageUrl, [1200, 800]],
+    ];
+    for (const [label, url, size] of pictures) {
+      expect(url, `${label} is missing from the manifest`).toBeTruthy();
+      const parsed = new URL(url as string);
+      expect(parsed.origin, label).toBe('https://fiddy.fun');
+      expect(
+        pngSize(path.join(webRoot, 'public', parsed.pathname)),
+        label,
+      ).toEqual(size);
+    }
+    // One splash and one embed card, both surfaces: the transition the shell
+    // paints and the picture the listing shows are the manifest's own.
     expect(app.splashImageUrl).toBe(embed.button.action.splashImageUrl);
-    const url = new URL(app.splashImageUrl!);
-    expect(url.origin).toBe('https://fiddy.fun');
-    // A URL the host aliases elsewhere is another app's art waiting to happen:
-    // the splash must be a file in this repo, served under its own name.
-    const asset = path.join(webRoot, 'public', url.pathname);
-    expect(pngSize(asset)).toEqual([200, 200]);
+    expect(app.imageUrl).toBe(embed.imageUrl);
   });
 
   it('keeps the front door free of the plumbing’s jargon', () => {

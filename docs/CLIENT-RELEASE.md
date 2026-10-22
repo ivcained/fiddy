@@ -25,6 +25,9 @@ embed renders as and the provider the client reads through, neither of which the
 | `/client`, `/client/`, `/FSSC/`, `/start` | unchanged | elsewhere, untouched |
 | `/.well-known/farcaster.json` | the signed app-list manifest — Fiddy's listing identity (name, icon, description, splash, webhook) | nginx `alias /var/www/fiddy-well-known/farcaster.json`; the release installs it from `releases/<sha>/web/.well-known/farcaster.json`, i.e. from the repo's `apps/farcaster-web/public/.well-known/farcaster.json` |
 | `/fiddy-splash.png` | the 200×200 splash the manifest and the shell's `fc:miniapp` embed both paint | `releases/<sha>/web/fiddy-splash.png` (a file in this repo) |
+| `/fiddy-embed.png` | the 1200×800 (3:2) embed card the manifest's `imageUrl` and the shell's `fc:miniapp` tag both name | `releases/<sha>/web/fiddy-embed.png` (a file in this repo, drawn by `apps/farcaster-web/scripts/render-share-card.mjs`) |
+| `/brand/fiddy-app-icon.png` | the 1024×1024 icon the manifest's `iconUrl` names — the app's own icon (the same PNG the shell serves as `apple-touch-icon` and the Expo app declares in `apps/fiddy-mobile/app.json`) | `releases/<sha>/web/brand/fiddy-app-icon.png` (a file in this repo) |
+| `/icon.png`, `/image.png`, `/splash.png` | 301s to `/brand/fiddy-app-icon.png`, `/fiddy-embed.png`, `/fiddy-splash.png` — the listing URLs as they stood before 2026-10-22, still answering for anything that cached them | nginx `location = … { return 301 …; }`; see *The listing's pictures* below |
 
 The release tree keeps three things the vhost and systemd depend on:
 
@@ -219,23 +222,60 @@ Rules that come with it:
   gate compares name, splash URL, splash colour and the description sentence
   between the built manifest and the built shell, and reads the splash PNG's own
   header for its size.
+- **Every picture the listing names is a file in this repo.** The splash, the
+  icon and the embed image are each served under the release root at the size the
+  spec asks (`/fiddy-splash.png` 200×200, `/brand/fiddy-app-icon.png` 1024×1024,
+  `/fiddy-embed.png` 1200×800), and the release gate reads each PNG's own header
+  for its size before anything is uploaded. Measured 2026-10-22 (card
+  t_90a2eee2): `/icon.png` and `/image.png` were nginx aliases into
+  `/var/www/fiddy-fssc/assets/` — the *sibling* FSSC app's asset directory — and
+  served FSSC's "Network Court" judge art, so Fiddy's app-list icon and every
+  fiddy.fun cast card sat one FSSC art edit away from being repainted. The icon
+  is the app's own (one PNG, three surfaces: the Farcaster listing, the shell's
+  `apple-touch-icon`, the Expo icon); the embed card is drawn from the repo's
+  mascot by `scripts/render-share-card.mjs`, the same script and art system as
+  the og card.
 - **Every URL it names must answer 200**, and the well-known path must serve real
   JSON (never a redirect) on **http and https** — a redirect or a 404 there is
   what makes a signing phone answer "error matching manifest" (the debug playbook
   is in the `farcaster-miniapps` skill).
-- **Known coupling, not yet fixed:** `/image.png` and `/icon.png` are vhost
-  aliases into `/var/www/fiddy-fssc/assets/`, a *sibling* app's asset directory —
-  the shape the miniapp skill warns about, where root-path art gets repurposed by
-  the next app on the domain. The splash is repo-owned now; the icon and the
-  embed image should follow once repo-owned art at the right sizes exists.
 
-The live state, in three commands:
+### The listing's pictures: one home each, and the old root URLs redirect
+
+Before 2026-10-22 the manifest's `iconUrl` and `imageUrl` were exact-match
+aliases into the *sibling* FSSC app's asset directory
+(`/var/www/fiddy-fssc/assets/fiddy-judge-ai.png` and `fiddy-card.png`) — the
+shape the `farcaster-miniapps` skill warns about, and in this case already the
+wrong art: Fiddy's app-list icon and every fiddy.fun cast card were showing
+FSSC's "Network Court" judge mascot. They are gone. The three pictures the
+listing names are files in this repo, and the three root paths the listing has
+ever named redirect to them, so anything that cached the old URL still lands on
+Fiddy's own art. The vhost names URLs rather than reaching into a release tree
+or another app's directory (card t_90a2eee2; vhost backed up at
+`/root/nginx-backups/fiddy.fun.<timestamp>.listing-assets.bak`):
+
+```nginx
+location = /icon.png   { return 301 https://fiddy.fun/brand/fiddy-app-icon.png; }
+location = /image.png  { return 301 https://fiddy.fun/fiddy-embed.png; }
+location = /splash.png { return 301 https://fiddy.fun/fiddy-splash.png; }
+```
+
+A redirect is right on those three — they are no longer manifest URLs, and the
+well-known path is the only URL on this domain that must never redirect. A
+release is what changes the listing (step 7 installs the manifest, and
+`check-manifest.mjs` refuses a build whose icon, embed image or splash is
+missing, mis-sized, or off-origin); this nginx half was a one-time vhost edit
+(`nginx -t && systemctl reload nginx`), not a step in the release ritual.
+
+The live state, in four commands:
 
 ```bash
 curl -s  https://fiddy.fun/.well-known/farcaster.json | head -c 120  # real JSON, 200
 curl -sI http://fiddy.fun/.well-known/farcaster.json | head -1       # 200 — not a 3xx
-for u in fiddy-splash.png image.png icon.png; do \
-  curl -s -o /dev/null -w "$u %{http_code} %{content_type}\n" https://fiddy.fun/$u; done
+for u in fiddy-splash.png fiddy-embed.png brand/fiddy-app-icon.png; do \
+  curl -s -o /dev/null -w "$u %{http_code} %{content_type} %{size_download}\n" https://fiddy.fun/$u; done
+for u in icon.png image.png splash.png; do \
+  curl -s -o /dev/null -w "$u %{http_code} -> %{redirect_url}\n" https://fiddy.fun/$u; done
 ```
 
 ### Rollback

@@ -175,10 +175,11 @@ The shell now declares, statically:
 - `twitter:card: summary_large_image` with its own title/description/image;
 - `description`;
 - **and an `fc:miniapp` embed**, so the same URL is a launchable mini app card —
-  `imageUrl` is `/image.png`, the manifest's own 3:2 image (measured 1200×800),
-  the action is `launch_miniapp` named `fiddy` (the manifest's `name`), and the
-  splash ground is the app's own `#161715` — the same ground the listing
-  manifest now paints (card t_8654d91e; both are pinned by
+  `imageUrl` is `/fiddy-embed.png`, the manifest's own 3:2 image (1200×800,
+  drawn from the repo's mascot by `scripts/render-share-card.mjs`; card
+  t_90a2eee2), the action is `launch_miniapp` named `fiddy` (the manifest's
+  `name`), and the splash ground is the app's own `#161715` — the same ground
+  the listing manifest paints (card t_8654d91e; all of it is pinned by
   `src/__tests__/wellKnownManifest.test.ts` and the release's
   `scripts/check-manifest.mjs`).
 
@@ -274,8 +275,14 @@ it (step 7) behind the `check-manifest.mjs` gate, and pointed the splash at the
 200×200 `/fiddy-splash.png` that the shell's embed already used, so the listing
 and the link describe one product. The signed `accountAssociation` carried over
 byte-for-byte — nothing was re-signed. `docs/CLIENT-RELEASE.md` → *The listing
-manifest* is the reference, including the two assets (`/image.png`, `/icon.png`)
-still aliased into the sibling FSSC app's asset directory on the VPS.
+manifest* is the reference, including the two assets that were aliased into the
+sibling FSSC app's asset directory: card t_90a2eee2 gave all three pictures a
+home in this repo (`/fiddy-splash.png` 200×200, `/brand/fiddy-app-icon.png`
+1024×1024 — the app's own icon, the same PNG the shell serves as
+`apple-touch-icon` and the Expo app declares — and `/fiddy-embed.png` 1200×800,
+drawn by `scripts/render-share-card.mjs`), and turned `/icon.png`, `/image.png`
+and `/splash.png` into 301s to those paths, so nothing FSSC edits can repaint
+Fiddy's app-list icon or its cast cards.
 
 ## 8. Carded, not done
 
@@ -288,8 +295,9 @@ still aliased into the sibling FSSC app's asset directory on the VPS.
    refuse-by-name rule as everything else). The card asked for this to be carded
    first because it is big: what a mini app may ask an agent for is a product and
    safety decision, not a wire to fill in.
-3. **The listing's two remaining host-aliased assets**: `/icon.png` and
-   `/image.png` are vhost aliases into `/var/www/fiddy-fssc/assets/` — a sibling
-   app's directory, which is the shape that ends with one app showing another's
-   art. The splash is repo-owned now (t_8654d91e); these two should follow once
-   repo-owned art at 1024×1024 and 1200×800 exists.
+3. ~~**The listing's two remaining host-aliased assets**~~ — **done**, card
+   t_90a2eee2. `/icon.png` and `/image.png` were vhost aliases into
+   `/var/www/fiddy-fssc/assets/`, a sibling app's directory (and, measured, that
+   sibling's judge art — not Fiddy's). Both pictures are files in this repo now
+   (1024×1024 and 1200×800) and the three root paths the listing has ever named
+   redirect to them.
