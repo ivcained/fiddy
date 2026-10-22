@@ -26,6 +26,15 @@ const connectStatus = vi.fn();
 const rememberConnectStatus = vi.fn();
 const stopConnect = vi.fn();
 
+/**
+ * Who this browser is signed in as. The sheet asks (a connection may only be
+ * adopted for the account a person is signed in as, or by the tab that started
+ * it), and a unit test of another surface has no session — so no account.
+ */
+vi.mock('farcaster-client-hooks', () => ({
+  useCachedOnboardingState: () => ({ result: { state: { user: undefined } } }),
+}));
+
 vi.mock('react-qrcode-logo', () => ({
   QRCode: () => <div data-testid="qr" />,
 }));

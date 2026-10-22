@@ -43,15 +43,33 @@ export type ConnectState =
   | 'waiting'
   | 'connected'
   | 'revoked'
+  /** The approval belonged to somebody else — never a connection, ever. */
+  | 'wrong_account'
   | 'unknown';
+
+/** Why a connection was refused. `app_account` carries no name with it. */
+export type ConnectRefusal = 'app_account' | 'other_account' | null;
 
 export interface ConnectStatus {
   state: ConnectState;
   /** The link the person opens in their Farcaster app, while there is one. */
   approvalUrl: string | null;
-  /** The account the posting key belongs to, once it has been approved. */
+  /**
+   * The account the posting key belongs to, once it has been approved. This is
+   * an identity only while `state` is `connected`; a refusal echoes it at most.
+   */
   fid: number | null;
   username: string | null;
+  /** The FID this request was started for, when this device proved one. */
+  forFid: number | null;
+  /** Set when the approval belonged to somebody other than the person. */
+  refused: ConnectRefusal;
+  /**
+   * True when the request was started from THIS tab. The one thing that lets a
+   * signed-out device adopt an identity: a connection this browser did not ask
+   * for is somebody else's, however it got into the cookie jar.
+   */
+  startedHere: boolean;
 }
 
 export const NO_CONNECTION: ConnectStatus = {
@@ -59,7 +77,21 @@ export const NO_CONNECTION: ConnectStatus = {
   approvalUrl: null,
   fid: null,
   username: null,
+  forFid: null,
+  refused: null,
+  startedHere: false,
 };
+
+/**
+ * What a signed-in browser hands over so the connection is *theirs*: the FID it
+ * is signed in as, and the SIWF proof of that (`~/lib/siwfSession` keeps the
+ * message and signature for exactly this kind of use). The service checks the
+ * proof against Farcaster's own answer; a claim without one is refused there.
+ */
+export interface ConnectBinding {
+  forFid: number;
+  proof: { message: string; signature: string; nonce: string };
+}
 
 /** What went wrong, in words a screen can show as they are. */
 export class ConnectUnavailableError extends Error {
@@ -88,7 +120,14 @@ const readStatus = (payload: unknown): ConnectStatus => {
   }
   const raw = payload as Record<string, unknown>;
   const state = raw.state;
-  const known: ConnectState[] = ['none', 'waiting', 'connected', 'revoked'];
+  const known: ConnectState[] = [
+    'none',
+    'waiting',
+    'connected',
+    'revoked',
+    'wrong_account',
+  ];
+  const refused = raw.refused;
   return {
     state:
       typeof state === 'string' && (known as string[]).includes(state)
@@ -103,7 +142,65 @@ const readStatus = (payload: unknown): ConnectStatus => {
       typeof raw.username === 'string' && raw.username.length > 0
         ? raw.username
         : null,
+    forFid:
+      typeof raw.forFid === 'number' && raw.forFid > 0 ? raw.forFid : null,
+    refused:
+      refused === 'app_account' || refused === 'other_account' ? refused : null,
+    // Filled in by the caller-side reader below: the answer alone never proves
+    // this tab asked.
+    startedHere: false,
   };
+};
+
+// ------------------------------------------------------- this tab's own attempt
+
+/**
+ * The label THIS tab puts on its own request.
+ *
+ * `sessionStorage`, so it dies with the tab: the question it answers is "did
+ * this tab start the connection the cookie is now holding?", and a label that
+ * outlived the tab would answer yes for a browser that never asked. A device
+ * with no label can still use a connection — by proving an identity of its own
+ * (signing in with Farcaster), which is the honest way to become somebody.
+ */
+const ATTEMPT_KEY = 'fiddy:connect-attempt';
+
+const newAttempt = (): string => {
+  try {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+      '',
+    );
+  } catch {
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  }
+};
+
+const currentAttempt = (): string | null => {
+  try {
+    return window.sessionStorage.getItem(ATTEMPT_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const rememberAttempt = (attempt: string): void => {
+  try {
+    window.sessionStorage.setItem(ATTEMPT_KEY, attempt);
+  } catch {
+    // A browser that refuses storage simply cannot adopt an identity from a
+    // connection it started: it signs in with Farcaster instead.
+  }
+};
+
+/** Forget this tab's request — called when it is adopted or turned off. */
+export const forgetConnectAttempt = (): void => {
+  try {
+    window.sessionStorage.removeItem(ATTEMPT_KEY);
+  } catch {
+    /* nothing to forget */
+  }
 };
 
 const failureFor = (
@@ -142,6 +239,16 @@ const postJson = async (
 
 // ------------------------------------------------------------------ the states
 
+/** Is this answer one this tab asked for? The service echoes the label back. */
+const startedHere = (payload: unknown): boolean => {
+  const attempt = currentAttempt();
+  if (attempt === null) {
+    return false;
+  }
+  const echoed = (payload as Record<string, unknown> | null)?.attempt;
+  return typeof echoed === 'string' && echoed === attempt;
+};
+
 /** What the connection is, asked of the service. */
 export const connectStatus = async ({
   fetchImpl = fetch,
@@ -170,23 +277,45 @@ export const connectStatus = async ({
   if (!response.ok) {
     throw failureFor(response.status, payload);
   }
-  return readStatus(payload);
+  return { ...readStatus(payload), startedHere: startedHere(payload) };
 };
 
 /**
  * One tap: the service creates the posting key and hands back the link the
  * person opens. A second press while a link is still waiting is answered with
  * *that same link* (`reused`) rather than a second, costly request.
+ *
+ * `binding` is who is asking: a signed-in browser passes the FID it is signed in
+ * as together with the SIWF proof of it, and the service checks that against
+ * Farcaster's own answer before the request is tied to anybody. Without a
+ * binding the request is nobody's until somebody approves it in their own
+ * Farcaster app — and then only this tab may adopt that identity.
  */
 export const startConnect = async ({
+  binding = null,
   fetchImpl = fetch,
-}: { fetchImpl?: typeof fetch } = {}): Promise<{
+}: {
+  binding?: ConnectBinding | null;
+  fetchImpl?: typeof fetch;
+} = {}): Promise<{
   status: ConnectStatus;
   reused: boolean;
 }> => {
+  // This tab's own label, minted before the request and shown to nobody but the
+  // service — it is what makes the answer recognisably ours later.
+  const attempt = newAttempt();
   let answered: { status: number; payload: unknown };
   try {
-    answered = await postJson(CONNECT_ENDPOINT, {}, fetchImpl);
+    answered = await postJson(
+      CONNECT_ENDPOINT,
+      {
+        attempt,
+        ...(binding === null
+          ? {}
+          : { forFid: binding.forFid, proof: binding.proof }),
+      },
+      fetchImpl,
+    );
   } catch {
     throw new ConnectUnavailableError(
       'CONNECT_UNREACHABLE',
@@ -197,8 +326,11 @@ export const startConnect = async ({
   if (answered.status < 200 || answered.status >= 300) {
     throw failureFor(answered.status, answered.payload);
   }
+  // Remembered only once the service has taken it: a request that never started
+  // must not make this tab the owner of somebody else's connection.
+  rememberAttempt(attempt);
   return {
-    status: readStatus(answered.payload),
+    status: { ...readStatus(answered.payload), startedHere: true },
     reused: Boolean(
       (answered.payload as Record<string, unknown> | null)?.reused,
     ),
@@ -231,6 +363,7 @@ export const stopConnect = async ({
   if (!response.ok) {
     throw failureFor(response.status, payload);
   }
+  forgetConnectAttempt();
   return readStatus(payload);
 };
 

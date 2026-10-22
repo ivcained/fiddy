@@ -386,6 +386,12 @@ export interface SiwfProof {
   fid: number;
   message: string;
   signature: string;
+  /**
+   * The nonce the handshake asked for. Kept so a reader can show the proof was
+   * made for THIS session and not harvested from another one (the connect flow
+   * passes it on; a proof without one is still checked by its signature).
+   */
+  nonce?: string;
   at: number;
 }
 
@@ -396,8 +402,11 @@ export interface SiwfProof {
  * owner's own Farcaster client. That pair is evidence of who signed in — and it
  * is replayable by anyone who reads it, so it is kept the way it deserves:
  * `sessionStorage` only (gone when the tab closes), a thirty-minute life, and
- * consumed once. The one consumer is `~/lib/fiddyAgentAutopair`, which forwards
- * it to the agent service exactly once and then deletes it.
+ * consumed once. Its readers are the two surfaces that must prove the same
+ * thing the sign-in just proved: `~/pages/agent` (which forwards it to the agent
+ * service and deletes it) and the connect flow (`managedConnect`, which hands it
+ * to Fiddy's own service so a posting key is issued FOR this account and no
+ * other). Nothing else in the app reads it, and it grants nothing on its own.
  *
  * It is kept for a real reason rather than convenience: the service that runs
  * your agent proves ownership by verifying precisely this signature against
@@ -410,7 +419,8 @@ export const saveSiwfProof = (
     fid,
     message,
     signature,
-  }: { fid: number; message: string; signature: string },
+    nonce,
+  }: { fid: number; message: string; signature: string; nonce?: string },
   now = Date.now(),
 ): void => {
   if (!Number.isSafeInteger(fid) || fid <= 0 || !message) {
@@ -422,7 +432,13 @@ export const saveSiwfProof = (
   try {
     window.sessionStorage.setItem(
       SIWF_PROOF_KEY,
-      JSON.stringify({ fid, message, signature, at: now }),
+      JSON.stringify({
+        fid,
+        message,
+        signature,
+        ...(typeof nonce === 'string' && nonce.length > 0 ? { nonce } : {}),
+        at: now,
+      }),
     );
   } catch {
     // A browser that refuses storage simply signs in again — never a broken login.
@@ -445,6 +461,7 @@ export const loadSiwfProof = (now = Date.now()): SiwfProof | null => {
     const signature =
       typeof parsed.signature === 'string' ? parsed.signature : '';
     const at = typeof parsed.at === 'number' ? parsed.at : 0;
+    const nonce = typeof parsed.nonce === 'string' ? parsed.nonce : undefined;
     if (!Number.isSafeInteger(fid) || fid <= 0 || !message || !at) {
       return null;
     }
@@ -454,7 +471,7 @@ export const loadSiwfProof = (now = Date.now()): SiwfProof | null => {
     if (now - at > SIWF_PROOF_TTL_MS || now < at - 60_000) {
       return null;
     }
-    return { fid, message, signature, at };
+    return { fid, message, signature, ...(nonce ? { nonce } : {}), at };
   } catch {
     return null;
   }

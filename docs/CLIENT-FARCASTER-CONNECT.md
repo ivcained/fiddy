@@ -78,9 +78,83 @@ registered FID whose custody key we hold. The owner's only such account is
 `@fiddy-one` (FID 3356372, deployed for the agent work). It is configured, not
 hard-coded, as `FIDDY_CONNECT_APP_FID` + `FIDDY_CONNECT_APP_KEY`, so a dedicated
 app account can replace it by changing two environment values — no code change.
-The approval screen names whoever that is ("sponsored by @fiddy-one" today).
 
-## 4. Coexisting with making a *new* account
+It is the account that *asks*, never the account that *owns* the connection:
+Neynar's own documentation for the managed-signer flow is explicit that the app
+FID signs the request and the person who opens the link approves the key for
+their own account ("The user opens the link and completes the Onchain Signer Add
+Request flow... The app finds the user's fid in the polling response"). A person
+who approves the request while their Farcaster client happens to be signed in as
+the app account therefore approves it **for that account** — which is exactly the
+wrong-account outcome the next section exists to refuse.
+
+## 4. Whose account a connection becomes — the identity rule
+
+**Status of the two halves.** The client half is in the client release
+(`t_e9657ffb-connect-identity`): it binds every connect request to the FID this
+browser is signed in as, and it refuses to enter a connection that is not the
+person's own. The service half is specified below and **is not deployed yet** —
+the control plane on the VPS still reports whatever account approved the request
+(`lib/fiddy-connect.ts` at `c91acff`). A client alone cannot stop the service
+from *holding* a key for the app account; it can only refuse to become it, which
+is what this release does. The service-side rule is followed up on its own card
+rather than half-deployed here.
+
+One tap can bind a browser to a Farcaster account, so the question "whose?" is
+answered twice, with evidence, and never by assertion.
+
+**What the browser proves.** A signed-in device hands the service its own SIWF
+proof with the request: the FID it is signed in as, the SIWE message its
+Farcaster app signed, and the signature over it. The service checks the message
+names the host the request arrived on, the signature recovers to the address the
+message names (`viem`'s `verifyMessage`, pure ECDSA), the proof is fresh, and
+Farcaster itself says that address is that FID's own — custody address, or one of
+its published verified addresses (read through Neynar, which this route already
+depends on). Only then is the request *for* that FID. A FID without a proof is
+never believed: the request is simply unbound, and then the approval alone
+decides.
+
+**What the service refuses.** Two facts must hold before anything is reported
+`connected`, and either failure is reported as `wrong_account` — with the key
+removed at Neynar, not merely forgotten:
+
+1. the account that approved is **not Fiddy's own app account**. A key attached
+   to our account is ours; a browser that adopted it would be signed in as
+   Fiddy. In that case the browser is told nothing about it at all — no number,
+   no handle — so there is nothing to adopt and nothing to leak.
+2. an approval that contradicts the FID the request was started for (a bound
+   request) is not a connection either. A connection belongs to one person.
+
+**What the client refuses, on its own.** `ConnectSheet` adopts an identity only
+when the connection is the person's own: the approval must be for the account
+they are already signed in as, or — on a device nobody is signed in on — for the
+request THIS tab started (`sessionStorage` label, echoed by the service). A
+connection left in the cookie jar by somebody else on a shared device is named
+and confirmed, never entered in one tap. And the one place a session's identity
+is set (`continueAs`) refuses an account that contradicts the signed-in one, so
+nothing switches silently.
+
+**What was measured, and what is asserted.** `scripts/probe-connect-identity.mjs`
+drives the running client at 390 and 1440 with a real SIWE sign-in (the relay
+stubbed with a message signed by a throwaway key) and the connect service stubbed
+(a probe never mints a real sponsored signer: that spends the owner's Neynar
+credits). It asserts the request carries the person's own proof; that their own
+approval signs them in as themselves; that the fixed service's refusal is shown
+and Fiddy's own account appears nowhere on the page or in storage; and that a
+service which has *not* been fixed — one that reports Fiddy's own account as the
+connection — still cannot sign this browser in as it. It ran green at both
+viewports on 2026-10-22 (14/14 checks) against a stubbed service; the client
+under test has to be the node-backed build (`VITE_SNAPCHAIN_HTTP_URL` set),
+because a device-only session never renders the connect surface at all — that is
+in the probe's own header, and a run without it fails from step B down. The live
+service's own record agreed with the design on 2026-10-22: the one approved
+connection in its database belongs to the person's own FID (`@ivc`, 191554), and
+no stored row has ever held the app account (`@fiddy-one`, 3356372); the two
+other rows are both `pending_approval`. So there is nothing to clear for the
+reported connection — what was wrong is that the *session* took its identity from
+whatever the service answered, and that is what this release changed.
+
+## 5. Coexisting with making a *new* account
 
 There are two honest ways to end up with an account Fiddy can post from, and
 they are different products:
@@ -102,7 +176,7 @@ reloaded and re-entered without touching the modal again. Nothing in this branch
 renames, moves or deletes a create-account file, so the two landings do not
 depend on each other's merge order.
 
-## 5. The seam the plugin's first-run setup shares
+## 6. The seam the plugin's first-run setup shares
 
 The plugin's one-click setup (card `t_e79c416a`) needs the same thing this
 branch builds — a signer for a Farcaster account, obtained with no passphrase and
@@ -128,7 +202,7 @@ Creating a signer is the only operation that spends money, so it is rate-limited
 per caller (8 per 10 minutes) and capped per day (`FIDDY_CONNECT_DAILY_CEILING`,
 default 40).
 
-## 6. What the write path does when a key was granted
+## 7. What the write path does when a key was granted
 
 `~/snapchain/nodeApi/nodeWrites.ts` carries every write in the app. It now has a
 second carrier: if a granted posting key exists **for the signed-in FID**, the
@@ -144,7 +218,7 @@ write is handed to the service that holds it instead of being signed here.
   falls back to this device's own key — so an unreachable service downgrades to
   the old path instead of failing the write.
 
-## 7. What is still open
+## 8. What is still open
 
 1. **The approval tap** — one person, in their own Farcaster app. The link is
    produced by the server on demand; nothing here can (or should) stand in.

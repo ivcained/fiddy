@@ -183,6 +183,7 @@ const LoginWithMobileContent: FC<LoginWithMobileContentProps> = memo(
           fid: completion.fid,
           message: completion.message,
           signature: completion.signature,
+          nonce: channel.nonce,
         });
 
         const authToken = buildLocalAuthToken({ fid: completion.fid });
