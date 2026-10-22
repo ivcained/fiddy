@@ -51,6 +51,38 @@ type SeedBackupNoticeProps = {
 const providerNameFor = (account: LocalAccount): string | undefined =>
   SOCIAL_PROVIDERS.find((provider) => provider.id === account.provider)?.name;
 
+/**
+ * Accounts whose ask this page load has already put on screen, and the moment it
+ * recorded as that ask (the `lastShownAt` it wrote).
+ *
+ * WHY THIS EXISTS. The ask is recorded in this device's storage as it is asked
+ * (`noteBackupAsked`), which is what stops a reload from being a fresh ask.
+ * MEASURED 2026-10-22: the account screen is created more than once inside a
+ * single page load — Privy's provider arrives late and its subtree is replaced
+ * (`~/providers/PrivyRoot`), and the app's own shell has the same shape — so a
+ * second creation read that write back, decided "asked just now", and left the
+ * person on an account screen with no reminder at all. Measured in 5 of 8 runs
+ * at 390px and 1440px, and with StrictMode patched out of the served module as
+ * well: it is not a development-mode artefact. A remount is not an answer.
+ *
+ * MEASURED AGAIN, later the same day, on a *deferred* account: the same hiding
+ * happens when the reminder's own moment comes round, because "asked just now"
+ * is written for a second ask exactly as it is for the first. 390px, real Chrome:
+ * the clock was moved four days into the past, the screen reloaded, and the
+ * notice that should have come back did not — the record it read was the one its
+ * own ask had just written. So the moment is kept with the account id, and only a
+ * record that is STILL that same unanswered ask is re-shown.
+ *
+ * WHAT IT IS NOT. It is not persistence, and it is not a second store of the
+ * asking: it lives for one page load, and a real reload reads the stored gap
+ * above exactly as it did before. An account whose ask was put off or confirmed
+ * is dropped from it, so the person's own answer still ends the asking — and a
+ * record written by anything else (a saved account, a deferral with its own
+ * moment, another tab) fails the moment check and is decided by the app's own
+ * rule instead.
+ */
+const asksOnScreenThisPageLoad = new Map<string, number>();
+
 const SeedBackupNotice: FC<SeedBackupNoticeProps> = memo(
   ({ account, heldWordsSlot }) => {
     const [step, setStep] = useState<Step>('loading');
@@ -72,15 +104,47 @@ const SeedBackupNotice: FC<SeedBackupNoticeProps> = memo(
 
         const now = Date.now();
 
+        // Was the ask put on screen earlier in this same page load, with no
+        // answer recorded since? Then the screen being created again must not
+        // hide it (see `asksOnScreenThisPageLoad`) — and nothing is
+        // re-recorded, so the stored gap still measures from the first ask.
+        // The stored record has to still BE that ask: a "saved" account, or a
+        // deferral with a moment of its own, is the person's answer or something
+        // else's write, and the app's own rule decides those below.
+        const askedThisPageLoad = asksOnScreenThisPageLoad.get(account.id);
+
+        if (
+          askedThisPageLoad !== undefined &&
+          stored.status !== 'saved' &&
+          stored.lastShownAt === askedThisPageLoad
+        ) {
+          setState(stored);
+          setStep('ask');
+          return;
+        }
+
         if (!shouldAskForBackup(stored, now)) {
           setState(stored);
           setStep('hidden');
           return;
         }
 
+        // A screen that has already gone must not answer for this one: the effect
+        // below is a read, a decision and a write, and a replaced instance whose
+        // write lands after the person's own answer would overwrite it. Nothing
+        // here is written by a dead instance, so an answer can only be replaced
+        // by another live instance's ask — and `asksOnScreenThisPageLoad` above
+        // is what keeps that from hiding the notice.
+        if (!live) {
+          return;
+        }
+
         // Recorded as asked, so a reload is not a fresh ask. The unread answer
         // stays "unseen", so a later visit does ask again.
         const asked = noteBackupAsked(stored, now);
+
+        asksOnScreenThisPageLoad.set(account.id, asked.lastShownAt ?? now);
+
         await saveSeedBackupState(account.id, asked);
 
         if (!live) {
@@ -99,6 +163,7 @@ const SeedBackupNotice: FC<SeedBackupNoticeProps> = memo(
     const defer = useCallback(async () => {
       const next = deferBackup(state, Date.now());
 
+      asksOnScreenThisPageLoad.delete(account.id);
       setState(next);
       setStep('hidden');
       await saveSeedBackupState(account.id, next);
@@ -107,6 +172,7 @@ const SeedBackupNotice: FC<SeedBackupNoticeProps> = memo(
     const confirmSaved = useCallback(async () => {
       const next = markBackupSaved(state, Date.now());
 
+      asksOnScreenThisPageLoad.delete(account.id);
       setState(next);
       setStep('done');
       await saveSeedBackupState(account.id, next);

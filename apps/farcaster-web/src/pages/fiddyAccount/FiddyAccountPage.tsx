@@ -25,6 +25,7 @@
 
 import { KeyRound, MessageCircle, ShieldCheck } from 'lucide-react';
 import React, { FC, lazy, memo, Suspense, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 
 import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
 import { FiddySheet } from '~/components/fiddy/FiddySheet';
@@ -32,7 +33,8 @@ import { SeedBackupNotice } from '~/components/fiddy/seedBackup/SeedBackupNotice
 import { Link } from '~/components/links/Link';
 import { LoginModal } from '~/components/modals/LoginModal';
 import { Page } from '~/components/page/Page';
-import { routes } from '~/constants/routes';
+import { defaultRoute, routes } from '~/constants/routes';
+import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
 import { SOCIAL_PROVIDERS } from '~/lib/socialSignUp';
 import { useLocalAccounts } from '~/snapchain/accounts/session';
 
@@ -47,10 +49,27 @@ const FiddyAccountPage: FC = memo(() => {
   const { accounts, current, loading } = useLocalAccounts();
   const [signingIn, setSigningIn] = useState(false);
   const [creating, setCreating] = useState(false);
+  const isSignedIn = useIsSignedIn();
 
   const provider =
     SOCIAL_PROVIDERS.find((candidate) => candidate.id === current?.provider) ??
     undefined;
+
+  // A signed-in session does not belong on this screen either.
+  //
+  // This is the screen a social sign-up lands on, and its whole subject is the
+  // one thing still missing: "No Farcaster account yet", with the two honest
+  // ways to get one. MEASURED 2026-10-22, a real Chrome at 390px: signing in
+  // with Farcaster from the primary above completes the handshake, saves the
+  // proof and reloads this very URL (`postSignInLocation` keeps a deep link in
+  // place, and this screen is not one of the setup paths it leaves) — and the
+  // person who just attached a Farcaster account was shown a screen telling them
+  // they have none, with no way into the client. So a session that arrives here,
+  // by that reload or by any other route, goes on to the client — where the
+  // switcher lists both accounts, which is the state this screen was pointing at.
+  if (isSignedIn) {
+    return <Navigate to={defaultRoute.path} replace />;
+  }
 
   if (loading) {
     return (

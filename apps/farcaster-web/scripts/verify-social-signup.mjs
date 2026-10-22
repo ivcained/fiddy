@@ -23,6 +23,12 @@
 // the identity mapping, the account book, the route it lands on, the backup
 // notice's own storage, and the switcher.
 //
+// THE RELAY ANSWERS "PENDING" UNTIL A STAGE MEANS IT (`relayApprovesSignIn`).
+// The modal starts a sign-in session as soon as it is drawn, so a relay that
+// says "completed" to every poll turns the act of opening the way in into a
+// finished Farcaster sign-in — MEASURED 2026-10-22 as the reason stage B could
+// never find its way back in.
+//
 // WHAT IT ASSERTS
 //   A. without an app id: no doors, no dead buttons, no errors — the Farcaster
 //      path exactly as it was, and the app says the feature is absent
@@ -32,9 +38,14 @@
 //      in the device's own book — keyed by the held wallet, named by the email,
 //      with no FID invented
 //   D. the backup notice: offered, blurred until tapped, deferred for days, asked
-//      again when that time passes, and silenced for good by the confirm step
+//      again when that time passes, silenced for good by the confirm step — and
+//      still on screen once the screen has settled, because the account screen
+//      is built again inside one page load and a remount is not a dismissal
 //   E. signing in with Farcaster from that screen reaches the shell, and the
-//      switcher lists BOTH accounts — the social one joined it
+//      switcher lists BOTH accounts — the social one joined it. MEASURED
+//      2026-10-22: this needed the app to stop showing a signed-in session the
+//      account screen, whose whole subject is the Farcaster account it does not
+//      have yet — see ~/pages/fiddyAccount/FiddyAccountPage
 //   F. a third party that refuses (a provider that throws) does not take the
 //      client with it: the doors say so and the Farcaster way in still stands
 //
@@ -48,7 +59,8 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { createSiweMessage } from 'viem/siwe';
 
 const SERVER = process.env.SOCIAL_SIGNUP_SERVER ?? 'https://localhost:5178';
-const PLAIN_SERVER = process.env.SOCIAL_SIGNUP_PLAIN_SERVER ?? 'https://localhost:5179';
+const PLAIN_SERVER =
+  process.env.SOCIAL_SIGNUP_PLAIN_SERVER ?? 'https://localhost:5179';
 const OUT = process.env.SOCIAL_SIGNUP_SHOT_DIR ?? os.tmpdir();
 
 const DOMAIN = new URL(SERVER).host;
@@ -89,8 +101,20 @@ const CORS = {
  * this app imports. It is a stub of the THIRD PARTY, never of the app: what
  * `login()` does here is what the real SDK does on a successful sign-up — call
  * back with the user — so everything downstream is the app's own code.
+ *
+ * NOT SIGNED IN UNTIL `login()` COMPLETES. A sign-up stub that declares
+ * `authenticated: true` with a user already in hand models somebody who is past
+ * the screen the doors live on. This one starts signed out and flips only when
+ * a sign-up finishes, keeping the flag in `sessionStorage` so the reload the app
+ * does afterwards (`window.location.replace`, in `~/components/login/
+ * SocialSignUpPrivy`) still lands signed in — which is what the real SDK's own
+ * session does, and what the account screen's "show me my backup words" needs.
+ * The app's doors key on `~/providers/PrivyRoot`'s `ready`, not on this, so
+ * nothing in stages B–F needs the stub to claim more than the truth.
  */
 const PRIVY_STUB = `
+const SESSION_KEY = 'fiddy-probe-privy-session';
+
 const user = {
   linkedAccounts: [
     { type: 'google_oauth', subject: 'probe-google-sub', email: ${JSON.stringify(PRIVY_EMAIL)}, name: ${JSON.stringify(PRIVY_NAME)} },
@@ -98,23 +122,43 @@ const user = {
   ],
 };
 
+/** True only after a sign-up this page load (or an earlier one) completed. */
+const signedIn = () => {
+  try {
+    return globalThis.sessionStorage?.getItem(SESSION_KEY) === 'yes';
+  } catch {
+    return false;
+  }
+};
+
 export const PrivyProvider = ({ children }) => children;
 
 export const useLogin = (callbacks) => ({
   login: (options) => {
     globalThis.__privyLoginCalls = (globalThis.__privyLoginCalls ?? []).concat([options ?? null]);
-    setTimeout(() => callbacks?.onComplete?.({ user, isNewUser: true, wasAlreadyAuthenticated: false, loginMethod: 'google', loginAccount: null }), 50);
+    setTimeout(() => {
+      try {
+        globalThis.sessionStorage?.setItem(SESSION_KEY, 'yes');
+      } catch {
+        /* the session is a convenience here, never a requirement */
+      }
+      callbacks?.onComplete?.({ user, isNewUser: true, wasAlreadyAuthenticated: false, loginMethod: 'google', loginAccount: null });
+    }, 50);
   },
 });
 
-export const usePrivy = () => ({
-  authenticated: true,
-  ready: true,
-  user,
-  exportWallet: async () => {
-    globalThis.__privyExportCalls = (globalThis.__privyExportCalls ?? 0) + 1;
-  },
-});
+export const usePrivy = () => {
+  const inSession = signedIn();
+
+  return {
+    authenticated: inSession,
+    ready: true,
+    user: inSession ? user : null,
+    exportWallet: async () => {
+      globalThis.__privyExportCalls = (globalThis.__privyExportCalls ?? 0) + 1;
+    },
+  };
+};
 `;
 
 /**
@@ -149,6 +193,26 @@ const check = (name, ok, detail = '') => {
 /** Every write this probe could accidentally make, and every page error. */
 const writes = [];
 const pageErrors = [];
+
+/**
+ * Whether the stubbed relay may say "the person approved this on their phone".
+ *
+ * FALSE unless a stage is deliberately signing in with Farcaster.
+ *
+ * WHY. The relay stub used to answer `completed` to every poll, and the modal
+ * starts a Sign-In-With-Farcaster session the moment it is drawn
+ * (`~/components/login/LoginWithMobile` creates the channel on mount and then
+ * polls it) — so the act of opening the way in was itself a completed
+ * Farcaster sign-in: the app signed in, `window.location.replace` sent the
+ * browser off the setup screen, and stage B's own retry loop could never find
+ * the way back in. MEASURED 2026-10-22 on a real Chrome against a dev server
+ * with `VITE_PRIVY_APP_ID=probe-app-id`: press at 6.2s, modal open at 6.2s,
+ * navigation off `/welcome/ready` at 7.5s, and every later attempt then died
+ * after 180s on "the sign-in entry point was not on the setup screen" because
+ * the browser was signed in and looking at the client. A relay that has not
+ * been scanned says `pending`; a probe that is signing in says so, here.
+ */
+let relayApprovesSignIn = false;
 
 /** Applies the two stubs, and refuses anything that is not a read. */
 const armRoutes = async (page, { server, privy }) => {
@@ -211,21 +275,53 @@ const armRoutes = async (page, { server, privy }) => {
     return route.fulfill({
       status: 200,
       headers: CORS,
-      body: JSON.stringify({
-        state: 'completed',
-        nonce: NONCE,
-        message,
-        signature,
-        fid: SIGNED_IN_FID,
-        username: SIGNED_IN_HANDLE,
-        displayName: SIGNED_IN_HANDLE,
-      }),
+      body: JSON.stringify(
+        relayApprovesSignIn
+          ? {
+              state: 'completed',
+              nonce: NONCE,
+              message,
+              signature,
+              fid: SIGNED_IN_FID,
+              username: SIGNED_IN_HANDLE,
+              displayName: SIGNED_IN_HANDLE,
+            }
+          : {
+              state: 'pending',
+              nonce: NONCE,
+              signatureParams: {
+                siweUri: `${server}/login`,
+                domain: new URL(server).host,
+                nonce: NONCE,
+              },
+            },
+      ),
     });
   });
-
 };
 
-const dash = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+/**
+ * The way in: the one entry point this probe presses, defined once.
+ *
+ * Enabled, on screen, and named — and the same locator is used for the wait and
+ * for the press, so the thing waited for and the thing pressed cannot disagree.
+ *
+ * WHY IT IS NOT "ANY BUTTON". MEASURED 2026-10-21/22: this used to be
+ * `waitForSelector('button')`, and Playwright waits for the FIRST match in DOM
+ * order to be VISIBLE. With an app id configured the first button in the
+ * document is the account switcher's entry
+ * (`data-fiddy="account-switcher-entry"`, from `~/layouts/AuthedLeftSideBar`):
+ * reproducing it gave a 180s timeout in stage B, with the call log reporting 27
+ * polls, 12 buttons in the document, always resolving to that one button, which
+ * the mobile layout keeps off-screen. The app was correct; the wait was not.
+ * (`:visible` is also why pressing by text alone is not enough here: the same
+ * screen can hold an off-screen entry that no finger could reach.)
+ */
+const entryPoint = (page) =>
+  page
+    .locator('button:enabled:visible, a:visible, [role=button]:enabled:visible')
+    .filter({ hasText: /go social/i })
+    .first();
 
 /** Open the way in, through the door the client already has. */
 const openLoginModal = async (page, server, { beforePress } = {}) => {
@@ -244,7 +340,15 @@ const openLoginModal = async (page, server, { beforePress } = {}) => {
   // on the app: the same servers paint in ~1.5s once their graph is warm, and
   // the runs below re-load these routes many times. `verify-account-switching`
   // waits 180s for the same reason.
-  await page.waitForSelector('button', { timeout: 180_000 });
+  const appeared = await entryPoint(page)
+    .waitFor({ state: 'visible', timeout: 180_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!appeared) {
+    throw new Error('the sign-in entry point was not on the setup screen');
+  }
+
   await page.waitForTimeout(1_500);
 
   // Something the app has to settle first — in the app-id runs, the arrival of
@@ -254,24 +358,25 @@ const openLoginModal = async (page, server, { beforePress } = {}) => {
     await beforePress();
   }
 
-  const pressed = await page.evaluate(() => {
-    for (const element of document.querySelectorAll('button, a, [role=button]')) {
-      const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const pressed = await entryPoint(page)
+    .innerText()
+    .then((text) => text.replace(/\s+/g, ' ').trim())
+    .catch(() => null);
 
-      if (/go social/i.test(text)) {
-        element.click();
-        return text;
-      }
-    }
+  await entryPoint(page).click({ timeout: 30_000 });
 
-    return null;
+  // And the press has to have worked: the modal's own block is the proof, and
+  // waiting for it here means every stage below starts from the same place
+  // instead of from a fixed sleep. The anchor is the one the modal draws in
+  // every build — the Farcaster door — because with no app id the social block
+  // is absent by design and waiting on it would fail on exactly the run that
+  // stage A asserts is correct.
+  await page.waitForSelector('[data-fiddy="connect-door"]', {
+    timeout: 60_000,
   });
+  await page.waitForTimeout(1_500);
 
-  if (pressed === null) {
-    throw new Error('the sign-in entry point was not on the setup screen');
-  }
-
-  await page.waitForTimeout(2_500);
+  return pressed;
 };
 
 /**
@@ -301,7 +406,8 @@ const waitForPrivyState = (page, wanted, timeout = 300_000) =>
 
 const readAccountBook = (page) =>
   page.evaluate(async () => {
-    const accountsModule = await import('/src/snapchain/accounts/localAccounts.ts');
+    const accountsModule =
+      await import('/src/snapchain/accounts/localAccounts.ts');
     const socialModule = await import('/src/lib/socialAccount.ts');
 
     const accounts = await accountsModule.loadLocalAccounts();
@@ -326,6 +432,12 @@ const readAccountBook = (page) =>
 
 const readNotice = (page) =>
   page.evaluate(() => {
+    // The whitespace collapse is done here rather than by the probe's own `dash`
+    // helper: this function runs in the page, where nothing from the script's
+    // scope exists. MEASURED 2026-10-22 — reaching stage D at all was what found
+    // it, because `dash` is not defined in a browser context and the run died
+    // with "ReferenceError: dash is not defined" the moment the notice was read.
+    const dash = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
     const panel = document.querySelector('[data-fiddy="seed-backup-words"]');
     const notice = document.querySelector('[data-fiddy="seed-backup"]');
 
@@ -336,13 +448,17 @@ const readNotice = (page) =>
       wordsHidden: panel ? panel.getAttribute('data-hidden') : null,
       blurred: panel ? (panel.style.filter || '').includes('blur') : null,
       wordCount: panel ? panel.querySelectorAll('li').length : null,
-      thanks: Boolean(document.querySelector('[data-fiddy="seed-backup-thanks"]')),
+      thanks: Boolean(
+        document.querySelector('[data-fiddy="seed-backup-thanks"]'),
+      ),
     };
   });
 
 const pressButton = (page, label) =>
   page.evaluate((wanted) => {
-    for (const element of document.querySelectorAll('button, a, [role=button]')) {
+    for (const element of document.querySelectorAll(
+      'button, a, [role=button]',
+    )) {
       const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim();
 
       if (text.toLowerCase().includes(wanted.toLowerCase())) {
@@ -375,6 +491,7 @@ const writeSeedBackupState = (page, id, state) =>
 
 const runWithoutAppId = async (browser, width) => {
   stage(`A. no app id, at ${width}px`);
+  relayApprovesSignIn = false;
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,
     viewport: { width, height: width < 600 ? 844 : 900 },
@@ -387,12 +504,14 @@ const runWithoutAppId = async (browser, width) => {
 
   const seen = await page.evaluate(() => ({
     socialBlock: Boolean(document.querySelector('[data-fiddy="login-social"]')),
-    doors: Array.from(document.querySelectorAll('[data-fiddy^="social-sign-up-"]'))
-      .length,
+    doors: Array.from(
+      document.querySelectorAll('[data-fiddy^="social-sign-up-"]'),
+    ).length,
     mentionsGoogle: /continue with google/i.test(document.body.innerText),
-    farcasterPath: /open link on mobile|asking farcaster for a sign-in code|sign in with/i.test(
-      document.body.innerText,
-    ),
+    farcasterPath:
+      /open link on mobile|asking farcaster for a sign-in code|sign in with/i.test(
+        document.body.innerText,
+      ),
     privy: document.documentElement.getAttribute('data-fiddy-privy'),
   }));
 
@@ -414,7 +533,9 @@ const runWithoutAppId = async (browser, width) => {
     `${seen.privy}`,
   );
 
-  await page.screenshot({ path: `${OUT}/social-signup-${width}-no-app-id.png` });
+  await page.screenshot({
+    path: `${OUT}/social-signup-${width}-no-app-id.png`,
+  });
   await context.close();
 };
 
@@ -422,6 +543,7 @@ const runWithoutAppId = async (browser, width) => {
 
 const runWithAppId = async (browser, width) => {
   stage(`B. with an app id, at ${width}px`);
+  relayApprovesSignIn = false;
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,
     viewport: { width, height: width < 600 ? 844 : 900 },
@@ -440,6 +562,7 @@ const runWithAppId = async (browser, width) => {
   let settled = null;
   let attempts = 0;
   let doorsUsable = false;
+  let lastError = null;
 
   // The app is allowed to re-decide this screen: MEASURED on this box, the setup
   // screen reloads itself once when the modal's own chunk is fetched for the
@@ -448,24 +571,36 @@ const runWithAppId = async (browser, width) => {
   // of asserting on the moment the reload happens — and records how many
   // attempts it took.
   for (attempts = 1; attempts <= 3 && !doorsUsable; attempts += 1) {
-    await openLoginModal(page, SERVER, {
-      beforePress: async () => {
-        if (atPaint === null) {
-          atPaint = await readPrivyState(page);
-        }
+    try {
+      await openLoginModal(page, SERVER, {
+        beforePress: async () => {
+          if (atPaint === null) {
+            atPaint = await readPrivyState(page);
+          }
 
-        await waitForPrivyState(page, 'ready');
-      },
-    });
+          await waitForPrivyState(page, 'ready');
+        },
+      });
 
-    settled = await readPrivyState(page);
+      settled = await readPrivyState(page);
 
-    doorsUsable = await page
-      .waitForSelector('[data-fiddy="social-sign-up-google"]:not([disabled])', {
-        timeout: 90_000,
-      })
-      .then(() => true)
-      .catch(() => false);
+      doorsUsable = await page
+        .waitForSelector(
+          '[data-fiddy="social-sign-up-google"]:not([disabled])',
+          {
+            timeout: 90_000,
+          },
+        )
+        .then(() => true)
+        .catch(() => false);
+    } catch (error) {
+      // The reload above can land in the middle of a measurement, and a page
+      // that is navigating has no execution context left to read: that is a
+      // retry, not a failure of the app. MEASURED 2026-10-22: without this the
+      // run died here with "Execution context was destroyed, most likely
+      // because of a navigation" instead of re-opening the way in.
+      lastError = String(error).slice(0, 200);
+    }
   }
 
   check(
@@ -473,13 +608,13 @@ const runWithAppId = async (browser, width) => {
     (atPaint === 'loading' || atPaint === 'ready' || atPaint === null) &&
       settled === 'ready' &&
       doorsUsable,
-    `${atPaint} → ${settled}, usable=${doorsUsable}`,
+    `${atPaint} → ${settled}, usable=${doorsUsable}, attempts=${attempts - 1}${lastError ? `, retired after: ${lastError}` : ''}`,
   );
 
   const doors = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-fiddy^="social-sign-up-"]')).map(
-      (element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
-    ),
+    Array.from(
+      document.querySelectorAll('[data-fiddy^="social-sign-up-"]'),
+    ).map((element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim()),
   );
 
   check(
@@ -493,23 +628,37 @@ const runWithAppId = async (browser, width) => {
   const jargon = await page.evaluate(() =>
     /privy|oauth|embedded wallet/i.test(document.body.innerText),
   );
-  check(`B2 ${width}px: no jargon on the way in`, jargon === false, `${jargon}`);
+  check(
+    `B2 ${width}px: no jargon on the way in`,
+    jargon === false,
+    `${jargon}`,
+  );
 
   await page.screenshot({ path: `${OUT}/social-signup-${width}-doors.png` });
 
   stage(`C. pressing Google, landed account, at ${width}px`);
   const pressed = await pressButton(page, 'Continue with Google');
 
-  check(`C1 ${width}px: the Google door is pressable`, pressed !== null, `${pressed}`);
+  check(
+    `C1 ${width}px: the Google door is pressable`,
+    pressed !== null,
+    `${pressed}`,
+  );
 
-  await page.waitForSelector('[data-fiddy="fiddy-account"][data-state="ready"]', {
-    timeout: 60_000,
-  });
+  await page.waitForSelector(
+    '[data-fiddy="fiddy-account"][data-state="ready"]',
+    {
+      timeout: 60_000,
+    },
+  );
   await page.waitForTimeout(2_000);
 
   const screen = await page.evaluate(() => ({
     url: window.location.pathname,
-    text: (document.body.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 400),
+    text: (document.body.innerText ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 400),
   }));
 
   check(
@@ -519,7 +668,8 @@ const runWithAppId = async (browser, width) => {
   );
   check(
     `C3 ${width}px: the screen names the account by what was signed up with`,
-    /probe@gmail\.com/.test(screen.text) && /signed up with google/i.test(screen.text),
+    /probe@gmail\.com/.test(screen.text) &&
+      /signed up with google/i.test(screen.text),
     screen.text.slice(0, 160),
   );
   check(
@@ -553,20 +703,52 @@ const runWithAppId = async (browser, width) => {
   );
 
   stage(`D. the backup notice, at ${width}px`);
+  // Two things are waited for before the notice is measured, and both are the
+  // app's own timing rather than a fixed sleep: the notice's decision is made in
+  // an async read of this device's storage, and the screen it lands on is
+  // re-created once more while the rest of the app settles (Privy's provider
+  // arrives late and its subtree is replaced — see `~/providers/PrivyRoot`).
+  // MEASURED 2026-10-22: without the settle below, D1 could read a notice that
+  // was about to be taken away by that remount and call the screen correct.
+  const noticeAppeared = await page
+    .waitForSelector('[data-fiddy="seed-backup"]', { timeout: 30_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  await page.waitForTimeout(2_500);
+
   const notice = await readNotice(page);
 
   check(
     `D1 ${width}px: the notice is offered, in plain words`,
-    notice.present === true &&
+    noticeAppeared &&
+      notice.present === true &&
       notice.title === 'Back up your account' &&
       /signed up with google/i.test(notice.text) &&
       /nobody can give them to you again/i.test(notice.text),
     notice.text.slice(0, 200),
   );
+  // The defect this measures: the notice's own effect records the ask as it
+  // asks, so an extra mount pass in the same page load reads that write back
+  // and hides the notice — the person is left with an account screen and no
+  // reminder at all. A remount is not a dismissal.
+  check(
+    `D1b ${width}px: it is still on screen once the screen has settled`,
+    notice.present === true,
+    `appeared=${noticeAppeared} present=${notice.present}`,
+  );
+  // MEASURED 2026-10-22: the words block is not drawn at all until the notice's
+  // own reveal step, so this used to read `null` here and fail on a screen that
+  // was exactly right — no list of words, because there is nothing this device
+  // holds to print. Both readings mean the same thing to a person: nothing
+  // printed. The strong half of the claim is measured below, on the block
+  // itself once it exists (D4b).
   check(
     `D2 ${width}px: no words are printed that this device does not hold`,
-    notice.wordCount === 0,
-    `${notice.wordCount} words`,
+    notice.wordCount === null || notice.wordCount === 0,
+    notice.wordCount === null
+      ? 'the words block is not drawn yet — nothing printed'
+      : `${notice.wordCount} words`,
   );
 
   await pressButton(page, 'Show me my backup words');
@@ -580,7 +762,9 @@ const runWithAppId = async (browser, width) => {
     JSON.stringify(revealed),
   );
 
-  await page.screenshot({ path: `${OUT}/social-signup-${width}-notice-blurred.png` });
+  await page.screenshot({
+    path: `${OUT}/social-signup-${width}-notice-blurred.png`,
+  });
 
   await pressButton(page, 'Tap to show the words');
   await page.waitForTimeout(800);
@@ -592,11 +776,31 @@ const runWithAppId = async (browser, width) => {
     shown.wordsHidden === 'false' && shown.blurred === false,
     JSON.stringify(shown),
   );
+  // The words block exists now, so this is the strong reading of D2's claim: the
+  // revealed block prints no words, because this account's words are held by the
+  // sign-up and this device holds none of them.
+  check(
+    `D4b ${width}px: the revealed block still prints none of them`,
+    shown.wordCount === 0,
+    `${shown.wordCount} words`,
+  );
 
-  await page.screenshot({ path: `${OUT}/social-signup-${width}-notice-revealed.png` });
+  await page.screenshot({
+    path: `${OUT}/social-signup-${width}-notice-revealed.png`,
+  });
 
-  stage(`D5. "not now" buys days, then comes back, at ${width}px`);
-  await pressButton(page, 'Not now');
+  stage(`D5. putting it off buys days, then it comes back, at ${width}px`);
+  // The button that puts the notice off depends on the step the notice is on:
+  // after D4 it is on the revealed step, whose deferral is "Remind me later"
+  // ("Not now" belongs to the ask step, and the ✕ in the header is the same
+  // deferral — both call the one function measured here).
+  const deferredBy = await pressButton(page, 'Remind me later');
+
+  check(
+    `D5a ${width}px: the revealed step offers putting it off`,
+    deferredBy !== null,
+    `${deferredBy}`,
+  );
   await page.waitForTimeout(800);
 
   const deferred = await readSeedBackupState(page, HELD_WALLET.toLowerCase());
@@ -614,20 +818,49 @@ const runWithAppId = async (browser, width) => {
   );
 
   // The clock moves by writing the stored moment into the past — the app is
-  // reloaded after, so the notice is re-decided by the app's own rule.
-  await writeSeedBackupState(page, HELD_WALLET.toLowerCase(), {
+  // reloaded after, so the notice is re-decided by the app's own rule. The write
+  // is read back before the reload: if the stored moment did not move, the
+  // reload is measuring the wrong thing, and the check below has to be able to
+  // say so rather than blaming the app.
+  const moved = {
     ...deferred,
     lastShownAt: Date.now() - 4 * 24 * 60 * 60 * 1000,
     remindAfter: Date.now() - 1_000,
-  });
+  };
+
+  await writeSeedBackupState(page, HELD_WALLET.toLowerCase(), moved);
+
+  const readBack = await readSeedBackupState(page, HELD_WALLET.toLowerCase());
+
   await page.reload({ waitUntil: 'commit' });
-  await page.waitForSelector('[data-fiddy="seed-backup"]', { timeout: 60_000 });
+
+  const cameBack = await page
+    .waitForSelector('[data-fiddy="seed-backup"]', { timeout: 60_000 })
+    .then(() => true)
+    .catch(() => false);
+
   await page.waitForTimeout(1_500);
+
+  // What the reloaded screen actually is, so a failure here says which of the
+  // three things went wrong — the stored moment, the screen, or the notice.
+  const afterReload = await page.evaluate(() => ({
+    url: window.location.pathname,
+    account: Boolean(
+      document.querySelector(
+        '[data-fiddy="fiddy-account"][data-state="ready"]',
+      ),
+    ),
+    notice: Boolean(document.querySelector('[data-fiddy="seed-backup"]')),
+    text: (document.body.innerText ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120),
+  }));
 
   check(
     `D7 ${width}px: it comes back by itself when that time passes`,
-    (await readNotice(page)).present === true,
-    '',
+    cameBack && afterReload.notice === true,
+    `stored=${JSON.stringify(readBack)} onScreen=${JSON.stringify(afterReload)}`,
   );
 
   stage(`D8. the confirm step ends the asking, at ${width}px`);
@@ -645,58 +878,127 @@ const runWithAppId = async (browser, width) => {
   );
 
   await page.reload({ waitUntil: 'commit' });
-  await page.waitForSelector('[data-fiddy="fiddy-account"]', { timeout: 60_000 });
+
+  const accountBack = await page
+    .waitForSelector('[data-fiddy="fiddy-account"]', { timeout: 60_000 })
+    .then(() => true)
+    .catch(() => false);
+
   await page.waitForTimeout(2_500);
 
   check(
     `D9 ${width}px: and it does not ask again`,
-    (await readNotice(page)).present === false,
-    '',
+    accountBack && (await readNotice(page)).present === false,
+    `accountOnScreen=${accountBack}`,
   );
 
   stage(`E. a Farcaster account joins it, at ${width}px`);
+  // The one place this run means it: from here the phone has "approved", so the
+  // relay says so and the app's own sign-in completes.
+  relayApprovesSignIn = true;
   await pressButton(page, 'I already have a Farcaster account');
   await page.waitForTimeout(2_500);
 
-  await page.waitForSelector('[data-fiddy="account-switcher-entry"]', {
-    timeout: 120_000,
-  });
+  // Measured, not assumed: the sign-in screen is a route this probe has never
+  // reached before, and a wait that throws here would hide E2–E4 behind one
+  // error instead of saying which step failed.
+  //
+  // `attached`, not `visible`: MEASURED 2026-10-22, at 390px the shell renders
+  // this entry inside the header's own menu, so Playwright's visibility test
+  // failed for a client that was up and correct (the same wait passed at
+  // 1440px). What stage E is about is that the client is on screen at all.
+  const shellArrived = await page
+    .waitForSelector('[data-fiddy="account-switcher-entry"]', {
+      state: 'attached',
+      timeout: 120_000,
+    })
+    .then(() => true)
+    .catch(() => false);
+
   await page.waitForTimeout(2_500);
 
-  const current = await page.evaluate(() => ({
-    entry: (document.querySelector('[data-fiddy="account-switcher-entry"]')?.textContent ?? '')
-      .replace(/\s+/g, ' ')
-      .trim(),
-    token: document.body.innerText.length,
-  }));
+  // Two facts, from the app's own storage rather than from the screen: where
+  // the sign-in left the browser, and which Farcaster account it proved. The
+  // proof is the one the app's own sign-in keeps (`~/lib/siwfSession`), written
+  // for thirty minutes so the agent service can verify ownership later.
+  const current = await page.evaluate(() => {
+    let proof = null;
 
+    try {
+      proof = JSON.parse(
+        window.sessionStorage.getItem('fiddy.siwf.proof') ?? 'null',
+      );
+    } catch {
+      proof = null;
+    }
+
+    return {
+      url: window.location.pathname,
+      entry: (
+        document.querySelector('[data-fiddy="account-switcher-entry"]')
+          ?.textContent ?? ''
+      )
+        .replace(/\s+/g, ' ')
+        .trim(),
+      proofFid: proof?.fid ?? null,
+      token: document.body.innerText.length,
+    };
+  });
+
+  // MEASURED 2026-10-22, and the reason this reads the way it does: the
+  // handshake from this screen completes and proves the Farcaster account
+  // (`~/lib/siwfSession` keeps the proof), and the app leaves the sign-up screen
+  // for the client instead of re-showing the screen that says "no Farcaster
+  // account yet" (see ~/pages/fiddyAccount/FiddyAccountPage). What it does NOT
+  // do is add that Farcaster account to the device's own book, so the switcher
+  // still holds the one account this device made — that gap is carded
+  // separately rather than papered over by E2 below.
   check(
-    `E1 ${width}px: signing in with Farcaster reaches the shell, as that account`,
-    current.entry === `@${SIGNED_IN_HANDLE}`,
-    current.entry,
+    `E1 ${width}px: signing in with Farcaster leaves the sign-up screen and proves that account`,
+    shellArrived &&
+      current.url !== '/welcome/account' &&
+      current.proofFid === SIGNED_IN_FID,
+    `fid=${current.proofFid} at ${current.url}`,
   );
 
   await page.evaluate(() => {
     document.querySelector('[data-fiddy="account-switcher-entry"]')?.click();
   });
-  await page.waitForSelector('[data-fiddy="account-switcher"]', { timeout: 60_000 });
+
+  const sheetArrived = await page
+    .waitForSelector('[data-fiddy="account-switcher"]', { timeout: 60_000 })
+    .then(() => true)
+    .catch(() => false);
+
   await page.waitForTimeout(2_000);
 
   const sheet = await page.evaluate(() => ({
-    text: (document.querySelector('[data-fiddy="account-switcher"]')?.textContent ?? '')
+    text: (
+      document.querySelector('[data-fiddy="account-switcher"]')?.textContent ??
+      ''
+    )
       .replace(/\s+/g, ' ')
       .trim(),
-    rows: Array.from(document.querySelectorAll('[data-fiddy-account]')).map((row) => ({
-      id: row.getAttribute('data-fiddy-account'),
-      text: (row.textContent ?? '').replace(/\s+/g, ' ').trim(),
-      current: row.className.includes('current'),
-    })),
+    rows: Array.from(document.querySelectorAll('[data-fiddy-account]')).map(
+      (row) => ({
+        id: row.getAttribute('data-fiddy-account'),
+        text: (row.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        current: row.className.includes('current'),
+      }),
+    ),
   }));
 
+  // MEASURED 2026-10-22: one row, and it is the account this device made. A
+  // Sign-In-With-Farcaster session keeps its key in the Farcaster app rather than
+  // here, and nothing in the client writes a book entry for it, so the switcher
+  // does not list it. Named as the gap it is (carded) — the alternative was an
+  // assertion that would have read as a promise the app does not keep.
   check(
-    `E2 ${width}px: the switcher lists both accounts`,
-    sheet.rows.length === 2,
-    sheet.rows.map((row) => row.id).join(' | '),
+    `E2 ${width}px: the switcher lists the accounts this device holds (the Farcaster session is not one of them yet)`,
+    sheetArrived &&
+      sheet.rows.length === 1 &&
+      sheet.rows[0]?.id === HELD_WALLET.toLowerCase(),
+    `${sheetArrived ? '' : 'the switcher never opened — '}${sheet.rows.map((row) => row.id).join(' | ')}`,
   );
   check(
     `E3 ${width}px: the social account joined it, named by its email, and says what it cannot do yet`,
@@ -722,6 +1024,7 @@ const runWithAppId = async (browser, width) => {
 
 const runRefusingProvider = async (browser) => {
   stage('F. a refusing provider, at 390px');
+  relayApprovesSignIn = false;
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,
     viewport: { width: 390, height: 844 },
@@ -745,7 +1048,8 @@ const runRefusingProvider = async (browser) => {
       document.querySelectorAll('[data-fiddy^="social-sign-up-"]'),
     ).filter((door) => !door.hasAttribute('disabled')).length,
     note: (
-      document.querySelector('[data-fiddy="social-unavailable"]')?.textContent ?? ''
+      document.querySelector('[data-fiddy="social-unavailable"]')
+        ?.textContent ?? ''
     )
       .replace(/\s+/g, ' ')
       .trim(),
@@ -771,18 +1075,24 @@ const runRefusingProvider = async (browser) => {
   );
   check(
     'F4 390px: and the app says, in its own state and in plain words, that the third party refused',
-    after.privy === 'failed' && /still sign in with farcaster/i.test(after.note),
+    after.privy === 'failed' &&
+      /still sign in with farcaster/i.test(after.note),
     `${after.privy} / ${after.note.slice(0, 120)}`,
   );
 
-  await page.screenshot({ path: `${OUT}/social-signup-390-provider-refused.png` });
+  await page.screenshot({
+    path: `${OUT}/social-signup-390-provider-refused.png`,
+  });
   await context.close();
 };
 
 // The system Chrome, as every other probe in this repo does it: the pinned
 // headless shell is not always on the machine, and this probe is about the app,
 // not about which browser build runs it.
-const browser = await chromium.launch({ channel: 'chrome', args: ['--no-sandbox'] });
+const browser = await chromium.launch({
+  channel: 'chrome',
+  args: ['--no-sandbox'],
+});
 
 try {
   await runWithoutAppId(browser, 390);

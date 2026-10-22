@@ -17,6 +17,12 @@
  * long enough to be an interruption and short enough that a person who signed up
  * on Monday still remembers why the notice is there on Thursday.
  *
+ * WHAT A VISIT IS, EXACTLY. The ask is recorded here as it is asked, which is
+ * what stops a reload from being a fresh ask. A screen that is built again
+ * *inside the same page load* is not a second visit either: it must not hide a
+ * notice the person has not answered — see `asksOnScreenThisPageLoad` in
+ * `~/components/fiddy/seedBackup/SeedBackupNotice`.
+ *
  * WHAT THIS MODULE DELIBERATELY DOES NOT DO. It never reads, stores or compares
  * the words themselves. It stores four facts — when it last asked, how many
  * times, when to ask again, and whether the person said it was done — under one
