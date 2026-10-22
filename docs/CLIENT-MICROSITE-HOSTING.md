@@ -189,6 +189,33 @@ defect, and each refused by name:
 | `no-tag` | the `fc:miniapp` line removed from the page | `no page in this tree declares an fc:miniapp — the Deploy a Node mini app would launch with no splash, no card and no button` |
 | `missing-splash` | the splash deleted | `the tree carries no …/assets/fiddy-splash.png for the splash it asks for` |
 
+## Verified on the live host (2026-10-22 — the splash fix)
+
+Deployed as `57a99a0` (PR #30, still open at the time of writing; live is that
+commit's `site/` tree, byte for byte). Every row was measured, and measured
+again independently of the deploy script's own output.
+
+| Check | Result |
+| --- | --- |
+| The deploy's own ritual | all four gates passed: the frozen tree's gate, the disk gate (**7 files**, sha256 read back off the box), the served gate (every file fetched from the ORIGIN by IP), and the gate run over the **served mirror** |
+| `/client/assets/fiddy-splash.png` at the CDN | 200 `image/png`, `content-length 8226`, sha256 `4175fcbf…` |
+| … at the ORIGIN (`--resolve fiddy.fun:443:187.127.148.194`) | 200 `image/png`, `content-length 8226`, sha256 `4175fcbf…` — the same bytes |
+| … the same bytes as the repo file | `site/assets/fiddy-splash.png` sha256 `4175fcbf…` |
+| The size, read from the PNG's own IHDR | **200×200** (`readUInt32BE(16/20)` on the live bytes), against 512×512 before |
+| The drawing's box, measured on the LIVE bytes with `apps/farcaster-web/scripts/lib/png.mjs` | mark 100×96 at (50,52), centre **(99.5,99.5)** on a canvas whose centre is (100,100) — **0.5px off**, fills 48% of the square |
+| The ground, against the page's own declaration | live PNG ground `#161715` = the `splashBackgroundColor` the live `/client/deploy/` declares; before it was `#f8f7f0` |
+| `/client/deploy/` | 200 `text/html`, byte-identical at the CDN and at the origin, and byte-identical to `site/deploy/index.html` (sha256 `f8f5aedf…`); its `fc:miniapp` still names `splashImageUrl /client/assets/fiddy-splash.png`, `imageUrl /client/assets/deploy-card.png`, launch url `/client/deploy/`, name `Deploy a Node` |
+| The other six files in the tree | already byte-identical live before the deploy (`git show` copies vs `sha256sum` on the box), so this deploy changed **one file**: the splash |
+| The edge's copy after the cut-over | the plain CDN fetch returns the NEW bytes (the file's name never changes, so this was the risk): `cf-cache-status: EXPIRED` → Cloudflare revalidated from the origin and served them |
+| What did NOT change | `/client`, `/client/`, `/client/zh/`, `/client/assets/deploy-card.png`, `…/miniapp-sdk.min.js`, `…/open-in-cloud-shell.svg` — same sha256 live as before; `fiddy-59s.mp4`/`.vtt` still on the host (the upload is additive) |
+
+**Not verified**: the launch transition inside a real Farcaster host, for the same
+reason card t_28b3612c could not verify it — that needs a client with the mini app
+open, and what a host does with a 200×200 `splashImageUrl` over
+`splashBackgroundColor` is the host's code. What is verified is everything the host
+reads: the page's declaration, the bytes at the URL it names, the picture's own
+size, its ground, and where its drawing sits.
+
 ## Verification performed (2026-10-18)
 
 | Check | Result |

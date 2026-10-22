@@ -94,16 +94,25 @@ fi
 
 say "3/5 upload to $HOST:$TARGET (additive: site/ is not the whole directory)"
 ssh_ "mkdir -p $TARGET"
-tar czf - -C "$STAGE/site" --exclude="$SKIP" . | ssh_ "tar xzf - -C $TARGET"
+# `--no-xattrs`: macOS stamps `com.apple.provenance` on the files it just wrote,
+# and without this bsdtar carries each one as a `LIBARCHIVE.xattr` pax header,
+# which makes the remote GNU tar print a warning per entry. Step 4 must stay
+# readable — a real tar failure prints the same way.
+tar czf - --no-xattrs -C "$STAGE/site" --exclude="$SKIP" . | ssh_ "tar xzf - -C $TARGET"
 ssh_ "chmod -R a+rX $TARGET"
 
 say "4/5 disk gate on the box: sha256 of every uploaded file, read back"
 fail=0
+count=0
 while IFS= read -r -d '' file; do
   rel=${file#"$STAGE/site/"}
   [ "./$rel" = "$SKIP" ] && continue
   local_sha=$(shasum -a 256 "$file" | cut -d' ' -f1)
-  remote_sha=$(ssh_ "sha256sum '$TARGET/$rel' | cut -d' ' -f1")
+  # `-n`, because ssh reads its own stdin: without it the first call eats the
+  # rest of the file list and this gate silently checks ONE file (measured while
+  # writing this script — it reported a single row and looked like a pass).
+  remote_sha=$(ssh -n -o BatchMode=yes "$HOST" "sha256sum '$TARGET/$rel' | cut -d' ' -f1")
+  count=$((count + 1))
   if [ "$local_sha" = "$remote_sha" ]; then
     printf '   %s  %s  %s\n' "${local_sha:0:12}" "$(du -h "$file" | cut -f1)" "$rel"
   else
@@ -111,6 +120,8 @@ while IFS= read -r -d '' file; do
     fail=1
   fi
 done < <(find "$STAGE/site" -type f -print0 | sort -z)
+[ "$count" -gt 0 ] || { echo "no file was checked — the tree is empty" >&2; exit 1; }
+echo "   $count files, byte-for-byte the frozen tree"
 [ "$fail" = 0 ] || { echo "the box does not hold the frozen tree — upload incomplete" >&2; exit 1; }
 
 say "5/5 served gate against the ORIGIN ($ORIGIN_IP, no cache in the path)"
@@ -127,7 +138,7 @@ while IFS= read -r -d '' file; do
     *) url="https://$ORIGIN_HOST/client/$rel" ;;
   esac
   mkdir -p "$(dirname "$STAGE/live/$rel")"
-  code=$(curl -sk --resolve "$ORIGIN_HOST:443:$ORIGIN_IP" -o "$STAGE/live/$rel" -w '%{http_code}' "$url")
+  code=$(curl -sk --resolve "$ORIGIN_HOST:443:$ORIGIN_IP" -o "$STAGE/live/$rel" -w '%{http_code}' "$url" < /dev/null)
   [ "$code" = 200 ] || { echo "the origin answers $code for $url" >&2; exit 1; }
   if cmp -s "$file" "$STAGE/live/$rel"; then
     printf '   origin  %s  %s  %s\n' "$code" "$(shasum -a 256 "$STAGE/live/$rel" | cut -c1-12)" "$url"
