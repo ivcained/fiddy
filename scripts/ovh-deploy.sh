@@ -75,7 +75,10 @@ VOL_ID="$(ovh POST "/cloud/project/$P/volume" "{\"region\":\"$REGION\",\"size\":
 USER_DATA='#!/bin/bash
 set -e
 curl -fsSL https://get.docker.com | sh
-apt-get install -y cron && systemctl enable --now cron
+apt-get install -y cron git && systemctl enable --now cron
+git clone https://github.com/ivcained/fiddy /opt/fiddy 2>/dev/null || git -C /opt/fiddy pull --ff-only
+chmod +x /opt/fiddy/bin/fiddy
+ln -sf /opt/fiddy/bin/fiddy /usr/local/bin/fiddy
 for d in /dev/sdb /dev/vdb; do
   if [ -b "$d" ]; then
     mkfs.ext4 -F "$d" || true

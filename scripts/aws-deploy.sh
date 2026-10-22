@@ -55,6 +55,11 @@ curl -fsSL https://get.docker.com | bash
 usermod -aG docker ubuntu
 apt-get install -y cron
 systemctl enable --now cron
+# Install the fiddy CLI system-wide so `fiddy` resolves from any shell/session.
+apt-get install -y git
+git clone https://github.com/ivcained/fiddy /opt/fiddy 2>/dev/null || git -C /opt/fiddy pull --ff-only
+chmod +x /opt/fiddy/bin/fiddy
+ln -sf /opt/fiddy/bin/fiddy /usr/local/bin/fiddy
 EOF
 
 IID="$(aws ec2 describe-instances --region "$REGION" --filters "Name=tag:Name,Values=$NAME" "Name=instance-state-name,Values=pending,running" --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null || true)"

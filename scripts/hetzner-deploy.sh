@@ -46,7 +46,10 @@ VOL_ID="$(hz POST "/volumes" "{\"name\":\"fiddy-node-data\",\"size\":$VOL_GB,\"l
 USER_DATA='#!/bin/bash
 set -e
 curl -fsSL https://get.docker.com | sh
-apt-get install -y cron && systemctl enable --now cron
+apt-get install -y cron git && systemctl enable --now cron
+git clone https://github.com/ivcained/fiddy /opt/fiddy 2>/dev/null || git -C /opt/fiddy pull --ff-only
+chmod +x /opt/fiddy/bin/fiddy
+ln -sf /opt/fiddy/bin/fiddy /usr/local/bin/fiddy
 for i in $(seq 1 30); do
   DEV=$(ls /dev/disk/by-id/scsi-0HC_Volume_* 2>/dev/null | head -1) && break
   sleep 2
