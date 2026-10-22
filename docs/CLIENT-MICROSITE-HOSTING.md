@@ -191,9 +191,11 @@ defect, and each refused by name:
 
 ## Verified on the live host (2026-10-22 — the splash fix)
 
-Deployed as `57a99a0` (PR #30, still open at the time of writing; live is that
-commit's `site/` tree, byte for byte). Every row was measured, and measured
-again independently of the deploy script's own output.
+Deployed from this branch's `site/` tree (PR #30): the tree is byte-identical in
+every commit on the branch — `57a99a0` carries it, and the commit after it
+(`7d70677`) touches only this document and the deploy script it describes — so
+the live bytes are the branch's `site/` exactly. Every row was measured, and
+measured again independently of the deploy script's own output.
 
 | Check | Result |
 | --- | --- |
