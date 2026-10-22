@@ -251,6 +251,10 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   <p class="dim">This installs Docker and the official Snapchain bootstrap on your server and starts syncing.
   You now run a <strong>read node</strong>: it follows the chain, stores the full state, and serves the HTTP
   (<code class="inline">:3381</code>) and gRPC (<code class="inline">:3383</code>) APIs. Anyone can run one. No permission, no API keys.</p>
+  <p class="dim" style="font-size:14px">On Linux the CLI installs the Docker <em>engine</em> itself (<code class="inline">get.docker.com</code>,
+  adds you to the docker group) and asks you to log back in once — there is no Docker Desktop on a headless box.
+  On macOS it offers Docker Desktop instead. First thing to know: the CLI is <code class="inline">bin/fiddy</code> —
+  <code class="inline">export PATH="$PWD/bin:$PATH"</code> after cloning, or every command says <code class="inline">fiddy: command not found</code>.</p>
   <pre><span class="k">fiddy node up</span>      <span class="c"># install, start, wait for the API to answer</span>
 <span class="k">fiddy node status</span>  <span class="c"># sync progress</span>
 <span class="k">fiddy node logs</span>    <span class="c"># tail the node</span>
