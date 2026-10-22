@@ -9,7 +9,11 @@
  * nothing. A well-formed ask from a real app is answered `unavailable` here,
  * until the slices that can do the work land behind their own approval (S2
  * `draft`/`post`, S3 `remind`) — the honest state for a shell that has no path
- * for something yet, instead of a pretend success.
+ * for something yet, instead of a pretend success. Those slices reach this
+ * channel through the one optional seam below, `answerAsk`: the ask arrives
+ * validated, counted and addressed, and the answer comes back in their own
+ * time. Every rule of this file still holds for it — the pin, the envelope, the
+ * one-shot id, the duplicate window, the budget, the mute and the sentences.
  *
  * Why a channel of Fiddy's own rather than a member on the spec's wire: the host
  * answers a message only through a closed `switch` over the spec's own members
@@ -95,14 +99,11 @@ export type AgentAskState =
   | 'failed';
 
 /**
- * §6, copied exactly. These are shown to readers through the app's own UI, so
- * they keep the product's jargon ban and each one is a fact, not a shrug.
- *
- * One flag for the next slice, not a re-opened decision: `posted`'s sentence is
- * §6's own and it says "node", which this card's copy rule keeps out of anything
- * a reader or an app author sees. The design of record is copied here verbatim
- * rather than silently edited, and S2 has to settle that word before it ever
- * emits `posted` (the card's comment thread names it).
+ * §6, copied exactly, with one word settled by S2: §6's `posted` sentence says
+ * "node", and this product's jargon ban keeps that word out of anything a reader
+ * or an app author sees. The card that owns the state settled it as "network",
+ * which keeps §6's fact (the owner approved it and the write is visible) and
+ * drops the banned word. Everything else is §6's own wording.
  */
 export const AGENT_ASK_SENTENCES: Record<AgentAskState, string> = {
   invalid: 'That ask was not something Fiddy can do.',
@@ -113,7 +114,7 @@ export const AGENT_ASK_SENTENCES: Record<AgentAskState, string> = {
   declined: 'The person said not now.',
   not_permitted: 'Fiddy does not hand what your agent says to an app.',
   drafted: 'A draft is open in the composer.',
-  posted: "Fiddy's owner approved it, and Fiddy's own node shows the cast.",
+  posted: "Fiddy's owner approved it, and the network shows the cast.",
   unknown:
     "Fiddy's owner approved it, but nothing on the network shows it yet, so Fiddy will not say it went out.",
   asked: 'Your agent was asked; the answer stays with its owner.',
@@ -177,6 +178,44 @@ export interface AgentAskChannelOptions {
   mutes?: AgentAskMuteStore;
   /** Injectable clock, for the 30 s duplicate window. */
   now?: () => number;
+  /**
+   * The seam the slices that *do* something answer through (S2's `draft` and
+   * `post`, S3's `remind`). Everything above stays this channel's: the pin on
+   * the frame's window and origin, the envelope, the one-shot ids, the 30 s
+   * duplicate window, the 3-ask budget, the reader's mute and the sentences.
+   *
+   * An ask that reaches here has already been validated, counted and addressed.
+   * Return `true` when this handler will answer it (the channel then says
+   * nothing, and nothing else is answered for that id), and answer *later* with
+   * `agentAskAnswer(envelope.id, state)` — the effect is a reader's decision, a
+   * chat message and a composer, so it cannot be this file's synchronous return.
+   * Return `false`, or leave this out entirely, and a well-formed ask is
+   * `unavailable` exactly as it is today: a shell with no path for something
+   * says so instead of pretending.
+   */
+  answerAsk?: (
+    envelope: AgentAskEnvelope,
+    deferral: AgentAskDeferral,
+  ) => boolean;
+}
+
+/**
+ * What a deferred answer is given: the ask itself, the origin the answer must
+ * be addressed to, and the one line back the channel needs so §4's 30 s
+ * duplicate window can replay the truth rather than a placeholder.
+ */
+export interface AgentAskDeferral {
+  /** The origin the window on screen was launched with. */
+  origin: string;
+  /** The frame's own window object, as `handle` received it. */
+  frameWindow: unknown;
+  /**
+   * What the ask ended as. Optional to call and harmless to call twice: until
+   * it is called, a duplicate of this ask is handed to the handler again (a
+   * second send while the reader is deciding is the same decision), and after
+   * it is called, an identical ask inside 30 s is answered from it.
+   */
+  settled: (state: AgentAskState) => void;
 }
 
 export interface AgentAskChannel {
@@ -378,9 +417,50 @@ interface AgentAskWindowState {
     ask: AgentAskKind;
     text: string;
     at: number;
-    state: AgentAskState;
+    /**
+     * What that ask was answered. Absent while the slices that do the work are
+     * still deciding it (a deferred ask): a duplicate then joins the decision
+     * already in front of the reader instead of being told a placeholder.
+     */
+    state?: AgentAskState;
   };
 }
+
+/**
+ * The context a deferred answer is given, built in one place so the two call
+ * sites (a fresh ask, and a duplicate of one still being decided) cannot drift.
+ *
+ * `settled` writes the ask's own outcome back into §4's duplicate window, and
+ * only for the entry it was built for: an ask that arrived after this one has
+ * its own record and its own answer, and a late verdict must not overwrite it.
+ */
+const deferralFor = (
+  envelope: AgentAskEnvelope,
+  origin: string,
+  frameWindow: unknown,
+  state: AgentAskWindowState,
+  at: number,
+): AgentAskDeferral => ({
+  origin,
+  frameWindow,
+  settled: (settled: AgentAskState) => {
+    const last = state.lastAsked;
+    if (
+      last &&
+      last.ask === envelope.ask &&
+      last.text === envelope.text &&
+      last.at === at
+    ) {
+      state.lastAsked = {
+        ...last,
+        ask: last.ask,
+        text: last.text,
+        at,
+        state: settled,
+      };
+    }
+  },
+});
 
 /**
  * The order that decides which answer wins (§6), with §4's two flood controls
@@ -502,7 +582,24 @@ export const createAgentAskChannel = (
         // The same answer again, under the app's new id. A courtesy for a
         // double-send or a retry, not a ceiling: an app that varies one
         // character is a new ask and spends budget like one.
-        return agentAskAnswer(envelope.id, last.state);
+        if (last.state !== undefined) {
+          return agentAskAnswer(envelope.id, last.state);
+        }
+        // That ask is still in front of the reader (a deferred one, whose
+        // answer is not known yet). A second send of it is the same decision,
+        // so it goes to the same handler — which joins it (S2's store) — and
+        // spends nothing, because it raises nothing.
+        if (
+          options.answerAsk?.(
+            envelope,
+            deferralFor(envelope, stateOrigin, frameWindow, state, last.at),
+          )
+        ) {
+          return undefined;
+        }
+        // No handler for it left the first one unanswered; the honest word for
+        // an ask this shell cannot answer is still `unavailable`.
+        return agentAskAnswer(envelope.id, 'unavailable');
       }
 
       if (state.asksUsed >= AGENT_ASK_BUDGET) {
@@ -511,10 +608,27 @@ export const createAgentAskChannel = (
 
       state.asksUsed += 1;
 
-      // S1's whole answer for a real ask: there is no path to the agent, the
-      // composer or the write seam in this slice, and saying so is the point of
-      // landing the refusals first. S2 answers `drafted`/`posted` here, S3
-      // `asked`.
+      // The ask is real, counted and addressed. If a slice has a path for it
+      // (S2's `draft`/`post`), it takes the ask and answers in its own time,
+      // with its own state word; otherwise this slice's whole answer stands —
+      // `unavailable`, the honest state for a shell that has no path for
+      // something yet, which is the right answer until S3 answers `remind`.
+      //
+      // The record is written *before* the handler is handed the ask, with no
+      // state: §4's duplicate window then treats a second send of it as the
+      // same decision rather than as a placeholder nobody ever gave.
+      if (options.answerAsk !== undefined) {
+        state.lastAsked = { ask: envelope.ask, text: envelope.text, at };
+        if (
+          options.answerAsk(
+            envelope,
+            deferralFor(envelope, stateOrigin, frameWindow, state, at),
+          )
+        ) {
+          return undefined;
+        }
+      }
+
       const answer = agentAskAnswer(envelope.id, 'unavailable');
       state.lastAsked = {
         ask: envelope.ask,
