@@ -172,10 +172,23 @@ preflight_verdict() { # preflight_verdict <allow-undersized 0|1>
 }
 
 preflight_local() {
-  local vcpu ram_gb disk_gb ports
-  vcpu="$(sysctl -n hw.ncpu 2>/dev/null || echo 0)"
-  ram_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
-  disk_gb=$(( $(df -Pk "$FIDDY_HOME" 2>/dev/null | awk 'NR==2 {print $4}') / 1048576 ))
+  local vcpu ram_gb disk_kb disk_gb ports target_dir
+  # Portable: nproc//proc/meminfo on Linux, sysctl on macOS.
+  if command -v nproc >/dev/null 2>&1; then
+    vcpu="$(nproc)"
+  else
+    vcpu="$(sysctl -n hw.ncpu 2>/dev/null || echo 0)"
+  fi
+  if [ -r /proc/meminfo ]; then
+    ram_gb=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 / 1024 ))
+  else
+    ram_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+  fi
+  # Measure the disk the node's data will live on; never feed awk an empty
+  # string (a nonexistent dir makes df fail and the arithmetic explodes).
+  target_dir="$HOME/snapchain"; [ -d "$target_dir" ] || target_dir="$FIDDY_HOME"; [ -d "$target_dir" ] || target_dir="$HOME"
+  disk_kb="$(df -Pk "$target_dir" 2>/dev/null | awk 'NR==2 {print $4}')"
+  disk_gb=$(( ${disk_kb:-0} / 1048576 ))
   ports="$(ports_in_use_local)"
   preflight_report "$vcpu" "$ram_gb" "$disk_gb" "\$HOME" "$ports"
 }
