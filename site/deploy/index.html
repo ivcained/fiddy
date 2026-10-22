@@ -114,6 +114,19 @@ git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/ovh-depl
       <p class="dim prow" style="margin-top:8px">True one click: Cloud Shell opens pre-authenticated, the walkthrough runs itself. Set a reminder to delete the VM before the credit ends.</p>
     </div>
 
+    <div class="provider">
+      <div class="phead"><strong>Budget VPS — manual order</strong><span class="price">from ~€24/mo · no API, so no one-click</span></div>
+      <p class="dim prow">Cheapest machines anywhere, but you order through their website (10 minutes of form-filling),
+      then one command does the rest: <code style="font-family:var(--mono)">bin/fiddy provision --ssh root@&lt;your-ip&gt;</code>.
+      <strong>Mind the disk:</strong> a mainnet node needs ~2 TB — most budget plans ship far under it.</p>
+      <p class="dim prow" style="font-size:13px">
+      • <a href="https://clients.mivocloud.com/cart.php?a=confproduct&i=0" target="_blank" rel="noopener">MivoCloud S8 — €40/mo</a> (Moldova): add "Disk 2 · 1TB HDD" (+€5) to reach 2 TB.<br>
+      • <a href="https://advinservers.com/vps" target="_blank" rel="noopener">Advin Servers — $24/mo</a>: 8 vCPU/16 GB but 256 GB disk — too small unless you upgrade storage.<br>
+      • <a href="https://contabo.com/en/vps/cloud-vps-core-8" target="_blank" rel="noopener">Contabo VPS 8 — €14/mo</a>: 8 vCPU/24 GB, 300 GB — needs their storage add-on to fit 2 TB.<br>
+      • <a href="https://billing.luxvps.net/cart.php?a=confproduct&i=0" target="_blank" rel="noopener">LuxVPS EPYC</a>: 6 vCPU/32 GB, 340 GB — too small as listed.<br>
+      <span class="wait">HDD is fine — bootstrap is just slower. <code style="font-family:var(--mono)">fiddy provision --ssh</code> measures the disk and refuses loudly if a box can't hold the node.</span></p>
+    </div>
+
     <p class="dim prow" style="font-size:13px">Already have a server? Skip ahead — any Ubuntu box with 4 vCPU / 16 GB / 2 TB works.
     Hetzner &amp; OVH paths are scripted against their API docs, not yet battle-tested; they fail loudly if anything drifts.</p>
   </div>
