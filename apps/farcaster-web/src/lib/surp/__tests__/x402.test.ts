@@ -23,6 +23,7 @@ import {
   PAYMENT_HEADERS,
   preparePayment,
   selectBaseOffer,
+  toJsonRpcTypedData,
   USDC_BASE_ADDRESS,
   USDC_BASE_DOMAIN,
 } from '~/lib/surp/x402';
@@ -196,5 +197,34 @@ describe('the request header, once the owner has signed', () => {
 
   it('names the headers Surp accepts, so a caller picks a real one', () => {
     expect(PAYMENT_HEADERS).toContain('X-Payment');
+  });
+});
+
+describe('the same authorization, asked for over the wire', () => {
+  const prepared = preparePayment({
+    offer,
+    from: FROM,
+    nowSeconds: 1_800_000_000,
+    nonce: `0x${'ab'.repeat(32)}`,
+  })!;
+
+  it('carries the domain among the types, which a direct wallet needs', () => {
+    const asked = JSON.parse(toJsonRpcTypedData(prepared.typedData));
+    expect(asked.types.EIP712Domain).toEqual([
+      { name: 'name', type: 'string' },
+      { name: 'version', type: 'string' },
+      { name: 'chainId', type: 'uint256' },
+      { name: 'verifyingContract', type: 'address' },
+    ]);
+    expect(asked.types.TransferWithAuthorization).toEqual(
+      prepared.typedData.types.TransferWithAuthorization,
+    );
+  });
+
+  it('is the same authorization as the object form, field for field', () => {
+    const asked = JSON.parse(toJsonRpcTypedData(prepared.typedData));
+    expect(asked.domain).toEqual(prepared.typedData.domain);
+    expect(asked.primaryType).toBe('TransferWithAuthorization');
+    expect(asked.message).toEqual(prepared.typedData.message);
   });
 });

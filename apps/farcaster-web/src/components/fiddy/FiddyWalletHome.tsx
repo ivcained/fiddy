@@ -8,11 +8,28 @@
  *                                context, so it can be rendered anywhere and
  *                                tested for every state a real client is in.
  *   `FiddyWalletHomeConnected`   the thin wiring that reads the client's own
- *                                wallet (wagmi) and signs with it. Everything
- *                                that could move money is in the second half,
- *                                and it does exactly one thing: ask the wallet
- *                                to sign an authorization this page built from
- *                                Surp's live 402 — then stop.
+ *                                wallet and signs with it. Everything that could
+ *                                move money is in the second half, and it does
+ *                                exactly one thing: ask the wallet to sign an
+ *                                authorization this page built from Surp's live
+ *                                402 — then stop.
+ *
+ * WHICH WALLET THE WIRING READS. Not wagmi alone: this client has three wallets
+ * behind one answer — an external one connected here (injected or by code), a
+ * MetaMask multichain account, and the Farcaster wallet a person signed in
+ * with. wagmi knows only the first, so reading it alone told a Farcaster user
+ * with a wallet that nothing was connected. The connection is therefore read
+ * from the client's own wallet context, which is the same answer the rest of the
+ * app acts on.
+ *
+ * THE CONNECT STRIP IS A PROP, ON PURPOSE. A wallet page has to let a person
+ * connect a wallet they already hold, and it does that by raising the client's
+ * existing wallet dialog rather than growing a second chooser here. So the
+ * button is wired by whoever mounts this surface (`onConnect`); a surface that
+ * has a chooser beside it already (settings) passes nothing and grows no
+ * button, and a signed-out layout — where no dialog exists to raise — gets no
+ * button either, because a button that cannot work is the defect this whole
+ * surface exists to avoid.
  *
  * What happens after the signature: the encoded payment is held on screen and
  * named for what it is. Nothing is broadcast from here. Spending it is a
@@ -24,6 +41,8 @@
 import React, { memo, useCallback, useState } from 'react';
 import { useAccount, useChainId, useSignTypedData } from 'wagmi';
 
+import { useSolanaWallet } from '~/contexts/SolanaWalletProvider';
+import { useWallet } from '~/contexts/WalletProvider';
 import { saveFiddySetup, useFiddySetup } from '~/lib/fiddySetup';
 import {
   describeWalletHome,
@@ -36,6 +55,7 @@ import {
   fetchPaymentOffer,
   type PreparedPayment,
   preparePayment,
+  toJsonRpcTypedData,
   type X402Challenge,
   type X402Offer,
 } from '~/lib/surp/x402';
@@ -46,6 +66,11 @@ export interface FiddyWalletHomeProps {
   connections: WalletConnections;
   chainId?: number;
   onChoose: (choice: WalletChoiceId) => void;
+  /**
+   * Raise the wallet connection this client already has. Absent when the
+   * surface has nothing to raise — then no button is drawn for it.
+   */
+  onConnect?: () => void;
   /** The wallet's own signature over the prepared authorization. */
   onSignTypedData?: (
     typedData: PreparedPayment['typedData'],
@@ -66,6 +91,7 @@ export const FiddyWalletHome = memo(
     connections,
     chainId,
     onChoose,
+    onConnect,
     onSignTypedData,
     requestTokens = 900,
   }: FiddyWalletHomeProps) => {
@@ -161,6 +187,36 @@ export const FiddyWalletHome = memo(
             </span>
           </p>
         </header>
+
+        {onConnect ? (
+          <div
+            className="fiddy-connect"
+            data-fiddy="wallet-connection"
+            data-fiddy-wallet-connection={
+              home.address ? 'connected' : 'disconnected'
+            }
+          >
+            <p className="fiddy-honest-note" role="status" aria-live="polite">
+              <span>
+                {home.address
+                  ? 'A wallet is connected already. You can swap in another one at any time — swapping changes which wallet pays, and nothing else.'
+                  : 'MetaMask, Rabby and other wallets in this browser connect in a tap. Any other wallet works by scanning a code with your phone. Fiddy learns the address and nothing more.'}
+              </span>
+            </p>
+            <button
+              type="button"
+              className={
+                home.address
+                  ? 'fiddy-quiet-btn fiddy-quiet-btn-outline'
+                  : 'fiddy-secondary-btn'
+              }
+              onClick={onConnect}
+              data-fiddy="wallet-connect"
+            >
+              {home.address ? 'Use a different wallet' : 'Connect a wallet'}
+            </button>
+          </div>
+        ) : null}
 
         <ul className="fiddy-card-list">
           {WALLET_OPTIONS.map((option) => {
@@ -280,42 +336,93 @@ const onAddressSafe = (
  * holds no key — the wallet is reached through the connection, never stored.
  */
 export const FiddyWalletHomeConnected = memo(
-  ({ requestTokens }: { requestTokens?: number }) => {
+  ({
+    onConnect,
+    requestTokens,
+  }: {
+    /**
+     * Raise the connect surface this client has. Passed by a page that owns one
+     * (the wallet page switches to its connect step); omitted by a surface that
+     * has a chooser beside it already (settings), which then grows no button.
+     */
+    onConnect?: () => void;
+    requestTokens?: number;
+  }) => {
     const setup = useFiddySetup();
-    const chainId = useChainId();
-    const { address, connector } = useAccount();
+    const { connector } = useAccount();
+    const wagmiChainId = useChainId();
     const { signTypedDataAsync } = useSignTypedData();
+    const solana = useSolanaWallet();
+    const {
+      address: connectedAddress,
+      available: walletSurfaceAvailable,
+      network,
+      preferredWallet,
+      provider,
+    } = useWallet();
+
+    // Which of the three wallets this is. The Farcaster wallet a person signed
+    // in with is reached through the embedded bridge rather than through wagmi.
+    const usesFarcasterWallet = preferredWallet === 'warpcast';
 
     const connections: WalletConnections = {
       evm:
-        address === undefined
+        connectedAddress === undefined
           ? { status: 'disconnected' }
           : {
               status: 'connected',
-              address,
-              walletName: connector?.name,
+              address: connectedAddress,
+              walletName: usesFarcasterWallet
+                ? 'Farcaster wallet'
+                : connector?.name,
             },
-      solana: { status: 'disconnected' },
+      solana:
+        solana.status === 'connected' && solana.address
+          ? {
+              status: 'connected',
+              address: solana.address,
+              walletName: solana.wallet?.name,
+            }
+          : { status: 'disconnected' },
     };
 
     const onSignTypedData = useCallback(
-      async (typedData: PreparedPayment['typedData']) =>
-        await signTypedDataAsync({
+      async (typedData: PreparedPayment['typedData']) => {
+        // The Farcaster wallet is not a wagmi connector, so it is asked over the
+        // wire through the provider this client is connected through.
+        // Everything else signs through wagmi, which knows its own connector's
+        // quirks — and which chain it is on.
+        if (usesFarcasterWallet) {
+          if (!provider || !connectedAddress) {
+            throw new Error('No wallet is connected to sign with.');
+          }
+          return (await provider.request({
+            method: 'eth_signTypedData_v4',
+            params: [connectedAddress, toJsonRpcTypedData(typedData)],
+          })) as `0x${string}`;
+        }
+
+        return await signTypedDataAsync({
           domain: typedData.domain,
           types: typedData.types,
           primaryType: typedData.primaryType,
           message: typedData.message,
-        }),
-      [signTypedDataAsync],
+        });
+      },
+      [usesFarcasterWallet, provider, connectedAddress, signTypedDataAsync],
     );
 
     return (
       <FiddyWalletHome
         choice={setup.walletChoice}
         connections={connections}
-        chainId={chainId}
+        chainId={
+          network.actualChainId ??
+          (usesFarcasterWallet ? undefined : wagmiChainId)
+        }
         onChoose={(walletChoice) => saveFiddySetup({ walletChoice })}
-        onSignTypedData={onAddressSafe(onSignTypedData, address)}
+        onConnect={walletSurfaceAvailable ? onConnect : undefined}
+        onSignTypedData={onAddressSafe(onSignTypedData, connectedAddress)}
         requestTokens={requestTokens}
       />
     );

@@ -299,6 +299,36 @@ export const encodePaymentHeader = ({
 export const PAYMENT_HEADERS = ['X-Payment', 'PAYMENT-SIGNATURE'] as const;
 
 /**
+ * The same authorization again, in the shape a wallet's JSON-RPC request
+ * carries.
+ *
+ * `eth_signTypedData_v4` is what a wallet is asked over the wire, and it takes
+ * the types as a JSON string. Two things differ from wagmi's object form: the
+ * message travels as JSON rather than as a typed object, and `EIP712Domain`
+ * has to be among the types — wagmi fills that in for its own connectors, and a
+ * wallet asked directly does not. It is built from the domain's own fixed
+ * fields, in a fixed order, so the encoding is a fact of this module rather
+ * than of the wallet's mood.
+ */
+export const toJsonRpcTypedData = (
+  typedData: PreparedPayment['typedData'],
+): string =>
+  JSON.stringify({
+    domain: typedData.domain,
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      ...typedData.types,
+    },
+    primaryType: typedData.primaryType,
+    message: typedData.message,
+  });
+
+/**
  * Ask Surp for the live price of a request an agent would make, and hand back
  * the offer it answers with. Costs nothing: an unpaid probe is how the price is
  * asked for. (The request in `x402.ts` is the only one in this folder that

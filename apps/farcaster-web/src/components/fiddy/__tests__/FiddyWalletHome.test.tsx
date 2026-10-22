@@ -259,3 +259,71 @@ describe('paying, without paying', () => {
     expect(document.querySelector('[data-fiddy="wallet-signed"]')).toBeNull();
   });
 });
+
+describe('connecting a wallet from this surface', () => {
+  it('draws no button when the surface has no dialog to raise', () => {
+    render(
+      <FiddyWalletHome
+        choice="farcaster"
+        connections={EMPTY_WALLET_CONNECTIONS}
+        onChoose={() => {}}
+      />,
+    );
+    expect(document.querySelector('[data-fiddy="wallet-connect"]')).toBeNull();
+    expect(
+      document.querySelector('[data-fiddy="wallet-connection"]'),
+    ).toBeNull();
+  });
+
+  it('offers connecting a wallet, and names both ways that work', () => {
+    const onConnect = vi.fn();
+    render(
+      <FiddyWalletHome
+        choice="farcaster"
+        connections={EMPTY_WALLET_CONNECTIONS}
+        onChoose={() => {}}
+        onConnect={onConnect}
+      />,
+    );
+
+    const strip = document.querySelector('[data-fiddy="wallet-connection"]');
+    expect(strip?.getAttribute('data-fiddy-wallet-connection')).toBe(
+      'disconnected',
+    );
+    expect(strip?.textContent).toContain('connect in a tap');
+    expect(strip?.textContent).toContain('scanning a code');
+
+    const button = document.querySelector(
+      '[data-fiddy="wallet-connect"]',
+    ) as HTMLElement;
+    expect(button.textContent).toBe('Connect a wallet');
+    fireEvent.click(button);
+    expect(onConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the offer once a wallet is connected, as a quiet swap', () => {
+    const onConnect = vi.fn();
+    render(
+      <FiddyWalletHome
+        choice="farcaster"
+        connections={connected}
+        chainId={8453}
+        onChoose={() => {}}
+        onConnect={onConnect}
+      />,
+    );
+
+    const button = document.querySelector(
+      '[data-fiddy="wallet-connect"]',
+    ) as HTMLElement;
+    expect(button.textContent).toBe('Use a different wallet');
+    expect(button.className).toContain('fiddy-quiet-btn');
+    expect(
+      document
+        .querySelector('[data-fiddy="wallet-connection"]')
+        ?.getAttribute('data-fiddy-wallet-connection'),
+    ).toBe('connected');
+    fireEvent.click(button);
+    expect(onConnect).toHaveBeenCalledTimes(1);
+  });
+});
