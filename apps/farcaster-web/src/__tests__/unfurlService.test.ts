@@ -29,6 +29,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createCardRenderer, pngSize } from '../../server/unfurl/cards.mjs';
 import { createUnfurlHandler } from '../../server/unfurl/handler.mjs';
+import { createLinkReader } from '../../server/unfurl/reader.mjs';
 import {
   escapeHtml,
   oneLine,
@@ -369,6 +370,68 @@ describe('the cast-hash index the client asks for', () => {
   });
 });
 
+describe('the payload the card renderer is handed', () => {
+  // A PROMISE here is what shipped the site card for every page on the first
+  // release: `handler.card()` was passed a `.then(…)` chain, the renderer reads
+  // its payload synchronously, and `JSON.stringify(promise)` is `{}` — so the
+  // renderer answered "unknown card kind: None" and every card fell back to the
+  // site card while the gate (1200x630) still passed. These pin the argument.
+  const drawn = Buffer.from(
+    '89504e470d0a1a0a0000000d49484452000004b000000276',
+    'hex',
+  );
+
+  it('is this page’s own cast card, resolved', async () => {
+    const seen: unknown[] = [];
+    const { headers } = await read(`/unfurl/cards/cast/${DW_R.cast.hash}.png`, {
+      reader: fakeReader({ cast: () => DW_R }),
+      renderCard: async (payload: unknown) => {
+        seen.push(payload);
+        return drawn;
+      },
+    });
+    expect(headers['x-unfurl']).toBe('card:cast');
+    const card = seen[0] as {
+      kind?: string;
+      hash?: string;
+      text?: string;
+      fid?: number;
+      username?: string;
+    };
+    expect(card).not.toBeInstanceOf(Promise);
+    expect(card.kind).toBe('cast');
+    expect(card.hash).toBe(DW_R.cast.hash);
+    expect(card.text).toBe('Neat');
+    expect(card.fid).toBe(3);
+    expect(card.username).toBe('dwr');
+  });
+
+  it('is this page’s own profile card, resolved', async () => {
+    const seen: unknown[] = [];
+    const { headers } = await read('/unfurl/cards/profile/3.png', {
+      reader: fakeReader({
+        profile: () => ({
+          author: { fid: 3, username: 'dwr', displayName: 'Dan Romero' },
+        }),
+      }),
+      renderCard: async (payload: unknown) => {
+        seen.push(payload);
+        return drawn;
+      },
+    });
+    expect(headers['x-unfurl']).toBe('card:profile');
+    const card = seen[0] as {
+      kind?: string;
+      fid?: string;
+      displayName?: string;
+    };
+    expect(card).not.toBeInstanceOf(Promise);
+    expect(card.kind).toBe('profile');
+    expect(card.fid).toBe('3');
+    expect(card.displayName).toBe('Dan Romero');
+  });
+});
+
 describe('a card that cannot be drawn', () => {
   it('falls back to the site card, which is the picture this URL had yesterday', async () => {
     const { status, body, headers } = await read(
@@ -477,6 +540,63 @@ describe('the card renderer, against the real thing', () => {
       mascotPath: path.join(webRoot, 'public', 'fiddy-mark-poster.png'),
     }).render;
     await expect(render({ kind: 'cast', text: 'x' })).rejects.toThrow();
+  });
+});
+
+describe('the reader, against the node’s own envelope', () => {
+  // MEASURED on the live node (2026-10-22): `/v1/castById` answers the MESSAGE
+  // — `{"data":{"type":"MESSAGE_TYPE_CAST_ADD","castAddBody":{"text":…}}}` —
+  // and `castTextFromMessage` used to look for `castAddBody` one level up. Every
+  // cast page then read "no text" and answered the shell, which is the state the
+  // first release of this service went live in. The fake answers the envelope
+  // the node actually sends, not the shape a test would like.
+  const envelope = (url: string): unknown => {
+    if (url.includes('/v1/castById')) {
+      return {
+        data: {
+          type: 'MESSAGE_TYPE_CAST_ADD',
+          fid: 3,
+          castAddBody: { text: 'Neat', mentions: [], embeds: [] },
+        },
+        hash: DW_R.cast.hash,
+      };
+    }
+    if (url.includes('/v1/userDataByFid')) {
+      return {
+        messages: [
+          {
+            data: {
+              userDataBody: {
+                type: 'USER_DATA_TYPE_USERNAME',
+                value: 'dwr',
+              },
+            },
+          },
+        ],
+      };
+    }
+    if (url.includes('api.neynar.com')) {
+      return { cast: { author: { fid: 3 } } };
+    }
+    throw new Error(`unexpected request: ${url}`);
+  };
+
+  const reader = () =>
+    createLinkReader({
+      fetchImpl: (async (url: string) =>
+        new Response(JSON.stringify(envelope(url)), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })) as unknown as typeof fetch,
+      nodeBaseUrl: 'https://node.test',
+      neynarApiKey: 'test-key',
+    });
+
+  it('reads a cast out of the node’s message envelope', async () => {
+    const facts = await reader().cast(DW_R.cast.hash);
+    expect(facts?.cast.text).toBe('Neat');
+    expect(facts?.cast.fid).toBe(3);
+    expect(facts?.author.username).toBe('dwr');
   });
 });
 

@@ -27,6 +27,9 @@
 #      a dropped route string is a release that quietly loses a feature) — and
 #      the built shell must carry no inline script, because the host serves
 #      script-src 'self' (the theme bootstrap lives at public/shell-bootstrap.js);
+#      and the per-page unfurl pages and their CARDS are rendered here from this
+#      build, with the real renderer, and refused if a page answers the site card
+#      instead of its own (a size-only check passes on that — measured);
 #      and the app-list manifest the release installs must be signed, spec-sized,
 #      and say the same thing about the app as the shell does
 #      (apps/farcaster-web/scripts/check-manifest.mjs);
@@ -381,19 +384,21 @@ fi
 # Sets ORIGIN_CODE to the HTTP status it got. The loopback + `Host:` fallback is
 # for a host this machine cannot reach on its public IP (and it reads exactly
 # what that vhost serves).
-origin_get() {  # origin_get <path> <outfile>
-  ORIGIN_CODE=$(curl -sk --connect-timeout 10 --max-time 60 --resolve "$ORIGIN_HOST:443:$ORIGIN_IP" -o "$2" -w '%{http_code}' "https://$ORIGIN_HOST$1" || true)
+origin_get() {  # origin_get <path> <outfile>  (also writes <outfile>.headers)
+  ORIGIN_CODE=$(curl -sk --connect-timeout 10 --max-time 60 --resolve "$ORIGIN_HOST:443:$ORIGIN_IP" -D "$2.headers" -o "$2" -w '%{http_code}' "https://$ORIGIN_HOST$1" || true)
   if [ -z "${ORIGIN_CODE:-}" ] || [ "${ORIGIN_CODE:-000}" = 000 ]; then
     # Fallback: read it from the box itself — HTTPS with SNI, resolved to the
     # loopback (the port-80 block on this vhost only 308-redirects to https).
     # Two calls, deliberately: the status code is fetched to /dev/null and the
     # body on its own, because an appended `-w` code would leave a stray newline
-    # in the bytes this gate compares.
+    # in the bytes this gate compares. The headers come from a third file on the
+    # host, which is what lets a gate read the service's own `x-unfurl` note.
     ORIGIN_CODE=000
-    FALLBACK_CODE=$(ssh_ "curl -sk --resolve $ORIGIN_HOST:443:127.0.0.1 -H 'Host: $ORIGIN_HOST' -o /dev/null -w '%{http_code}' https://$ORIGIN_HOST$1" 2>/dev/null || true)
+    FALLBACK_CODE=$(ssh_ "curl -sk --resolve $ORIGIN_HOST:443:127.0.0.1 -H 'Host: $ORIGIN_HOST' -D /tmp/fiddy-origin-gate.headers -o /dev/null -w '%{http_code}' https://$ORIGIN_HOST$1" 2>/dev/null || true)
     if [ -n "$FALLBACK_CODE" ]; then
       ORIGIN_CODE=$FALLBACK_CODE
       ssh_ "curl -sk --resolve $ORIGIN_HOST:443:127.0.0.1 -H 'Host: $ORIGIN_HOST' https://$ORIGIN_HOST$1" > "$2" || true
+      ssh_ "cat /tmp/fiddy-origin-gate.headers" > "$2.headers" || true
     fi
   fi
   [ "${ORIGIN_CODE:-000}" != 000 ]
@@ -458,7 +463,14 @@ origin_get "/unfurl/cards/profile/3.png" "$STAGE/origin-profile-card.png" \
 node -e 'const b=require("fs").readFileSync(process.argv[1]);process.exit(b.length>24&&b.readUInt32BE(16)===1200&&b.readUInt32BE(20)===630?0:1)' \
   "$STAGE/origin-profile-card.png" \
   || gate_fail "the origin's profile card is not a 1200x630 PNG"
-echo "  origin GET /~/profiles/3 → that page's own og:url, card 1200x630"
+# ...and it must be THAT PAGE'S OWN card. The site card is also 1200x630, so a
+# release that answers the site card for every URL passed this gate for a whole
+# release (measured 2026-10-22, card t_1efd7e2e: the service answered
+# `x-unfurl: card:site` for `/unfurl/cards/profile/3.png` while the pixels were
+# right). The service says which card it drew; this reads the note.
+grep -qi '^x-unfurl:[[:space:]]*card:profile' "$STAGE/origin-profile-card.png.headers" \
+  || gate_fail "the origin's profile card is not that page's own card (the service answered '$(grep -i '^x-unfurl:' "$STAGE/origin-profile-card.png.headers" | tr -d '\r' | tail -1)'): the page's own card is what a share has to preview"
+echo "  origin GET /~/profiles/3 → that page's own og:url, card 1200x630, drawn for the page"
 
 # 2. The entry chunk at the path THIS BUILD produced, from the origin, compared
 #    byte-for-byte. This is the heart of the check.

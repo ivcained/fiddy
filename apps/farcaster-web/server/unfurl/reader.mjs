@@ -136,7 +136,13 @@ export const userDataFromMessages = (messages, fid) => {
 };
 
 export const castTextFromMessage = (message) => {
-  const body = message?.castAddBody;
+  // The node hands back a MESSAGE, not a bare body: `/v1/castById` answers
+  // `{"data":{"castAddBody":{"text":…}}}` and `/v1/castsByFid` the same message
+  // inside `messages`. Reading `message.castAddBody` finds nothing on the real
+  // node and every cast page silently falls back to the site card — the flat
+  // form is accepted too, because a card renderer is not the place to be strict
+  // about an envelope somebody already unwrapped.
+  const body = message?.data?.castAddBody ?? message?.castAddBody;
   return typeof body?.text === 'string' ? body.text : undefined;
 };
 
