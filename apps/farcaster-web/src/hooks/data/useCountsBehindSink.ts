@@ -23,8 +23,14 @@ import type { CastCounts, CastCountsSink } from '~/snapchain/nodeApi/reads';
  * nobody is rendering would be half a cast in the global cache, and the next
  * surface to read it would find a cast with counts and no text.
  *
- * A cast can be cached under two keys — itself, and as a recast (the flag is
- * part of `buildGloballyCachedCastKey`) — so both are updated when they exist.
+ * A cast can be cached under two keys — itself, and as a recast — and both are
+ * filled when both exist. The flag is part of the key, and `compactQueryKey`
+ * drops only `undefined`, so "itself" is `false` and not `undefined`: every
+ * writer and every reader of this cache passes `!!recast` (a feed stores its
+ * page's casts with `recast: false`). Writing the `undefined` key instead reads
+ * the same in review and matches nothing at all — the counts were read, merged
+ * onto a key no cast was held under, and dropped, leaving a feed that painted
+ * early and never showed a number.
  */
 export const mergeCastCountsIntoGloballyCachedCasts = ({
   queryClient,
@@ -38,7 +44,7 @@ export const mergeCastCountsIntoGloballyCachedCasts = ({
   for (const { hash, reactions, recasts } of counts) {
     let wroteThisCast = false;
 
-    for (const recast of [undefined, true]) {
+    for (const recast of [false, true]) {
       const key = buildGloballyCachedCastKey({ hash, recast });
       const cached = queryClient.getQueryData<ApiCast>(key);
       if (!cached) {
