@@ -127,6 +127,8 @@ Next:
   fiddy node up
   fiddy client up
 
+(If 'fiddy: command not found': run  export PATH="$PWD/bin:$PATH"  inside the repo first.)
+
 Tear down: delete the instance AND the volume in the Control Panel (or via the
 API) — the volume keeps billing if you only delete the VM.
 EOF
