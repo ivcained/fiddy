@@ -87,10 +87,18 @@ import {
 import { FrameIconImage } from '~/components/images/FrameIconImage';
 import { Image } from '~/components/images/Image';
 import {
+  AGENT_ASK_CAPABILITY,
+  createAgentAskChannel,
+} from '~/components/miniApp/agentAskChannel';
+import {
   createLegacyWalletChannel,
   LegacyWalletProvider,
 } from '~/components/miniApp/legacyWalletChannel';
 import { MiniAppQualityButton } from '~/components/miniApp/MiniAppQualityButton';
+import {
+  gateMiniAppWire,
+  pinnedMiniAppOrigin,
+} from '~/components/miniApp/miniAppWireGate';
 import { ComposeCastModal } from '~/components/modals/ComposeCastModal';
 import { MiniAppQualityModal } from '~/components/modals/MiniAppQualityModal';
 import {
@@ -114,6 +122,7 @@ import {
 } from '~/contexts/SignManifestProvider';
 import { SubordinateOpenableWarpcastWalletProvider } from '~/contexts/SubordinateOpenableWarpcastWalletProvider';
 import { useWallet, WalletProvider } from '~/contexts/WalletProvider';
+import { useAgentSession } from '~/hooks/agent/useAgentSession';
 import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import { useIsAdmin } from '~/hooks/data/useIsAdmin';
 import { useUserLevel } from '~/hooks/data/useUserLevel';
@@ -342,6 +351,13 @@ function InnerMiniAppContent({
   const addRejectedBeforeLoadRef = useRef(false);
   const addPromptCountRef = useRef(0);
 
+  // The agent session this browser holds, read through a ref: the ask channel
+  // below is built once per launched URL, and a session that arrives while the
+  // app is open has to be answered by the listener that is already running.
+  const agentSession = useAgentSession();
+  const agentSessionPairedRef = useRef(false);
+  agentSessionPairedRef.current = agentSession.status === 'paired';
+
   const [showSplashScreen, setShowSplashScreen] = useState(true);
   const [backState, setBackState] = useState<Back.BackState>(
     Back.DEFAULT_BACK_STATE,
@@ -544,16 +560,75 @@ function InnerMiniAppContent({
     }
 
     setEndpoint(
-      createIframeEndpoint({
-        iframe,
-        // targetOrigin: '*',
-        targetOrigin: new URL(url).origin,
-        debug,
-      }),
+      // The wire the exposed SDK listens on is pinned to the frame it serves
+      // here, where it is built: the listener lives on this window, so a gate
+      // anywhere further along would be a gate on the wrong side of the message
+      // (`~/components/miniApp/miniAppWireGate`). Only the incoming side is
+      // touched — `emit`'s own `targetOrigin` below stays what it was.
+      gateMiniAppWire(
+        createIframeEndpoint({
+          iframe,
+          // targetOrigin: '*',
+          targetOrigin: new URL(url).origin,
+          debug,
+        }),
+        // Read at message time: a reload hands back a window this effect never
+        // saw, and the gate has to follow the frame that is on screen.
+        () => iframeLoaderRef.current?.iframe?.contentWindow,
+        pinnedMiniAppOrigin(url),
+      ),
     );
   }, [debug, url]);
 
   const emit = useMemo(() => endpoint?.emit, [endpoint?.emit]);
+
+  // The mini app's own ask channel — what the app may ask this reader's agent
+  // for, and every honest refusal when it may not
+  // (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.1, §6). One real listener, and it
+  // is pinned twice: the channel is handed the frame's own window object and the
+  // URL the window was launched with, and it answers only a message that matches
+  // both. A sibling frame, a frame embedded in the app, or any other page gets
+  // nothing at all — not even a refusal, because a reply is itself an oracle.
+  //
+  // The answer goes back to the frame's own origin, the way `createIframeEndpoint`
+  // above addresses this app. Nothing here reaches the agent, the composer or the
+  // write seam: in this slice every well-formed ask is answered `unavailable`,
+  // which is the honest state for a shell that has no path for it yet.
+  useEffect(() => {
+    const iframe = iframeLoaderRef.current?.iframe;
+    if (!iframe || !url) {
+      return;
+    }
+
+    const frameOrigin = new URL(url).origin;
+    const channel = createAgentAskChannel({
+      hasPairedSession: () => agentSessionPairedRef.current,
+    });
+    channel.setLaunchedUrl(url);
+
+    const onMessage = (event: MessageEvent) => {
+      // The pin, here as well as inside the channel: this listener serves one
+      // frame's own window object at one origin. The channel refuses anything
+      // else by itself, so neither this call site nor a future one can be the
+      // hole — the check is written twice on purpose.
+      if (
+        event.source !== iframe.contentWindow ||
+        event.origin !== frameOrigin
+      ) {
+        return;
+      }
+      const answer = channel.handle(
+        { source: event.source, origin: event.origin, data: event.data },
+        iframe.contentWindow,
+      );
+      if (answer) {
+        iframe.contentWindow?.postMessage(answer, frameOrigin);
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [url]);
 
   const triggerBack = useCallback(() => {
     if (backState.visible) {
@@ -824,6 +899,14 @@ function InnerMiniAppContent({
       'experimental.signManifest',
       'actions.openMiniApp',
       'back',
+      // Fiddy's own channel, not a member of the spec: a mini app can ask the
+      // reader's agent for a draft, a post or a reminder through the
+      // `fiddy:agent-ask` envelope (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.1).
+      // It is namespaced because it is ours alone, and it is declared here so a
+      // well-behaved app can find out before asking. Every string in this list
+      // has to be backed by something real; the live channel answers every ask
+      // it can be sent, honestly and in the order §6 fixes.
+      AGENT_ASK_CAPABILITY as MiniAppHostCapability,
     ];
   }, []);
 
@@ -1332,10 +1415,19 @@ function InnerMiniAppContent({
     preferredWallet,
   ]);
 
+  // The origin this window was launched with, pinned as the exposed SDK's own
+  // allowed origin. The endpoint above is already gated on the frame's window
+  // object; this is the second half, stated where the package reads it, so the
+  // wire holds even if the gate is ever moved or the package's list is passed a
+  // wildcard again. An unpinnable window is not exposed at all rather than
+  // exposed to anyone (`~/components/miniApp/miniAppWireGate`).
+  const launchedOrigin = pinnedMiniAppOrigin(url);
   useExposeToEndpoint({
-    endpoint,
+    endpoint: launchedOrigin ? endpoint : undefined,
     sdk,
-    miniAppOrigin: '*',
+    // Unreachable with no endpoint, and inert if it ever were: no document's
+    // origin is the empty string.
+    miniAppOrigin: launchedOrigin ?? '',
     // @ts-expect-error - cant figure out typing here
     ethProvider: instrumentedProvider,
     debug,

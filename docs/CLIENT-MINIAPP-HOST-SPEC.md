@@ -282,7 +282,14 @@ home in this repo (`/fiddy-splash.png` 200×200, `/brand/fiddy-app-icon.png`
 `apple-touch-icon` and the Expo app declares — and `/fiddy-embed.png` 1200×800,
 drawn by `scripts/render-share-card.mjs`), and turned `/icon.png`, `/image.png`
 and `/splash.png` into 301s to those paths, so nothing FSSC edits can repaint
-Fiddy's app-list icon or its cast cards.
+Fiddy's app-list icon or its cast cards. The splash's ART was then measured, and
+it was off-centre — the mark sat in the upper-left third of its own square, which
+is the first frame of every launch (card t_28b3612c). It is now redrawn by a
+third variant of the same generator (`node scripts/render-share-card.mjs splash`:
+the mascot cropped to its own drawing, centred on `#161715` at half the square,
+the share the app icon gives its mark), and `check-manifest.mjs` decodes the PNG
+and refuses a splash whose drawing is not centred, so a cornered mark cannot ship
+silently again.
 
 ## 8. Carded, not done
 
