@@ -56,6 +56,7 @@ import {
 } from './nodeWrites';
 import {
   castAuthorOf,
+  type CastCountsSink,
   channelParentUrlFor,
   NodeBackedReads,
   NodeCannotAnswerError,
@@ -128,6 +129,20 @@ export interface NodeBackedFetchOptions {
    * phrased in ("your node would not accept this like: …").
    */
   nodeLabel?: string;
+  /**
+   * Where a feed page's engagement counts go when they arrive behind its paint.
+   *
+   * With this in hand `POST /v2/feed-items` answers a page built WITHOUT its
+   * like/recast counts and reads them afterwards (`reads.ts` `readCastCounts`),
+   * handing the whole pass here when it lands — see the card this exists for:
+   * a cold first cast used to wait ~5.5 s on the slowest per-cast count read.
+   * Without it the page carries its counts, exactly as before. The app that
+   * renders counts is the one that registers this
+   * (`~/hooks/data/useCountsBehindSink`, wired in
+   * `~/contexts/WebFarcasterApiClientProvider`), because only it knows where a
+   * late count has to land.
+   */
+  onCountsRead?: CastCountsSink;
   /**
    * Where a write records what it submitted and whether the node's state showed
    * it. Defaults to the request log below, so a probe reads it from the same
@@ -446,6 +461,7 @@ export const createNodeBackedFetch = ({
   managedPoster: managedPosterOption,
   askForPostingKey: askForPostingKeyOption,
   nodeLabel = 'your node',
+  onCountsRead,
   onWriteEvidence,
   log: logOption,
 }: NodeBackedFetchOptions): NodeBackedFetchHandle => {
@@ -708,6 +724,9 @@ export const createNodeBackedFetch = ({
             ...(requestBody.updateState !== undefined
               ? { updateState: requestBody.updateState }
               : {}),
+            // A page that can have its counts read behind it is answered behind
+            // them; with no sink registered the page carries its own counts.
+            ...(onCountsRead ? { onCounts: onCountsRead } : {}),
           });
           return jsonResponse({ result });
         }

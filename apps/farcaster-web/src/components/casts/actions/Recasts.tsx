@@ -63,8 +63,10 @@ const RecastsContent: FC<RecastsContentProps> = memo(
     const [showBlockedAlert, setShowBlockedAlert] = useState(false);
 
     const recastCount = useMemo(() => {
-      return cast.combinedRecastCount || cast.recasts.count;
-    }, [cast.combinedRecastCount, cast.recasts.count]);
+      // Absent means not read yet (a feed paints before its counts are), and
+      // renders nothing, exactly as a read 0 does.
+      return cast.combinedRecastCount || (cast.recasts?.count ?? 0);
+    }, [cast.combinedRecastCount, cast.recasts?.count]);
 
     const castReactionAction = useMemo(() => {
       return (

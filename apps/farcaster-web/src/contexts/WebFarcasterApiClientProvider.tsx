@@ -20,8 +20,10 @@ import React, {
 import { baseApiUrl, localApiEnabled, wsUrl } from '~/constants/api';
 import { isDev } from '~/constants/env';
 import { useRecentFetch } from '~/contexts/RecentFetchProvider';
+import { useCountsBehindSink } from '~/hooks/data/useCountsBehindSink';
 import { askForPostingKey } from '~/snapchain/accounts/postingKeyApproval';
 import { isNodeBackedClientEnabled } from '~/snapchain/nodeApi';
+import type { CastCountsSink } from '~/snapchain/nodeApi/reads';
 import { noteWriteEvidence } from '~/snapchain/nodeApi/writeEvidenceWatch';
 import { resolveEffectiveNodeBaseUrl } from '~/snapchain/nodeChoice';
 import {
@@ -82,6 +84,28 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
     useProviderWatch(signedInFid);
 
     /**
+     * Where a feed page's counts land when they arrive behind its paint.
+     *
+     * Registering this is what asks the seam for a page built WITHOUT its
+     * like/recast counts (`~/hooks/data/useCountsBehindSink`): the page paints
+     * as soon as its own reads are done, the counts are read behind it, and
+     * they are merged onto the casts already on screen. See the card — a cold
+     * first cast used to wait ~5.5 s for the slowest per-cast count read.
+     *
+     * Held in a ref and handed to the seam as one stable function, so the
+     * adapter (built per node address, kept between requests) always calls the
+     * current sink — the same shape as `signedInFidRef` above, and for the same
+     * reason: the seam is not rebuilt when a hook identity changes.
+     */
+    const countsBehind = useCountsBehindSink();
+    const countsBehindRef = useRef<CastCountsSink>(countsBehind);
+    countsBehindRef.current = countsBehind;
+    const onCountsRead = useCallback<CastCountsSink>(
+      (counts) => countsBehindRef.current(counts),
+      [],
+    );
+
+    /**
      * The read adapter the client is handed, now provider-aware.
      *
      * It replaces the hosted API as the client's data source: same `fetch`
@@ -121,6 +145,10 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         // `post` ask (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.3). Read-only:
         // nothing about a write changes, and nothing is kept here.
         onWriteEvidence: noteWriteEvidence,
+        // A feed page is answered without its engagement counts and the counts
+        // are read behind the paint, landing on the casts already rendered
+        // (see above, and `~/hooks/data/useCountsBehindSink`).
+        onCountsRead,
       }).fetch;
       // The address the build was configured with is the only input that can
       // change under a running tab and needs the adapter rebuilt; the live

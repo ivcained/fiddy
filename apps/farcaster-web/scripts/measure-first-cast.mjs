@@ -26,9 +26,19 @@
 //   - every request the page makes is timestamped relative to the case's own
 //     start, with its duration, so the wait can be attributed (the bundle, the
 //     sign-in handshake, the node reads) instead of described.
+//   - the engagement counts are checked TWICE per case: at the paint, and again
+//     after waiting for them. A count can arrive behind a paint now (the
+//     node-backed client answers a feed page before its counts are read), so
+//     "the page paints early AND the numbers show up a moment later" is the
+//     claim to measure — with `null` for counts that never appear, which is what
+//     a feed stuck at no engagement numbers would report.
+//   - the cold/warm read ordering says whether the count wave (`reactionsByCast`)
+//     was still running when the first cast appeared, and when the page's own
+//     reads (`castsByFid`) ended. Those two facts are what the card turns on and
+//     they survive a loaded box, unlike absolute wall clock.
 //
 // Knobs: LIVE_SITE, LIVE_BOOT_MS (per-step ceiling), MEASURE_VIEWS (default
-// "390,1440"), MEASURE_OUT.
+// "390,1440"), MEASURE_OUT, MEASURE_COUNT_MS (how long to wait for the counts).
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -44,6 +54,10 @@ const NONCE = 'c'.repeat(128);
 const FID = 3;
 const HANDLE = 'dwr';
 const BOOT = Number(process.env.LIVE_BOOT_MS ?? 180_000);
+/** How long the run waits for the first cast's counts after the paint. A feed
+ * that paints early and shows no engagement numbers forever is not the fix, so
+ * this wait exists to be able to say that. */
+const COUNT_BUDGET = Number(process.env.MEASURE_COUNT_MS ?? 45_000);
 const OUT = process.env.MEASURE_OUT ?? `${process.cwd()}/first-cast-measure.json`;
 const VIEWS = (process.env.MEASURE_VIEWS ?? '390,1440')
   .split(',')
@@ -63,6 +77,81 @@ const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * detector names the page a node can answer rather than one it cannot. */
 const CAST_LINK = 'a[href]';
 const CAST_HREF = /^\/~\/conversations\/0x[0-9a-f]{8,}$/i;
+
+/**
+ * In-page: the first visible cast, and the engagement counts drawn on it RIGHT
+ * NOW. Returns `{ cast, method, likes, recasts, replies }`, where the three
+ * kinds are the numbers on screen (empty when the count is not drawn at all).
+ *
+ * Two ways of reading it, because two builds exist:
+ *
+ *   - `markers` — the count spans carry `data-fiddy-count` (`CastDetails`),
+ *     which is how a build that knows a count can arrive LATE says which count
+ *     it is. This is the exact answer.
+ *   - `titles` — a build from before those markers: every count the fork draws
+ *     is a span whose `title` is the number, sitting beside a label naming it
+ *     ("likes"), so that pair is what is looked for. Coarser, but it makes a
+ *     before/after comparison possible against a release already deployed.
+ *
+ * Self-contained on purpose: it is stringified into the page (`evaluate`, and
+ * `waitForFunction` for the wait), so it closes over nothing.
+ */
+const COUNTS_DETECT = ({ link, pattern }) => {
+  const re = new RegExp(pattern, 'i');
+  const first = Array.from(document.querySelectorAll(link)).find(
+    (node) =>
+      re.test(node.getAttribute('href') ?? '') &&
+      node.getBoundingClientRect().width > 0,
+  );
+  if (!first) {
+    return {
+      cast: null,
+      method: 'none',
+      likes: [],
+      recasts: [],
+      replies: [],
+      reason: 'no cast link is visible',
+    };
+  }
+
+  const scope = first.closest('div[class]') ?? document.body;
+  const href = first.getAttribute('href');
+  const marks = Array.from(scope.querySelectorAll('[data-fiddy-count]'));
+
+  if (marks.length > 0) {
+    const held = (kind) =>
+      marks
+        .filter((node) => node.getAttribute('data-fiddy-count') === kind)
+        .map((node) => node.getAttribute('title') ?? node.textContent);
+    return {
+      cast: href,
+      method: 'markers',
+      likes: held('likes'),
+      recasts: held('recasts'),
+      replies: held('replies'),
+    };
+  }
+
+  const labels = {
+    likes: /likes?/i,
+    recasts: /recasts?/i,
+    replies: /repl(y|ies)/i,
+  };
+  const titled = Array.from(scope.querySelectorAll('span[title]'));
+  const named = (kind) =>
+    titled
+      .filter((node) =>
+        labels[kind].test(node.parentElement?.textContent ?? ''),
+      )
+      .map((node) => node.getAttribute('title'));
+  return {
+    cast: href,
+    method: 'titles',
+    likes: named('likes'),
+    recasts: named('recasts'),
+    replies: named('replies'),
+  };
+};
 
 const account = privateKeyToAccount(
   '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
@@ -253,6 +342,52 @@ for (const view of VIEWS.map((width) => ({
     return Date.now() - started;
   };
 
+  /** The first visible cast's engagement counts, as they are on screen now.
+   *
+   * The counts carry `data-fiddy-count` markers (`CastDetails`), because a
+   * count can arrive AFTER the cast was painted: the node-backed client answers
+   * a feed page as soon as the page's own reads are done and reads its counts
+   * behind it. So "is the like count on screen yet?" is a question with a real
+   * answer, and this is what asks it — separate from whatever text the block
+   * happens to hold.
+   *
+   * A build from before those markers existed is read the older way: a numeric
+   * `title` on a span (which is how the fork renders every count) whose
+   * neighbours name it ("likes"). `method` says which of the two answered, so a
+   * comparison never mixes them silently.
+   */
+  const countsSample = async () => {
+    try {
+      return await page.evaluate(COUNTS_DETECT, {
+        link: CAST_LINK,
+        pattern: CAST_HREF.source,
+      });
+    } catch (error) {
+      return { error: String(error).slice(0, 120) };
+    }
+  };
+
+  /** How long after the paint the first cast's LIKE count appears on screen.
+   *
+   * `null` when it never does inside the budget — a feed that paints early and
+   * shows no engagement numbers at all is not the fix this measures, so the
+   * wait has to be able to say so rather than time out silently.
+   */
+  const waitForCountAfterPaint = async (budgetMs) => {
+    const started = Date.now();
+    const args = { link: CAST_LINK, pattern: CAST_HREF.source };
+    try {
+      await page.waitForFunction(
+        `(${COUNTS_DETECT.toString()})(${JSON.stringify(args)}).likes.length > 0`,
+        undefined,
+        { timeout: budgetMs, polling: 250 },
+      );
+      return Date.now() - started;
+    } catch {
+      return null;
+    }
+  };
+
   /** When the feed stopped asking for things after that first paint. */
   const waitForSettled = async () => {
     const started = Date.now();
@@ -272,6 +407,9 @@ for (const view of VIEWS.map((width) => ({
     const waited = await waitForFirstCast(BOOT);
     const paintedAt = Date.now();
     const inFlightAtPaint = open.size;
+    const countsAtPaint = await countsSample();
+    const countsAfterPaintMs = await waitForCountAfterPaint(COUNT_BUDGET);
+    const countsAfterPaint = await countsSample();
     const settled = await waitForSettled();
     const signedInAt = signIns.length ? signIns[signIns.length - 1] : null;
     run.cold = {
@@ -279,6 +417,9 @@ for (const view of VIEWS.map((width) => ({
       signInCompletedMs: signedInAt ? signedInAt - clickedAt : null,
       firstCastMs: paintedAt - clickedAt,
       firstCastFromSignInMs: signedInAt ? paintedAt - signedInAt : null,
+      countsAtPaint,
+      countsAfterPaintMs,
+      countsAfterPaint,
       settledAfterPaintMs: settled,
       inFlightAtPaint,
       waitedMs: waited,
@@ -306,9 +447,15 @@ for (const view of VIEWS.map((width) => ({
     await waitForFirstCast(BOOT);
     const paintedAt = Date.now();
     const inFlightAtPaint = open.size;
+    const countsAtPaint = await countsSample();
+    const countsAfterPaintMs = await waitForCountAfterPaint(COUNT_BUDGET);
+    const countsAfterPaint = await countsSample();
     const settled = await waitForSettled();
     run.warm = {
       firstCastMs: paintedAt - warmStart,
+      countsAtPaint,
+      countsAfterPaintMs,
+      countsAfterPaint,
       inFlightAtPaint,
       settledAfterPaintMs: settled,
       sample: await sample(),
@@ -343,10 +490,55 @@ writeFileSync(OUT, JSON.stringify(result, null, 2));
 
 /** What the summary says: enough to compare two runs, nothing to interpret. */
 const isNodeRead = (url) => url.includes('haatz') || url.includes('/snapchain-api/') || url.includes('/v1/') || url.includes('/v2/');
+
+/** When a set of reads ran, relative to the case's own start. */
+const readWindow = (list, needle) => {
+  const reads = list
+    .filter((entry) => entry.url.includes(needle))
+    .map((entry) => ({
+      from: entry.fromMs,
+      to: entry.ms === null ? null : entry.fromMs + entry.ms,
+    }));
+  const ends = reads.map((read) => read.to).filter((to) => to !== null);
+  return {
+    count: reads.length,
+    firstStartMs: reads.length ? Math.min(...reads.map((read) => read.from)) : null,
+    lastStartMs: reads.length ? Math.max(...reads.map((read) => read.from)) : null,
+    lastEndMs: ends.length ? Math.max(...ends) : null,
+  };
+};
+
+/** The page's own reads vs the count wave, against the paint they used to hold
+ * up: whether a count read was still running when the first cast appeared is
+ * the fact this card turns on, and it is a fact that survives a loaded box. */
+const readOrdering = ({ timeline: list, paintMs }) => {
+  const page = readWindow(list, '/v1/castsByFid');
+  const counts = readWindow(list, '/v1/reactionsByCast');
+  const openAtPaint =
+    paintMs === null
+      ? null
+      : list.filter(
+          (entry) =>
+            entry.url.includes('/v1/reactionsByCast') &&
+            entry.fromMs <= paintMs &&
+            (entry.ms === null || entry.fromMs + entry.ms >= paintMs),
+        ).length;
+  return {
+    paintFromCaseStartMs: paintMs,
+    pageReads: page,
+    countReads: counts,
+    countReadsStillRunningAtPaint: openAtPaint,
+  };
+};
+
 const summary = result.runs.map((run) => {
   const nodeAt = (list) => list.filter((entry) => isNodeRead(entry.url)).map((entry) => entry.fromMs);
   const coldNode = nodeAt(run.timeline).sort((a, b) => a - b);
   const warmNode = nodeAt(run.warmTimeline).sort((a, b) => a - b);
+  const coldPaintMs =
+    typeof run.cold.readyMs === 'number' && typeof run.cold.firstCastMs === 'number'
+      ? run.cold.readyMs + run.cold.firstCastMs
+      : null;
   return {
     viewport: run.viewport,
     coldFirstCastMs: run.cold.firstCastMs ?? null,
@@ -354,11 +546,17 @@ const summary = result.runs.map((run) => {
     coldError: run.cold.error ?? null,
     coldCasts: run.cold.sample?.casts ?? null,
     coldInFlightAtPaint: run.cold.inFlightAtPaint ?? null,
+    coldCountsAtPaint: run.cold.countsAtPaint ?? null,
+    coldCountsAfterPaintMs: run.cold.countsAfterPaintMs,
+    coldCountsAfterPaint: run.cold.countsAfterPaint ?? null,
     coldText: run.cold.sample?.text ?? null,
     warmFirstCastMs: run.warm.firstCastMs ?? null,
     warmError: run.warm.error ?? null,
     warmCasts: run.warm.sample?.casts ?? null,
     warmInFlightAtPaint: run.warm.inFlightAtPaint ?? null,
+    warmCountsAtPaint: run.warm.countsAtPaint ?? null,
+    warmCountsAfterPaintMs: run.warm.countsAfterPaintMs,
+    warmCountsAfterPaint: run.warm.countsAfterPaint ?? null,
     warmText: run.warm.sample?.text ?? null,
     warmStorageKeys: run.warm.storage?.keys ?? null,
     warmStorageBytes: run.warm.storage?.bytes ?? null,
@@ -369,6 +567,8 @@ const summary = result.runs.map((run) => {
     warmNodeReads: warmNode.length,
     warmFirstNodeReadMs: warmNode[0] ?? null,
     abortedWrites: run.abortedWrites.length,
+    coldReadOrdering: readOrdering({ timeline: run.timeline, paintMs: coldPaintMs }),
+    warmReadOrdering: readOrdering({ timeline: run.warmTimeline, paintMs: run.warm.firstCastMs ?? null }),
   };
 });
 console.log(

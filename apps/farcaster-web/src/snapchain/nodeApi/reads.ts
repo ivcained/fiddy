@@ -80,6 +80,22 @@ export class NodeCannotAnswerError extends Error {
   }
 }
 
+/** One cast's own engagement counts, as they were read. */
+export interface CastCounts {
+  hash: string;
+  reactions: { count: number };
+  recasts: { count: number };
+}
+
+/**
+ * Where a page's counts go when they are read behind its paint.
+ *
+ * Only counts that were really read arrive here: a count whose read failed is
+ * left out, and the cast keeps no count rather than a zero (`CastCounts`). The
+ * sink is handed the whole pass at once — one merge per page, not one per cast.
+ */
+export type CastCountsSink = (counts: CastCounts[]) => void;
+
 const DEFAULT_COUNT_CAP = 6000;
 const COUNT_PAGE_SIZE = 1000;
 /**
@@ -791,6 +807,108 @@ export class NodeBackedReads {
   }
 
   /**
+   * The like and recast counts for casts this reader has already served — the
+   * second pass a feed page no longer waits for.
+   *
+   * WHY THIS IS SEPARATE FROM THE PAGE
+   *
+   * MEASURED (2026-10-22, live release, 390px, cold): a home feed's page read
+   * finished at 7.9 s and the first cast painted at 13.4 s — the ~5.5 s in
+   * between was the per-cast count wave (60 `reactionsByCast` + 37
+   * `userDataByFid` + 35 `linkById` + 10 `castsByParent` + 6 `castById`), whose
+   * last read ENDED 170 ms before the paint. The page could not paint without
+   * it because every cast was built `withCounts: true` and the client resolves
+   * a feed page once. So the counts are read here instead: after the page has
+   * answered, for the same hashes, and the page is painted while this runs.
+   *
+   * Both reaction types are read — the recast count is rendered too
+   * (`CastDetails`, `Recasts`), so deferring only likes would leave a number
+   * that never arrives. The reads reuse `countCache` (a count some other
+   * surface already read is not read again) and run at the same bound as any
+   * other page read.
+   *
+   * A count that could not be read is left OUT of the answer, never answered
+   * with 0: a page that shows "0 likes" for a cast nobody counted is a lie the
+   * card this exists for was written to prevent.
+   */
+  async readCastCounts({
+    targets,
+  }: {
+    targets: { fid: number; hash: string }[];
+  }): Promise<CastCounts[]> {
+    if (targets.length === 0) {
+      return [];
+    }
+
+    const read = await mapWithConcurrency(
+      targets,
+      RESOLVE_CONCURRENCY,
+      async (target: {
+        fid: number;
+        hash: string;
+      }): Promise<CastCounts | undefined> => {
+        const { fid, hash } = target;
+        try {
+          const [reactions, recasts] = await Promise.all([
+            this.countReactions({
+              targetFid: fid,
+              targetHash: hash,
+              reactionType: 'Like',
+            }),
+            this.countReactions({
+              targetFid: fid,
+              targetHash: hash,
+              reactionType: 'Recast',
+            }),
+          ]);
+          return {
+            hash,
+            reactions: { count: reactions.value },
+            recasts: { count: recasts.value },
+          };
+        } catch {
+          // Not read, so not claimed: the cast keeps no count and the next
+          // surface that asks for it reads it then.
+          return undefined;
+        }
+      },
+    );
+
+    return read.filter((counts): counts is CastCounts => counts !== undefined);
+  }
+
+  /**
+   * The counts for a page just read, started behind it and handed to `onCounts`
+   * when they land. Never awaited by the page: nothing that renders the page's
+   * text, authors or embeds needs a count.
+   */
+  private startCountsBehind({
+    messages,
+    onCounts,
+  }: {
+    messages: NodeMessage[];
+    onCounts: CastCountsSink;
+  }): void {
+    const targets: { fid: number; hash: string }[] = [];
+    const seen = new Set<string>();
+    for (const message of messages) {
+      const key = `${message.fid}:${message.hash}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      targets.push({ fid: message.fid, hash: message.hash });
+    }
+
+    void this.readCastCounts({ targets })
+      .then((counts) => onCounts(counts))
+      .catch(() => {
+        // The page is already painted; a counts pass that failed is a set of
+        // counts nobody read, which is exactly what the casts still say.
+      });
+  }
+
+  /**
    * Which casts the signed-in account has already liked / recast.
    *
    * Cached, because the question ("which of my likes do I hold?") is answered by
@@ -982,20 +1100,24 @@ export class NodeBackedReads {
 
     const [author, reactions, recasts, mentioned] = await Promise.all([
       this.readAuthor(message.fid),
+      // No count read at all when the caller does not want one: `undefined` is
+      // how "not read" travels to `apiCastFromNode`, which then leaves the
+      // fields off the cast entirely. `exactCount(0)` used to be written here,
+      // and a page built that way claimed every cast had no likes.
       withCounts
         ? this.countReactions({
             targetFid: message.fid,
             targetHash: message.hash,
             reactionType: 'Like',
           })
-        : Promise.resolve(exactCount(0)),
+        : Promise.resolve(undefined),
       withCounts
         ? this.countReactions({
             targetFid: message.fid,
             targetHash: message.hash,
             reactionType: 'Recast',
           })
-        : Promise.resolve(exactCount(0)),
+        : Promise.resolve(undefined),
       mentionUsersPromise,
     ]);
 
@@ -1227,6 +1349,13 @@ export class NodeBackedReads {
    * `POST /v2/feed-items`. The feed the app asks for decides the source:
    * `home` and `following` are your follow graph, anything else is treated as
    * a channel key (the app passes `feed.key` for channel feeds).
+   *
+   * `onCounts` is what makes this page paintable early: with a sink in hand the
+   * page is built WITHOUT its engagement counts and the counts are read behind
+   * it (`readCastCounts`), handed to the sink when they land. Without a sink the
+   * page carries its counts as it always did — the mechanism is opt-in by the
+   * caller that can actually render counts arriving late, so a probe, a test or
+   * a build with no such surface sees the older, slower, complete answer.
    */
   async readFeed({
     feedKey,
@@ -1234,12 +1363,15 @@ export class NodeBackedReads {
     olderThan,
     limit = 25,
     updateState = false,
+    onCounts,
   }: {
     feedKey: string;
     feedType?: string;
     olderThan?: number;
     limit?: number;
     updateState?: boolean;
+    /** Where the page's counts go, when they are read behind its paint. */
+    onCounts?: CastCountsSink;
   }): Promise<ApiFeedItemsResult> {
     const fid = this.requireFid();
 
@@ -1267,7 +1399,21 @@ export class NodeBackedReads {
           })
         : await this.channelFeedMessages({ key: feedKey, olderThan, limit });
 
-    const casts = await this.buildCasts(messages);
+    const casts = await this.buildCasts(messages, {
+      withCounts: onCounts === undefined,
+    });
+
+    // The counts, started the moment the page is built and then left behind it.
+    //
+    // AFTER the page's own reads, deliberately: this pass is 2 reads per cast,
+    // and starting them alongside the page's author/mention/embed reads would
+    // put both fan-outs on the node at once and could slow the very paint this
+    // exists to move earlier. Started here, it cannot cost the page anything —
+    // it runs while the answer travels and the casts render, and the numbers
+    // land a few seconds under the paint instead of in front of it.
+    if (onCounts) {
+      this.startCountsBehind({ messages, onCounts });
+    }
 
     if (updateState) {
       this.markSeen(fid, isHome || isFollowing ? 'home' : feedKey);

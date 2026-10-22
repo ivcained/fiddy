@@ -68,7 +68,11 @@ import {
   type WriteApproval,
   type WriteEvidence,
 } from '~/snapchain/nodeApi/nodeWrites';
-import { castAuthorOf, channelParentUrlFor } from '~/snapchain/nodeApi/reads';
+import {
+  castAuthorOf,
+  type CastCountsSink,
+  channelParentUrlFor,
+} from '~/snapchain/nodeApi/reads';
 
 import {
   providerCanServe,
@@ -139,6 +143,14 @@ export interface ProviderBackedFetchOptions {
    * Leave it out (or pass `null`) for the bare refusal.
    */
   askForPostingKey?: WriteApproval | null;
+  /**
+   * Where a feed page's engagement counts go when they arrive behind its paint
+   * (`nodeApi/reads.ts` `readCastCounts`, `nodeBackedFetch`'s `onCountsRead`).
+   * Handed to every node adapter this seam builds, so the counts of a page read
+   * from whichever node is live land in the same place. Leave it out for the
+   * older answer, where a page waits for its own counts.
+   */
+  onCountsRead?: CastCountsSink;
   /**
    * Where a write's own evidence goes, when a surface in the app has to read it
    * rather than guess — today the mini app agent bridge's `post` ask, which is
@@ -239,6 +251,7 @@ export const createProviderBackedFetch = ({
   drafts: draftsOption,
   askForPostingKey,
   onWriteEvidence,
+  onCountsRead,
 }: ProviderBackedFetchOptions): ProviderBackedFetchHandle => {
   const drafts = draftsOption ?? new LocalDraftStore();
   const nodeFetch = fetchImpl ?? fetch;
@@ -314,6 +327,7 @@ export const createProviderBackedFetch = ({
       ...(askForPostingKey === null || askForPostingKey === undefined
         ? {}
         : { askForPostingKey }),
+      ...(onCountsRead === undefined ? {} : { onCountsRead }),
       ...(onWriteEvidence === undefined ? {} : { onWriteEvidence }),
     });
     adapters.set(baseUrl, created);

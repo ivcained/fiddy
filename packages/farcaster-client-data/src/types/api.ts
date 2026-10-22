@@ -2193,10 +2193,29 @@ export interface ApiCast {
     count: ApiNonNegativeInteger;
     casts?: ApiCast[];
   };
-  reactions: {
+  /**
+   * A cast's own like count — or, when it is ABSENT, the fact that this client
+   * has not read it yet.
+   *
+   * It is optional because a count really can be missing now: the node-backed
+   * client answers a feed page as soon as the page's own reads are done and
+   * reads the engagement counts in a second pass *behind* it (`reads.ts`,
+   * `readCastCounts`), because a first cast used to wait ~5.5 s on the slowest
+   * per-cast count read of the page. So between the paint and that pass the
+   * number genuinely does not exist, and writing `0` there would be a claim
+   * nobody made.
+   *
+   * The rule that follows, and the reason this is a type and not a comment:
+   * a surface that renders a count must handle the absence — render nothing
+   * (a count that is 0 renders nothing today anyway) or wait — and must never
+   * treat "not read" as "none". `0` here still means what it always meant: the
+   * count was read, and it is zero.
+   */
+  reactions?: {
     count: ApiNonNegativeInteger;
   };
-  recasts: {
+  /** A cast's own recast count — absent means not read yet, exactly as above. */
+  recasts?: {
     count: ApiNonNegativeInteger;
     recasters?: ApiRecaster[];
   };

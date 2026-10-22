@@ -497,8 +497,12 @@ export const apiCastFromNode = ({
       count: replies?.count ?? 0,
       ...(replies?.casts ? { casts: replies.casts } : {}),
     },
-    reactions: { count: reactions?.value ?? 0 },
-    recasts: { count: recasts?.value ?? 0 },
+    // A count is written only when it was READ. With no `reactions` in hand
+    // (a feed page answers before its counts are read — see `reads.ts`
+    // `readCastCounts`) the field is left absent rather than zeroed, so no
+    // surface can render "0 likes" for a cast nobody counted.
+    ...(reactions ? { reactions: { count: reactions.value } } : {}),
+    ...(recasts ? { recasts: { count: recasts.value } } : {}),
     // View counts are the hosted indexer's; absent, not zero.
     watches: { count: 0 },
     // `castType` in this API means where the cast sits in a feed, not how long
