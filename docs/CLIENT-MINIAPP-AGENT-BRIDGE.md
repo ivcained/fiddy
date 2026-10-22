@@ -388,6 +388,7 @@ shrug:
 | `muted` | `The person using Fiddy told this app to stop asking.` |
 | `budget` | `This app has asked Fiddy as often as it may in this window.` |
 | `not_permitted` | `Fiddy does not hand what your agent says to an app.` |
+| `unavailable` | `Fiddy cannot do that here yet.` |
 | `invalid` | `That ask was not something Fiddy can do.` |
 | `drafted` | `A draft is open in the composer.` |
 | `posted` | `Fiddy's owner approved it, and Fiddy's own node shows the cast.` |
@@ -398,6 +399,22 @@ shrug:
 error: the app asked something real and there is no agent in this browser to
 answer for it. The app may show the sentence, or ignore it, or ask again when the
 reader has a session — and it will be told the same thing until then.
+
+**One order decides which sentence wins**, so the same ask never gets two
+different answers from two code paths:
+
+```
+invalid  →  no_agent  →  muted  →  budget  →  unavailable  →  the ask itself
+```
+
+Validation first (a malformed ask is refused before anything else is even
+considered), then the environment (`no_agent` is about the session, not about the
+app), then the app's own standing with this reader (mute outranks budget: a muted
+app is not told how many asks it has left), then the ceiling, and only then the
+ask's own route. `unavailable` is what a well-formed ask gets from a shell that
+has no path for it — today that is every effectful ask, since the slices below
+land one at a time, and it is the state that keeps a half-built bridge honest
+instead of pretending.
 
 The app is also told the truth when Fiddy is signed out entirely: an ask from a
 window on a signed-out shell is `no_agent` too, because there is no session for
@@ -436,8 +453,10 @@ bridge cannot be built on top of it quietly.
 Four slices, chained so that one worker owns this repo at a time (this repo's
 `lint-staged` hook stashes unstaged work on every commit — two workers in one
 tree destroy each other's work, so slices run in sequence, each from a worktree).
-Each block below is the decision set its card must carry; none of them re-opens a
-question settled in this file.
+The landing order is **S1 → S4 → S2 → S3**: the refusals can be honest first, the
+wire the approval will sit on gets pinned before an approval exists on it, and
+the two effectful asks come last. Each block below is the decision set its card
+must carry; none of them re-opens a question settled in this file.
 
 **S1 — the channel and the refusals.** `apps/farcaster-web/src/components/miniApp/agentAskChannel.ts`
 (a pure module: envelope validation, the one-shot ids, the 30 s dedupe, the
@@ -446,10 +465,11 @@ browser), wired into `MiniApp.tsx` with a real `window` listener pinned to the
 iframe's `event.source` + origin; `fiddy.agent.ask` added to `getCapabilities`;
 and the ~30-line app-facing shim an app author drops in (`public/fiddy-agent-ask.js`)
 so a real app can exercise it. **It raises no UI and has no agent parity**: every
-ask an app can send is answered honestly (`no_agent` when nothing is paired,
-`invalid` for anything outside §3.6) and nothing is spent, which is exactly the
-safety half landing before the effectful half. Unit tests only; no browser probe
-required to call it done.
+ask an app can send is answered honestly and in the order of §6 (`no_agent` when
+nothing is paired, `unavailable` for a well-formed effectful ask, `invalid` for
+anything outside §3.6, `budget` and `muted` for the app that earned them) and
+nothing is spent — which is exactly the safety half landing before the effectful
+half. Unit tests only; no browser probe required to call it done.
 
 **S2 — the ask card, `draft`, and `post`.** The store
 (`postingKeyApproval`'s shape: one decision in front of the reader, joins, five
@@ -458,7 +478,8 @@ chrome, the mute affordance, and the two effectful asks that end in the composer
 `draft` (one chat message → the draft in `ComposeCastModal`'s own route; the app
 gets `drafted`) and `post` (the same composer, then the write seam, then the
 existing posting-key approval if this device holds no key; the app gets `posted`
-/ `unknown` / `declined`, never a hash). Depends on S1.
+/ `unknown` / `declined`, never a hash). Depends on S1 and S4 — it is an approval
+surface, so the wire it sits on is pinned first.
 
 **S3 — `remind`.** The third ask: the ask card's words, one chat message in
 `AgentPage.tsx:545-548`'s own phrasing, the record in `lib/agentSchedules.ts`,
