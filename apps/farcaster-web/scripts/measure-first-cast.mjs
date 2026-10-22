@@ -58,7 +58,8 @@ const BOOT = Number(process.env.LIVE_BOOT_MS ?? 180_000);
  * that paints early and shows no engagement numbers forever is not the fix, so
  * this wait exists to be able to say that. */
 const COUNT_BUDGET = Number(process.env.MEASURE_COUNT_MS ?? 45_000);
-const OUT = process.env.MEASURE_OUT ?? `${process.cwd()}/first-cast-measure.json`;
+const OUT =
+  process.env.MEASURE_OUT ?? `${process.cwd()}/first-cast-measure.json`;
 const VIEWS = (process.env.MEASURE_VIEWS ?? '390,1440')
   .split(',')
   .map((label) => Number(label.trim()))
@@ -80,18 +81,34 @@ const CAST_HREF = /^\/~\/conversations\/0x[0-9a-f]{8,}$/i;
 
 /**
  * In-page: the first visible cast, and the engagement counts drawn on it RIGHT
- * NOW. Returns `{ cast, method, likes, recasts, replies }`, where the three
- * kinds are the numbers on screen (empty when the count is not drawn at all).
+ * NOW. Returns `{ cast, method, likes, recasts, replies, page, pageNumbers }`,
+ * where the three kinds are the numbers on screen (empty when the count is not
+ * drawn at all).
  *
  * Two ways of reading it, because two builds exist:
  *
- *   - `markers` — the count spans carry `data-fiddy-count` (`CastDetails`),
- *     which is how a build that knows a count can arrive LATE says which count
- *     it is. This is the exact answer.
+ *   - `markers` — the count spans carry `data-fiddy-count`, which is how a build
+ *     that knows a count can arrive LATE says which count it is. This is the
+ *     exact answer. The markers live on `CastDetails` AND on the count beside a
+ *     cast's action icons (`CastReactionAction`, added for this card): the
+ *     action bar is the only place a non-focused cast draws a number, so
+ *     without it the feed's numbers were unreadable from the DOM and a count
+ *     that arrived behind the paint could not be told from one that never
+ *     arrived.
  *   - `titles` — a build from before those markers: every count the fork draws
  *     is a span whose `title` is the number, sitting beside a label naming it
  *     ("likes"), so that pair is what is looked for. Coarser, but it makes a
  *     before/after comparison possible against a release already deployed.
+ *
+ * `scope` is walked up from the permalink to the ancestor that actually holds
+ * the cast's counts, and not `closest('div[class]')`: the permalink sits in the
+ * cast's header and the counts are siblings under a common ancestor, so the old
+ * one-level scope saw none of them and answered "no counts" for a cast with
+ * 1,664 likes (measured, card t_0d0e9330).
+ *
+ * `page`/`pageNumbers` are the same question for the WHOLE page — how many
+ * counts, of which kind, the feed is drawing at this moment. A wall of "0"s
+ * that never becomes numbers is what those two are there to show.
  *
  * Self-contained on purpose: it is stringified into the page (`evaluate`, and
  * `waitForFunction` for the wait), so it closes over nothing.
@@ -103,6 +120,24 @@ const COUNTS_DETECT = ({ link, pattern }) => {
       re.test(node.getAttribute('href') ?? '') &&
       node.getBoundingClientRect().width > 0,
   );
+
+  const pageMarks = Array.from(document.querySelectorAll('[data-fiddy-count]'));
+  const page = {};
+  for (const node of pageMarks) {
+    const kind = node.getAttribute('data-fiddy-count');
+    page[kind] = (page[kind] ?? 0) + 1;
+  }
+  // Every bare number the page is drawing (a count with no label of its own:
+  // the action bar's).
+  const pageNumbers = Array.from(document.querySelectorAll('span'))
+    .filter(
+      (node) =>
+        /^[\d.,]+ ?(K|M)?$/.test((node.textContent ?? '').trim()) &&
+        node.getBoundingClientRect().width > 0 &&
+        (node.textContent ?? '').trim() !== '',
+    )
+    .map((node) => (node.textContent ?? '').trim());
+
   if (!first) {
     return {
       cast: null,
@@ -110,12 +145,23 @@ const COUNTS_DETECT = ({ link, pattern }) => {
       likes: [],
       recasts: [],
       replies: [],
+      page,
+      pageNumbers,
       reason: 'no cast link is visible',
     };
   }
 
-  const scope = first.closest('div[class]') ?? document.body;
   const href = first.getAttribute('href');
+  let scope = first;
+  for (let i = 0; i < 12 && scope.parentElement; i += 1) {
+    scope = scope.parentElement;
+    if (scope.querySelector('[data-fiddy-count]')) {
+      break;
+    }
+    if ((scope.innerText ?? '').length > 120) {
+      break;
+    }
+  }
   const marks = Array.from(scope.querySelectorAll('[data-fiddy-count]'));
 
   if (marks.length > 0) {
@@ -129,6 +175,8 @@ const COUNTS_DETECT = ({ link, pattern }) => {
       likes: held('likes'),
       recasts: held('recasts'),
       replies: held('replies'),
+      page,
+      pageNumbers,
     };
   }
 
@@ -137,19 +185,28 @@ const COUNTS_DETECT = ({ link, pattern }) => {
     recasts: /recasts?/i,
     replies: /repl(y|ies)/i,
   };
-  const titled = Array.from(scope.querySelectorAll('span[title]'));
+  const labeled = Array.from(scope.querySelectorAll('span[title]'));
   const named = (kind) =>
-    titled
+    labeled
       .filter((node) =>
         labels[kind].test(node.parentElement?.textContent ?? ''),
       )
       .map((node) => node.getAttribute('title'));
+  // A build with no markers at all (before card t_0d0e9330) draws its counts as
+  // bare numbers in the action bar too, so those are reported as well rather
+  // than leaving `likes: []` to mean both "no count" and "cannot see it".
+  const bare = Array.from(scope.querySelectorAll('span'))
+    .filter((node) => /^[\d.,]+ ?(K|M)?$/.test((node.textContent ?? '').trim()))
+    .map((node) => (node.textContent ?? '').trim());
   return {
     cast: href,
     method: 'titles',
     likes: named('likes'),
     recasts: named('recasts'),
     replies: named('replies'),
+    bareNumbers: bare,
+    page,
+    pageNumbers,
   };
 };
 
@@ -179,7 +236,10 @@ const result = {
   driver: createHash('sha256')
     .update(readFileSync(new URL(import.meta.url)))
     .digest('hex'),
-  host: { cpus: os.cpus().length, load: os.loadavg().map((n) => Math.round(n * 10) / 10) },
+  host: {
+    cpus: os.cpus().length,
+    load: os.loadavg().map((n) => Math.round(n * 10) / 10),
+  },
   notes: [],
   runs: [],
 };
@@ -194,17 +254,34 @@ try {
     signal: AbortSignal.timeout(30_000),
   }).then((response) => response.json());
 } catch (error) {
-  note(`release.json: ${String(error).slice(0, 120)} (a locally served build has none)`);
+  note(
+    `release.json: ${String(error).slice(0, 120)} (a locally served build has none)`,
+  );
 }
-const shell = await fetch(`${SITE}/`, { signal: AbortSignal.timeout(60_000) }).then((response) => response.text());
+const shell = await fetch(`${SITE}/`, {
+  signal: AbortSignal.timeout(60_000),
+}).then((response) => response.text());
 const entryMatch = shell.match(/\/assets\/index-[A-Za-z0-9_-]+\.js/);
 const entryChunk = entryMatch
   ? {
       path: entryMatch[0],
-      bytes: Number((await fetch(`${SITE}${entryMatch[0]}`, { signal: AbortSignal.timeout(180_000) })).headers.get('content-length')) || null,
+      bytes:
+        Number(
+          (
+            await fetch(`${SITE}${entryMatch[0]}`, {
+              signal: AbortSignal.timeout(180_000),
+            })
+          ).headers.get('content-length'),
+        ) || null,
     }
   : null;
-result.release = { ...(release ?? { revision: null, note: 'no release.json (a locally served build)' }), entryChunk };
+result.release = {
+  ...(release ?? {
+    revision: null,
+    note: 'no release.json (a locally served build)',
+  }),
+  entryChunk,
+};
 
 const browser = await chromium.launch({ channel: 'chrome' });
 
@@ -226,7 +303,14 @@ for (const view of VIEWS.map((width) => ({
   let timeline = [];
   let open = new Map();
   page.on('request', (request) => {
-    open.set(request, { method: request.method(), url: request.url(), start: Date.now(), end: null, status: null, failed: null });
+    open.set(request, {
+      method: request.method(),
+      url: request.url(),
+      start: Date.now(),
+      end: null,
+      status: null,
+      failed: null,
+    });
   });
   const close = (request, failed) => {
     const entry = open.get(request);
@@ -246,7 +330,9 @@ for (const view of VIEWS.map((width) => ({
       }
     }
   });
-  page.on('requestfailed', (request) => close(request, request.failure()?.errorText ?? 'failed'));
+  page.on('requestfailed', (request) =>
+    close(request, request.failure()?.errorText ?? 'failed'),
+  );
 
   const abortedWrites = [];
   const signIns = [];
@@ -255,7 +341,8 @@ for (const view of VIEWS.map((width) => ({
     const url = request.url();
     const method = request.method();
     if (url.startsWith('https://relay.farcaster.xyz')) {
-      if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS, body: '' });
+      if (method === 'OPTIONS')
+        return route.fulfill({ status: 204, headers: CORS, body: '' });
       if (method === 'POST') {
         return route.fulfill({
           status: 201,
@@ -289,7 +376,14 @@ for (const view of VIEWS.map((width) => ({
     return route.continue();
   });
 
-  const run = { viewport: view.label, cold: {}, warm: {}, abortedWrites, timeline: [], warmTimeline: [] };
+  const run = {
+    viewport: view.label,
+    cold: {},
+    warm: {},
+    abortedWrites,
+    timeline: [],
+    warmTimeline: [],
+  };
 
   /** Everything a cast-bearing page can be read from, for the report. */
   const sample = async () => {
@@ -304,13 +398,15 @@ for (const view of VIEWS.map((width) => ({
           );
           const first = visible[0];
           const block = first
-            ? first.closest('div[class]')?.innerText ?? first.innerText
+            ? (first.closest('div[class]')?.innerText ?? first.innerText)
             : '';
           return {
             casts: visible.length,
             href: first?.getAttribute('href') ?? null,
             text: (block ?? '').replace(/\s+/g, ' ').trim().slice(0, 200),
-            body: (document.body?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 220),
+            body: (document.body?.innerText ?? '')
+              .replace(/\s+/g, ' ')
+              .slice(0, 220),
           };
         },
         { link: CAST_LINK, pattern: CAST_HREF.source },
@@ -321,8 +417,8 @@ for (const view of VIEWS.map((width) => ({
   };
 
   /** Wait for the first cast, tolerating the sign-in's own navigation. The
- * predicate is self-contained and takes its pattern as an argument: a function
- * that closes over a module binding is serialized into the page without it. */
+   * predicate is self-contained and takes its pattern as an argument: a function
+   * that closes over a module binding is serialized into the page without it. */
   const waitForFirstCast = async (budgetMs) => {
     const started = Date.now();
     await page
@@ -338,7 +434,9 @@ for (const view of VIEWS.map((width) => ({
         { link: CAST_LINK, pattern: CAST_HREF.source },
         { timeout: budgetMs, polling: 100 },
       )
-      .catch((error) => note(`first cast wait: ${String(error).slice(0, 140)}`));
+      .catch((error) =>
+        note(`first cast wait: ${String(error).slice(0, 140)}`),
+      );
     return Date.now() - started;
   };
 
@@ -367,18 +465,25 @@ for (const view of VIEWS.map((width) => ({
     }
   };
 
-  /** How long after the paint the first cast's LIKE count appears on screen.
+  /** How long after the paint the first cast's DEFERRED counts (its likes and
+   * recasts) appear on screen.
    *
-   * `null` when it never does inside the budget — a feed that paints early and
-   * shows no engagement numbers at all is not the fix this measures, so the
-   * wait has to be able to say so rather than time out silently.
+   * The two kinds a feed page now reads behind its paint. The reply count is
+   * deliberately not part of the question: it arrives WITH the page, so it is
+   * already drawn at the paint and waiting for it would answer instantly and
+   * tell us nothing (and a focused cast's zero replies draws a "0" with a
+   * marker of its own).
+   *
+   * `null` when neither appears inside the budget — a feed that paints early and
+   * shows no engagement numbers at all is not the fix this measures, so the wait
+   * has to be able to say so rather than time out silently.
    */
   const waitForCountAfterPaint = async (budgetMs) => {
     const started = Date.now();
     const args = { link: CAST_LINK, pattern: CAST_HREF.source };
     try {
       await page.waitForFunction(
-        `(${COUNTS_DETECT.toString()})(${JSON.stringify(args)}).likes.length > 0`,
+        `(() => { const r = (${COUNTS_DETECT.toString()})(${JSON.stringify(args)}); return r.likes.length + r.recasts.length > 0; })()`,
         undefined,
         { timeout: budgetMs, polling: 250 },
       );
@@ -391,16 +496,23 @@ for (const view of VIEWS.map((width) => ({
   /** When the feed stopped asking for things after that first paint. */
   const waitForSettled = async () => {
     const started = Date.now();
-    await page.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => {});
+    await page
+      .waitForLoadState('networkidle', { timeout: 60_000 })
+      .catch(() => {});
     return Date.now() - started;
   };
 
   // ── COLD: a fresh browser (no storage at all) signs in and waits for a cast.
   const coldStart = Date.now();
   try {
-    await page.goto(`${SITE}/welcome/ready`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
+    await page.goto(`${SITE}/welcome/ready`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 120_000,
+    });
     await page.waitForSelector('[data-fiddy="onboarding"]', { timeout: BOOT });
-    const signIn = page.locator('button:has-text("sign in with Farcaster")').first();
+    const signIn = page
+      .locator('button:has-text("sign in with Farcaster")')
+      .first();
     await signIn.waitFor({ state: 'visible', timeout: BOOT });
     const clickedAt = Date.now();
     await signIn.click({ timeout: 60_000, force: true });
@@ -465,7 +577,11 @@ for (const view of VIEWS.map((width) => ({
         return {
           count: keys.length,
           keys: keys.slice(0, 40),
-          bytes: keys.reduce((total, key) => total + (window.localStorage.getItem(key)?.length ?? 0), 0),
+          bytes: keys.reduce(
+            (total, key) =>
+              total + (window.localStorage.getItem(key)?.length ?? 0),
+            0,
+          ),
         };
       }),
     };
@@ -489,7 +605,11 @@ await browser.close();
 writeFileSync(OUT, JSON.stringify(result, null, 2));
 
 /** What the summary says: enough to compare two runs, nothing to interpret. */
-const isNodeRead = (url) => url.includes('haatz') || url.includes('/snapchain-api/') || url.includes('/v1/') || url.includes('/v2/');
+const isNodeRead = (url) =>
+  url.includes('haatz') ||
+  url.includes('/snapchain-api/') ||
+  url.includes('/v1/') ||
+  url.includes('/v2/');
 
 /** When a set of reads ran, relative to the case's own start. */
 const readWindow = (list, needle) => {
@@ -502,8 +622,12 @@ const readWindow = (list, needle) => {
   const ends = reads.map((read) => read.to).filter((to) => to !== null);
   return {
     count: reads.length,
-    firstStartMs: reads.length ? Math.min(...reads.map((read) => read.from)) : null,
-    lastStartMs: reads.length ? Math.max(...reads.map((read) => read.from)) : null,
+    firstStartMs: reads.length
+      ? Math.min(...reads.map((read) => read.from))
+      : null,
+    lastStartMs: reads.length
+      ? Math.max(...reads.map((read) => read.from))
+      : null,
     lastEndMs: ends.length ? Math.max(...ends) : null,
   };
 };
@@ -532,11 +656,13 @@ const readOrdering = ({ timeline: list, paintMs }) => {
 };
 
 const summary = result.runs.map((run) => {
-  const nodeAt = (list) => list.filter((entry) => isNodeRead(entry.url)).map((entry) => entry.fromMs);
+  const nodeAt = (list) =>
+    list.filter((entry) => isNodeRead(entry.url)).map((entry) => entry.fromMs);
   const coldNode = nodeAt(run.timeline).sort((a, b) => a - b);
   const warmNode = nodeAt(run.warmTimeline).sort((a, b) => a - b);
   const coldPaintMs =
-    typeof run.cold.readyMs === 'number' && typeof run.cold.firstCastMs === 'number'
+    typeof run.cold.readyMs === 'number' &&
+    typeof run.cold.firstCastMs === 'number'
       ? run.cold.readyMs + run.cold.firstCastMs
       : null;
   return {
@@ -549,6 +675,15 @@ const summary = result.runs.map((run) => {
     coldCountsAtPaint: run.cold.countsAtPaint ?? null,
     coldCountsAfterPaintMs: run.cold.countsAfterPaintMs,
     coldCountsAfterPaint: run.cold.countsAfterPaint ?? null,
+    /** How many counts the whole feed is drawing at the paint and after
+     * waiting, by kind — a feed whose every number is absent at the paint and
+     * present later is the shape this card claims. */
+    coldPageAtPaint: run.cold.countsAtPaint?.page ?? null,
+    coldPageNumberCountAtPaint:
+      run.cold.countsAtPaint?.pageNumbers?.length ?? null,
+    coldPageAfter: run.cold.countsAfterPaint?.page ?? null,
+    coldPageNumberCountAfter:
+      run.cold.countsAfterPaint?.pageNumbers?.length ?? null,
     coldText: run.cold.sample?.text ?? null,
     warmFirstCastMs: run.warm.firstCastMs ?? null,
     warmError: run.warm.error ?? null,
@@ -557,6 +692,8 @@ const summary = result.runs.map((run) => {
     warmCountsAtPaint: run.warm.countsAtPaint ?? null,
     warmCountsAfterPaintMs: run.warm.countsAfterPaintMs,
     warmCountsAfterPaint: run.warm.countsAfterPaint ?? null,
+    warmPageAtPaint: run.warm.countsAtPaint?.page ?? null,
+    warmPageAfter: run.warm.countsAfterPaint?.page ?? null,
     warmText: run.warm.sample?.text ?? null,
     warmStorageKeys: run.warm.storage?.keys ?? null,
     warmStorageBytes: run.warm.storage?.bytes ?? null,
@@ -567,10 +704,27 @@ const summary = result.runs.map((run) => {
     warmNodeReads: warmNode.length,
     warmFirstNodeReadMs: warmNode[0] ?? null,
     abortedWrites: run.abortedWrites.length,
-    coldReadOrdering: readOrdering({ timeline: run.timeline, paintMs: coldPaintMs }),
-    warmReadOrdering: readOrdering({ timeline: run.warmTimeline, paintMs: run.warm.firstCastMs ?? null }),
+    coldReadOrdering: readOrdering({
+      timeline: run.timeline,
+      paintMs: coldPaintMs,
+    }),
+    warmReadOrdering: readOrdering({
+      timeline: run.warmTimeline,
+      paintMs: run.warm.firstCastMs ?? null,
+    }),
   };
 });
 console.log(
-  JSON.stringify({ out: OUT, driver: result.driver, release: result.release, host: result.host, notes: result.notes, runs: summary }, null, 2),
+  JSON.stringify(
+    {
+      out: OUT,
+      driver: result.driver,
+      release: result.release,
+      host: result.host,
+      notes: result.notes,
+      runs: summary,
+    },
+    null,
+    2,
+  ),
 );

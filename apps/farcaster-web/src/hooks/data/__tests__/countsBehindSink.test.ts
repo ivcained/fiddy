@@ -44,11 +44,25 @@ const countsFor = (hash: string) => ({
   recasts: { count: 2 },
 });
 
+/** The key a feed's casts are really cached under.
+ *
+ * NOT `{ hash }`: the flag is part of the key and `compactQueryKey` drops only
+ * `undefined`, so a cast held as itself is `[.., hash, false]` — every writer
+ * and every reader passes `!!recast` (`useBatchMergeIntoGloballyCachedCasts`,
+ * `useGloballyCachedCast`). This test file used to seed `{ hash }` instead,
+ * which is the key `mergeCastCountsIntoGloballyCachedCasts` wrote to at the
+ * time — so the merge and its test agreed with each other and neither agreed
+ * with the app. On a live release the counts were read, delivered to the sink
+ * and dropped onto a key no cast was held under, and the feed showed no numbers
+ * at all (measured 2026-10-23, cold sign-in, 390px). Seed what the app holds. */
+const castKey = (hash: string, recast = false) =>
+  buildGloballyCachedCastKey({ hash, recast });
+
 describe('a page’s counts merge into the casts already cached', () => {
   it('fills the counts of a cast that is on screen', () => {
     const queryClient = new QueryClient();
     const hash = '0xabc';
-    const key = buildGloballyCachedCastKey({ hash });
+    const key = castKey(hash);
     queryClient.setQueryData(key, castFixture(hash));
 
     const updated = mergeCastCountsIntoGloballyCachedCasts({
@@ -65,12 +79,30 @@ describe('a page’s counts merge into the casts already cached', () => {
     expect(cast.author.fid).toBe(3);
   });
 
+  it('lands on the key the feed stores its casts under, and not the flagless one', () => {
+    const queryClient = new QueryClient();
+    const hash = '0xflag';
+    queryClient.setQueryData(castKey(hash), castFixture(hash));
+
+    const updated = mergeCastCountsIntoGloballyCachedCasts({
+      queryClient,
+      counts: [countsFor(hash)],
+    });
+
+    expect(updated).toBe(1);
+    expect(queryClient.getQueryData<ApiCast>(castKey(hash))!.reactions).toEqual(
+      { count: 7 },
+    );
+    // The flagless key is NOT where a cast lives; a count written there is a
+    // count dropped, which is what this test exists to catch.
+    expect(
+      queryClient.getQueryData(buildGloballyCachedCastKey({ hash })),
+    ).toBeUndefined();
+  });
+
   it('creates nothing for a hash nobody has cached', () => {
     const queryClient = new QueryClient();
-    queryClient.setQueryData(
-      buildGloballyCachedCastKey({ hash: '0xoncache' }),
-      castFixture('0xoncache'),
-    );
+    queryClient.setQueryData(castKey('0xoncache'), castFixture('0xoncache'));
     const before = queryClient.getQueryCache().getAll().length;
 
     const updated = mergeCastCountsIntoGloballyCachedCasts({
@@ -90,8 +122,8 @@ describe('a page’s counts merge into the casts already cached', () => {
   it('fills both a cast and its recast entry when both are cached', () => {
     const queryClient = new QueryClient();
     const hash = '0xboth';
-    const plain = buildGloballyCachedCastKey({ hash });
-    const asRecast = buildGloballyCachedCastKey({ hash, recast: true });
+    const plain = castKey(hash);
+    const asRecast = castKey(hash, true);
     queryClient.setQueryData(plain, castFixture(hash));
     queryClient.setQueryData(asRecast, castFixture(hash, { recast: true }));
 
@@ -112,10 +144,7 @@ describe('a page’s counts merge into the casts already cached', () => {
   it('reports how many casts it filled, one per cast', () => {
     const queryClient = new QueryClient();
     for (const hash of ['0xone', '0xtwo', '0xthree']) {
-      queryClient.setQueryData(
-        buildGloballyCachedCastKey({ hash }),
-        castFixture(hash),
-      );
+      queryClient.setQueryData(castKey(hash), castFixture(hash));
     }
 
     const updated = mergeCastCountsIntoGloballyCachedCasts({
