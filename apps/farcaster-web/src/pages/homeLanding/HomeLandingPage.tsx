@@ -186,6 +186,14 @@ export function HomeLandingPage() {
                   </div>
                 </div>
               </div>
+              <div className="mt-4 text-center text-xs text-[rgba(255,255,255,0.35)]">
+                <ExternalLink
+                  href="https://fiddy.fun/client/"
+                  title="Run your own Farcaster node"
+                >
+                  run your own node →
+                </ExternalLink>
+              </div>
               <div className="mt-[35px] flex flex-col space-y-3">
                 <div className="flex flex-row items-center space-x-2 py-2">
                   <div className="h-px grow bg-[rgba(255,255,255,0.8)]" />
