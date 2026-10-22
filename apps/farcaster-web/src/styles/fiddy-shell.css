@@ -958,6 +958,24 @@ html.fiddy-dark-shell body {
   gap: 10px;
 }
 
+/*
+ * An item is as tall as everything it holds.
+ *
+ * `.fiddy-brain-card` is `height: 100%` because the brain grid wants equal
+ * heights across a row. Inside a grid item that percentage is resolved against
+ * the item, so the item ends up only as tall as the card, and a note under the
+ * card (`~wallet home` says why a choice is unavailable) spills out of the item
+ * and lands on whatever comes next — measured on the wallet page: the note and
+ * the summary line rendered on top of each other. A flex column item makes the
+ * percentage indefinite again, so the card is its own height and the note is
+ * part of the item.
+ */
+.fiddy-card-list > li {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 @media (min-width: 640px) {
   .fiddy-card-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));

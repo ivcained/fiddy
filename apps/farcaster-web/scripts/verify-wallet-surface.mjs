@@ -7,6 +7,10 @@
 //
 //   WALLET_ORIGIN=https://localhost:5199 node apps/farcaster-web/scripts/verify-wallet-surface.mjs
 //
+// The page's address is /~/wallet: the client's app routes all live behind the
+// `/~` prefix (see src/constants/routePrefixes.ts), and the bare /wallet is a
+// different route entirely.
+//
 // Screenshots land in $WALLET_SHOT_DIR (default: the system temp dir).
 //
 // WHAT IT MEASURES, AND WHY
@@ -305,7 +309,7 @@ const run = async ({ label, injected, signedIn: wantsSignIn, width }) => {
     );
   }
 
-  await page.goto(`${ORIGIN}/wallet`, {
+  await page.goto(`${ORIGIN}/~/wallet`, {
     waitUntil: 'domcontentloaded',
     timeout: BOOT_TIMEOUT,
   });
