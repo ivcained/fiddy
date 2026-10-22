@@ -97,8 +97,9 @@ describe('the shell a shared link unfurls as', () => {
     expect(embed.button.action.type).toBe('launch_miniapp');
     expect(embed.button.action.name).toBe('fiddy');
     expect(embed.button.action.url).toBe('https://fiddy.fun/');
-    // The splash the transition paints is the app's own ground, not the
-    // purple the older manifest still carries.
+    // The splash the transition paints is the app's own ground. The manifest
+    // that lists this app says the same, and both are held to it by
+    // wellKnownManifest.test.ts and the release's check-manifest.mjs.
     expect(embed.button.action.splashBackgroundColor).toBe('#161715');
     expect(embed.button.action.splashImageUrl).toMatch(/^https:\/\//);
   });

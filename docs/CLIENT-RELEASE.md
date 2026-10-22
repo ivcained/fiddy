@@ -23,6 +23,8 @@ embed renders as and the provider the client reads through, neither of which the
 | `/api/fiddy/media`, `/api/fiddy/media/<sha256>.<ext>` | our media host | nginx → `:3219` (`fiddy-auth`) |
 | `/api/farcaster/status`, `/api/farcaster/poidh/bounties` | the preview's read API | nginx → `:3218` (`fiddy-preview.service`) |
 | `/client`, `/client/`, `/FSSC/`, `/start` | unchanged | elsewhere, untouched |
+| `/.well-known/farcaster.json` | the signed app-list manifest — Fiddy's listing identity (name, icon, description, splash, webhook) | nginx `alias /var/www/fiddy-well-known/farcaster.json`; the release installs it from `releases/<sha>/web/.well-known/farcaster.json`, i.e. from the repo's `apps/farcaster-web/public/.well-known/farcaster.json` |
+| `/fiddy-splash.png` | the 200×200 splash the manifest and the shell's `fc:miniapp` embed both paint | `releases/<sha>/web/fiddy-splash.png` (a file in this repo) |
 
 The release tree keeps three things the vhost and systemd depend on:
 
@@ -112,7 +114,12 @@ What it does, and why each step is not optional:
    `index.html` would be refused in the browser after the release). A build that
    needs one does not ship
    (`apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs`, taken from
-   the frozen tree). Step 6 repeats the Together assertions on the extracted
+   the frozen tree). Step 3 also has to pass
+   `apps/farcaster-web/scripts/check-manifest.mjs` over the built tree: the
+   app-list manifest must be signed, spec-sized (200×200 splash, read from the
+   PNG's own header), describe the same product the shell unfurls as, and name a
+   splash asset this repo owns — see *The listing manifest* below. Step 6 repeats
+   the Together assertions on the extracted
    tree on the VPS. Step 3 also has to resolve the entry chunk the release
    ships (`/assets/index-<hash>.js`, grepped out of the built `index.html`) and
    refuse to ship when that file is not in the build — step 8 fetches *that*
@@ -125,7 +132,11 @@ What it does, and why each step is not optional:
 6. **Disk gate on the VPS** — grep the extracted tree, and check the vhost still
    carries the client's locations. Not the deploy command's exit code.
 7. **Cut over by symlink only** (`ln -sfn … && mv -Tf …`) plus one nginx reload
-   in the same command; the previous release stays where it is.
+   in the same command; the previous release stays where it is. The same command
+   first **installs the app-list manifest** from this build's web root into
+   `/var/www/fiddy-well-known/farcaster.json` and byte-compares it — the listing
+   is domain state the vhost serves by alias from outside any release directory,
+   so the release that ships it is what writes it (see *The listing manifest*).
 8. **Served gate against the origin.** Fetch the built shell and the entry chunk
    this build produced from the host **by IP** (`--resolve fiddy.fun:443:<origin
    IP>`; HTTPS with SNI, so it is the same vhost a browser reaches, with the CDN
@@ -169,6 +180,63 @@ exist now and are checked in step 6:
 
 The client's own routes are `/~/together` and `/~/spaces`, so nothing the SPA
 serves lives under `/spaces` — the API prefix does not shadow a page.
+
+### The listing manifest (`/.well-known/farcaster.json`)
+
+Fiddy's listing identity — the app-list entry, search, and the notification
+webhook — is the manifest a Farcaster client reads at the well-known path. The
+vhost serves that path by exact-match alias in **both** the port-80 and the
+port-443 `fiddy.fun` block:
+
+```nginx
+location = /.well-known/farcaster.json {
+    default_type application/json;
+    alias /var/www/fiddy-well-known/farcaster.json;
+    add_header Cache-Control "no-store";
+}
+```
+
+The copy that counts is in this repo, at
+`apps/farcaster-web/public/.well-known/farcaster.json`, and step 7 installs it.
+It moved out of VPS-only state for two reasons: the manifest is a *second front
+door to the same app*, so a change to its copy is a change to what the app says
+about itself and belongs in a diff; and nothing in the repo could hold it to the
+shell's own `fc:miniapp` embed, which is exactly how it drifted — measured
+2026-10-22, the served manifest asked for a 512×512 splash where the spec asks
+200×200, painted that splash in upstream Warpcast purple `#6200EA` while the
+app's ground is `#161715`, and sold "deploy always on agents with onchain
+identities" on the listing while the shell unfurled "a Farcaster client with an
+agent".
+
+Rules that come with it:
+
+- **Never re-sign in a release.** `accountAssociation` is the owner's
+  cryptographic approval of the *domain* — it covers `{"domain":"fiddy.fun"}` and
+  none of the `miniapp` block. It is copied through unchanged; re-signing needs
+  the owner's phone. `check-manifest.mjs` refuses an unsigned or stubbed
+  association, so no release can take the listing offline by accident.
+- **The listing and the link are one product or they are broken.** The release
+  gate compares name, splash URL, splash colour and the description sentence
+  between the built manifest and the built shell, and reads the splash PNG's own
+  header for its size.
+- **Every URL it names must answer 200**, and the well-known path must serve real
+  JSON (never a redirect) on **http and https** — a redirect or a 404 there is
+  what makes a signing phone answer "error matching manifest" (the debug playbook
+  is in the `farcaster-miniapps` skill).
+- **Known coupling, not yet fixed:** `/image.png` and `/icon.png` are vhost
+  aliases into `/var/www/fiddy-fssc/assets/`, a *sibling* app's asset directory —
+  the shape the miniapp skill warns about, where root-path art gets repurposed by
+  the next app on the domain. The splash is repo-owned now; the icon and the
+  embed image should follow once repo-owned art at the right sizes exists.
+
+The live state, in three commands:
+
+```bash
+curl -s  https://fiddy.fun/.well-known/farcaster.json | head -c 120  # real JSON, 200
+curl -sI http://fiddy.fun/.well-known/farcaster.json | head -1       # 200 — not a 3xx
+for u in fiddy-splash.png image.png icon.png; do \
+  curl -s -o /dev/null -w "$u %{http_code} %{content_type}\n" https://fiddy.fun/$u; done
+```
 
 ### Rollback
 
