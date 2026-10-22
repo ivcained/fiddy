@@ -30,6 +30,15 @@ const startConnect = vi.fn();
 const stopConnect = vi.fn();
 const rememberConnectStatus = vi.fn();
 
+/**
+ * Who this browser is signed in as. The sheet asks (a connection may only be
+ * adopted for the account a person is signed in as, or by the tab that started
+ * it), and a unit test of another surface has no session — so no account.
+ */
+vi.mock('farcaster-client-hooks', () => ({
+  useCachedOnboardingState: () => ({ result: { state: { user: undefined } } }),
+}));
+
 vi.mock('react-qrcode-logo', () => ({
   QRCode: () => <div data-testid="qr" />,
 }));
@@ -69,6 +78,9 @@ const CONNECTED = {
   approvalUrl: null,
   fid: 3,
   username: 'dwr',
+  // This gate starts the request itself (autoStart), so the answer is its own
+  // tab's — which is what lets the person's own account be adopted here.
+  startedHere: true,
 };
 
 /** A write waiting on the approval, with a carry the test controls. */

@@ -11,9 +11,22 @@
  *   stopped   after they turn it off — from here or in Farcaster
  *   problem   what actually happened, in a sentence, plus the honest fallback
  *
+ * WHOSE ACCOUNT IT IS
+ *
+ * A connection belongs to one person, and this screen is where that is enforced
+ * on the client side. It adopts an identity only when the connection is the
+ * person's own: the approval has to be for the account they are signed in as
+ * (never a different one), or — on a device that has not signed in yet — for the
+ * request THIS tab started. Anything else is reported as what it is and the
+ * session is left exactly where it was. Fiddy's own account can never become
+ * somebody's identity, on any path: the service refuses that approval outright
+ * and tells the browser nothing about it.
+ *
  * WHAT IT WILL NOT DO
  *
  * - It never says "connected" until the service says so.
+ * - It never signs this browser in as an account that is not the one it proved,
+ *   and never silently switches an existing session.
  * - It never leaves a dead button: a failure replaces the screen with a
  *   sentence and a way forward.
  * - It never uses the words this product bans from its own screens (no
@@ -28,13 +41,18 @@ import { FiddySheet } from '~/components/fiddy/FiddySheet';
 import { routes } from '~/constants/routes';
 import { getOnboardingStateKey } from '~/constants/storage';
 import { useAuth } from '~/contexts/AuthProvider';
+import { useCachedCurrentUser } from '~/hooks/data/useCachedCurrentUser';
 import {
   buildLocalAuthToken,
   buildLocalOnboardingState,
+  loadSiwfProof,
 } from '~/lib/siwfSession';
 import {
+  type ConnectBinding,
+  type ConnectRefusal,
   type ConnectStatus,
   connectStatus,
+  forgetConnectAttempt,
   rememberConnectStatus,
   startConnect,
   stopConnect,
@@ -56,6 +74,10 @@ type View =
   | { name: 'waiting'; approvalUrl: string }
   | { name: 'connected'; fid: number; username: string | null }
   | { name: 'stopped' }
+  /** The approval was somebody else's. Nothing is adopted, ever. */
+  | { name: 'refused'; reason: ConnectRefusal; username: string | null }
+  /** A connection this tab did not ask for, on a device nobody is signed in on. */
+  | { name: 'elsewhere'; username: string | null }
   | { name: 'problem'; message: string };
 
 export interface ConnectSheetProps {
@@ -84,8 +106,35 @@ export interface ConnectSheetProps {
   completing?: string | null;
 }
 
-const statusToView = (status: ConnectStatus): View => {
+/**
+ * The service's answer, turned into a screen — with the identity questions asked
+ * here, in one place, before anything can be adopted.
+ *
+ * `signedInFid` is who THIS browser is signed in as, if anyone:
+ *   - a connection for a different account is never rendered as this person's;
+ *   - a connection for the same account is theirs, and the sheet says so;
+ *   - with nobody signed in, an identity may only be adopted from a request this
+ *     tab started (`startedHere`). Someone else's connection on a shared device
+ *     is reported, not entered.
+ */
+const statusToView = (
+  status: ConnectStatus,
+  signedInFid: number | undefined,
+): View => {
+  if (status.state === 'wrong_account') {
+    return {
+      name: 'refused',
+      reason: status.refused,
+      username: status.username,
+    };
+  }
   if (status.state === 'connected' && status.fid !== null) {
+    if (signedInFid !== undefined && signedInFid !== status.fid) {
+      return { name: 'elsewhere', username: status.username };
+    }
+    if (signedInFid === undefined && !status.startedHere) {
+      return { name: 'elsewhere', username: status.username };
+    }
     return { name: 'connected', fid: status.fid, username: status.username };
   }
   if (status.state === 'waiting' && status.approvalUrl !== null) {
@@ -97,9 +146,38 @@ const statusToView = (status: ConnectStatus): View => {
   return { name: 'idle' };
 };
 
+/**
+ * Who is asking, as far as this browser can prove it: the FID it is signed in
+ * as, with the SIWF proof of that sign-in when this tab still holds one. Without
+ * a proof the request is nobody's until somebody approves it in their own
+ * Farcaster app — which the service then ties to that account alone.
+ *
+ * A proof for a *different* fid than the session (a leftover from an earlier
+ * sign-in) is never sent: it would be evidence for somebody else's account.
+ */
+const bindingFor = (signedInFid: number | undefined): ConnectBinding | null => {
+  if (signedInFid === undefined) {
+    return null;
+  }
+  const proof = loadSiwfProof();
+  if (!proof || proof.fid !== signedInFid) {
+    return null;
+  }
+  return {
+    forFid: signedInFid,
+    proof: {
+      message: proof.message,
+      signature: proof.signature,
+      nonce: proof.nonce ?? '',
+    },
+  };
+};
+
 export const ConnectSheet = memo<ConnectSheetProps>(
   ({ onClose, autoStart = false, onApproved, completing = null }) => {
     const { authToken, signIn } = useAuth();
+    const signedIn = useCachedCurrentUser();
+    const signedInFid = signedIn?.fid;
     const [view, setView] = useState<View>({ name: 'idle' });
     const [slow, setSlow] = useState(false);
     const [working, setWorking] = useState(false);
@@ -126,21 +204,27 @@ export const ConnectSheet = memo<ConnectSheetProps>(
         if (!mounted.current) {
           return;
         }
-        const next = statusToView(status);
+        const next = statusToView(status, signedInFid);
         if (next.name === 'connected' && onApproved !== undefined) {
           onApproved(next.fid, next.username);
           return;
         }
         setView(next);
       },
-      [onApproved],
+      [onApproved, signedInFid],
     );
 
     const begin = useCallback(async () => {
       setWorking(true);
       setSlow(false);
       try {
-        const { status } = await startConnect();
+        // Who this connection is for, said with evidence rather than asserted:
+        // the sign-in proof this tab holds, when it is for the account it is
+        // signed in as. Without one the request belongs to whoever approves it
+        // in their own Farcaster app — and then only to this tab.
+        const { status } = await startConnect({
+          binding: bindingFor(signedInFid),
+        });
         apply(status);
       } catch (error) {
         if (!mounted.current) {
@@ -152,7 +236,7 @@ export const ConnectSheet = memo<ConnectSheetProps>(
           setWorking(false);
         }
       }
-    }, [apply]);
+    }, [apply, signedInFid]);
 
     /**
      * What is already true, asked once when the sheet opens: somebody who
@@ -213,7 +297,7 @@ export const ConnectSheet = memo<ConnectSheetProps>(
           if (!live || !mounted.current) {
             return;
           }
-          const next = statusToView(status);
+          const next = statusToView(status, signedInFid);
           if (next.name !== 'waiting') {
             if (next.name === 'connected' && onApproved !== undefined) {
               onApproved(next.fid, next.username);
@@ -243,7 +327,7 @@ export const ConnectSheet = memo<ConnectSheetProps>(
         live = false;
         clearTimeout(timer);
       };
-    }, [waitingUrl, onApproved]);
+    }, [waitingUrl, onApproved, signedInFid]);
 
     const turnOff = useCallback(async () => {
       setWorking(true);
@@ -271,6 +355,13 @@ export const ConnectSheet = memo<ConnectSheetProps>(
      */
     const continueAs = useCallback(
       async (fid: number, username: string | null) => {
+        // The one place a session's identity is set, so the one place it can be
+        // set wrongly: an account that contradicts the one already signed in
+        // here is refused outright rather than swapped in.
+        if (signedInFid !== undefined && signedInFid !== fid) {
+          setView({ name: 'elsewhere', username });
+          return;
+        }
         setWorking(true);
         try {
           const token = buildLocalAuthToken({ fid });
@@ -283,6 +374,8 @@ export const ConnectSheet = memo<ConnectSheetProps>(
             value: onboardingState,
           });
           await signIn({ authToken: token });
+          // This tab's label has done its job: nobody else may inherit it.
+          forgetConnectAttempt();
           window.location.replace(routes.homeFeed.path);
         } catch (error) {
           if (mounted.current) {
@@ -294,7 +387,7 @@ export const ConnectSheet = memo<ConnectSheetProps>(
           }
         }
       },
-      [signIn],
+      [signIn, signedInFid],
     );
 
     if (view.name === 'starting') {
@@ -385,6 +478,72 @@ export const ConnectSheet = memo<ConnectSheetProps>(
             anything.
           </p>
         </FiddySheet>
+      );
+    }
+
+    if (view.name === 'refused') {
+      const said =
+        view.reason === 'app_account'
+          ? {
+              title: 'That approval was not for your account',
+              sub: "The account that approved it was Fiddy's own, so nothing was connected here — and no posting key is held for you.",
+            }
+          : view.reason === 'other_account'
+            ? {
+                title: 'That approval came from a different account',
+                sub:
+                  view.username === null
+                    ? 'The approval came from an account that is not the one this request was for. Nothing here was switched.'
+                    : `The approval came from @${view.username}, but this request was started for your account. Nothing here was switched.`,
+              }
+            : {
+                title: 'That connection is not yours',
+                sub: 'The account that approved it was not the one this request was for. Nothing here was switched.',
+              };
+      return (
+        <FiddySheet
+          name="connect-refused"
+          title={said.title}
+          sub={said.sub}
+          egg="small"
+          primary={{
+            label: 'Try again',
+            onClick: () => void begin(),
+            disabled: working,
+          }}
+          quiet={{ label: 'Not now', onClick: () => onClose?.() }}
+          note="Your own account, its key and its recovery phrase are untouched. Nothing was posted as anybody."
+        />
+      );
+    }
+
+    if (view.name === 'elsewhere') {
+      const handle = view.username === null ? null : `@${view.username}`;
+      const mine = signedInFid !== undefined;
+      return (
+        <FiddySheet
+          name="connect-elsewhere"
+          title={
+            mine
+              ? 'That connection is for a different account'
+              : handle === null
+                ? 'This phone already has a connection'
+                : `Connected as ${handle} on this device`
+          }
+          sub={
+            mine
+              ? `${handle === null ? 'Another account' : handle} is connected on this device, but you are signed in as someone else. Nothing was switched.`
+              : 'This device already has a posting key from a previous visit. Confirm it is yours to use it here.'
+          }
+          egg="small"
+          primary={{
+            label: mine ? 'Connect my account' : "That's me",
+            onClick: () => void begin(),
+            disabled: working,
+          }}
+          quiet={{ label: 'Not now', onClick: () => onClose?.() }}
+          note="Nobody is signed in differently here — this screen only decides which account Fiddy may post as."
+        />
       );
     }
 

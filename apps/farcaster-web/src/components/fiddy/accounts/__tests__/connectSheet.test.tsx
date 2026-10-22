@@ -30,6 +30,20 @@ vi.mock('~/snapchain/accounts/managedConnect', () => ({
   startConnect: (...args: unknown[]) => startConnect(...args),
   stopConnect: (...args: unknown[]) => stopConnect(...args),
   rememberConnectStatus: (...args: unknown[]) => rememberConnectStatus(...args),
+  forgetConnectAttempt: vi.fn(),
+}));
+
+/**
+ * Who this browser is signed in as. Mutable, because the sheet's whole identity
+ * behaviour depends on it: the same service answer means different things to a
+ * device signed in as somebody and a device signed in as nobody.
+ */
+const state: { user?: { fid: number; username?: string } } = {};
+
+vi.mock('farcaster-client-hooks', () => ({
+  useCachedOnboardingState: () => ({
+    result: { state: { user: state.user } },
+  }),
 }));
 
 import { ConnectSheet } from '~/components/fiddy/accounts/ConnectSheet';
@@ -37,6 +51,7 @@ import { ConnectSheet } from '~/components/fiddy/accounts/ConnectSheet';
 const APPROVAL = 'https://warcast.example/~/add-signer?request=abc';
 
 beforeEach(() => {
+  state.user = undefined;
   connectStatus.mockReset();
   startConnect.mockReset();
   stopConnect.mockReset();
@@ -109,6 +124,7 @@ describe('ConnectSheet', () => {
         approvalUrl: null,
         fid: 4242,
         username: 'someone',
+        startedHere: true,
       });
 
     render(<ConnectSheet />);
@@ -150,6 +166,7 @@ describe('ConnectSheet', () => {
       approvalUrl: null,
       fid: 4242,
       username: 'someone',
+      startedHere: true,
     });
     stopConnect.mockResolvedValue({
       state: 'revoked',
@@ -248,6 +265,7 @@ describe('ConnectSheet', () => {
       approvalUrl: null,
       fid: 3,
       username: 'dwr',
+      startedHere: true,
     });
     await screen.findByText('One tap in Farcaster to finish');
     // The sheet polls every 2.5 s, so this waits for a poll that has not
@@ -257,5 +275,93 @@ describe('ConnectSheet', () => {
     });
     // The sheet's own Connected screen — which offers to sign in — is not shown.
     expect(screen.queryByText('Connected as @dwr')).toBeNull();
+  });
+
+  it('never becomes the account Fiddy’s own approval landed on, and says nothing about it', async () => {
+    // The worst bug this flow can have: a person's session bound to the
+    // project's own Farcaster account. The service refuses that approval and
+    // tells the browser nothing — no number, no handle — so there is nothing
+    // here to adopt, and the screen says what happened.
+    state.user = undefined;
+    connectStatus.mockResolvedValue({
+      state: 'wrong_account',
+      approvalUrl: null,
+      fid: null,
+      username: null,
+      forFid: 191554,
+      refused: 'app_account',
+      startedHere: true,
+    });
+
+    const { container } = render(<ConnectSheet />);
+    await screen.findByText('That approval was not for your account');
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    // The project's own account, by number or by name, is nowhere on the page.
+    expect(container.textContent).not.toContain('3356372');
+    expect(container.textContent).not.toContain('fiddy-one');
+  });
+
+  it('never switches a signed-in session to a different account', async () => {
+    // Signed in as 191554, and the device's connection belongs to 4242: the
+    // sheet reports it and offers to connect THIS person's account. It does not
+    // offer to become the other one.
+    state.user = { fid: 191554, username: 'ivc' };
+    connectStatus.mockResolvedValue({
+      state: 'connected',
+      approvalUrl: null,
+      fid: 4242,
+      username: 'someone',
+      forFid: 4242,
+      refused: null,
+      startedHere: true,
+    });
+
+    render(<ConnectSheet />);
+    await screen.findByText('That connection is for a different account');
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Connect my account' }),
+    ).toBeTruthy();
+    expect(screen.queryByText('Connected as @someone')).toBeNull();
+  });
+
+  it('does not adopt a connection this device never asked for', async () => {
+    // Nobody signed in, and the cookie holds an approved connection from an
+    // earlier visit: it is named and confirmed, never entered in one tap.
+    state.user = undefined;
+    connectStatus.mockResolvedValue({
+      state: 'connected',
+      approvalUrl: null,
+      fid: 4242,
+      username: 'someone',
+      forFid: null,
+      refused: null,
+      startedHere: false,
+    });
+
+    render(<ConnectSheet />);
+    await screen.findByText('Connected as @someone on this device');
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(screen.getByRole('button', { name: /That's me/ })).toBeTruthy();
+  });
+
+  it('signs this person in as their own account after their own approval', async () => {
+    // The door the flow is for: nobody signed in, this tab started the request,
+    // the person approved it in their own Farcaster app — so this tab becomes
+    // that account, and only that one.
+    state.user = undefined;
+    connectStatus.mockResolvedValue({
+      state: 'connected',
+      approvalUrl: null,
+      fid: 191554,
+      username: 'ivc',
+      forFid: 191554,
+      refused: null,
+      startedHere: true,
+    });
+
+    render(<ConnectSheet />);
+    await screen.findByText('Connected as @ivc');
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeTruthy();
   });
 });
