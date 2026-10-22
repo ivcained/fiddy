@@ -66,6 +66,7 @@ import {
 import {
   NodeBackedWrites,
   type WriteApproval,
+  type WriteEvidence,
 } from '~/snapchain/nodeApi/nodeWrites';
 import { castAuthorOf, channelParentUrlFor } from '~/snapchain/nodeApi/reads';
 
@@ -138,6 +139,15 @@ export interface ProviderBackedFetchOptions {
    * Leave it out (or pass `null`) for the bare refusal.
    */
   askForPostingKey?: WriteApproval | null;
+  /**
+   * Where a write's own evidence goes, when a surface in the app has to read it
+   * rather than guess — today the mini app agent bridge's `post` ask, which is
+   * told `posted` / `unknown` / `failed` from exactly this
+   * (`~/snapchain/nodeApi/writeEvidenceWatch`, `docs/CLIENT-MINIAPP-AGENT-BRIDGE.md`
+   * §3.3). Additive and read-only: it observes what the seam already records on
+   * the request log (`RequestLogEntry.write`) and changes nothing about a write.
+   */
+  onWriteEvidence?: (evidence: WriteEvidence) => void;
 }
 
 export interface ProviderBackedFetchHandle {
@@ -228,6 +238,7 @@ export const createProviderBackedFetch = ({
   getProviderOrder,
   drafts: draftsOption,
   askForPostingKey,
+  onWriteEvidence,
 }: ProviderBackedFetchOptions): ProviderBackedFetchHandle => {
   const drafts = draftsOption ?? new LocalDraftStore();
   const nodeFetch = fetchImpl ?? fetch;
@@ -303,6 +314,7 @@ export const createProviderBackedFetch = ({
       ...(askForPostingKey === null || askForPostingKey === undefined
         ? {}
         : { askForPostingKey }),
+      ...(onWriteEvidence === undefined ? {} : { onWriteEvidence }),
     });
     adapters.set(baseUrl, created);
     return created;
@@ -385,6 +397,7 @@ export const createProviderBackedFetch = ({
         : { askForPostingKey }),
       onEvidence: (evidence) => {
         entry.write = evidence;
+        onWriteEvidence?.(evidence);
       },
     });
 

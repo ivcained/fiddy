@@ -27,6 +27,7 @@ import {
   AGENT_ASK_SENTENCES,
   AGENT_ASK_VERSION,
   AgentAskAnswer,
+  AgentAskDeferral,
   AgentAskEnvelope,
   createAgentAskChannel,
   readAgentAsk,
@@ -530,5 +531,161 @@ describe('this slice reaches nothing', () => {
     expect(miniAppSource).toMatch(
       /event\.source !== iframe\.contentWindow\s*\|\|\s*event\.origin !== frameOrigin/,
     );
+  });
+});
+
+describe('the seam the slices that do something answer through', () => {
+  /**
+   * S2 wired in the way `MiniApp.tsx` wires it: a handler takes `draft` and
+   * `post` and answers later; everything else is still this channel's own
+   * honest answer. What is asserted here is the half that must not change when a
+   * handler is present — the pin, the one-shot ids, the duplicate window, the
+   * budget, the mute, the sentences — plus the one thing the handler needs back
+   * from the channel: what the ask ended as (§4's duplicate window).
+   */
+  const openDeferred = () => {
+    const taken: {
+      envelope: AgentAskEnvelope;
+      deferral: AgentAskDeferral;
+    }[] = [];
+    const channel = createAgentAskChannel({
+      hasPairedSession: () => true,
+      now: () => clock,
+      answerAsk: (envelope, deferral) => {
+        if (envelope.ask === 'remind') {
+          return false;
+        }
+        taken.push({ envelope, deferral });
+        return true;
+      },
+    });
+    channel.setLaunchedUrl(FRAME_URL);
+    return { channel, taken };
+  };
+
+  it('hands a real ask over and says nothing itself', () => {
+    const { channel, taken } = openDeferred();
+
+    const answer = send(channel, ask());
+
+    // Silence from the channel: the answer is the handler's to give, in its own
+    // time, and a channel that also answered would be answering twice.
+    expect(answer).toBeUndefined();
+    expect(taken).toHaveLength(1);
+    expect(taken[0]?.envelope).toMatchObject({
+      id: 'ask-1',
+      ask: 'draft',
+      text: 'draft a cast about this',
+    });
+    // What the handler is given to answer with: the origin the window was
+    // launched with, the frame's own window object, and the one line back.
+    expect(taken[0]?.deferral.origin).toBe(FRAME_ORIGIN);
+    expect(taken[0]?.deferral.frameWindow).toBe(FRAME_WINDOW);
+    expect(typeof taken[0]?.deferral.settled).toBe('function');
+  });
+
+  it('leaves an ask no slice has a path for to this channel’s own answer', () => {
+    const { channel, taken } = openDeferred();
+
+    const answer = send(channel, ask({ id: 'r1', ask: 'remind' }));
+
+    expect(answer?.state).toBe('unavailable');
+    expect(taken).toHaveLength(0);
+  });
+
+  it('answers a duplicate from what the ask settled as, not from a placeholder', () => {
+    const { channel, taken } = openDeferred();
+    expect(send(channel, ask())).toBeUndefined();
+    taken[0]?.deferral.settled('posted');
+
+    clock += 1_000;
+    const answer = send(channel, ask({ id: 'ask-2' }));
+
+    expect(answer?.state).toBe('posted');
+    expect(answer?.message).toBe(AGENT_ASK_SENTENCES.posted);
+    expect(taken).toHaveLength(1);
+  });
+
+  it('joins a duplicate of an ask that is still being decided', () => {
+    const { channel, taken } = openDeferred();
+
+    // A double-send while the reader is deciding is the same decision: it goes
+    // to the same handler (S2's store joins it), and it raises nothing.
+    expect(send(channel, ask({ id: 'a' }))).toBeUndefined();
+    expect(send(channel, ask({ id: 'b' }))).toBeUndefined();
+    expect(send(channel, ask({ id: 'c' }))).toBeUndefined();
+    expect(taken).toHaveLength(3);
+
+    // And none of them spent the ceiling: a different ask still gets in.
+    expect(
+      send(channel, ask({ id: 'd', text: 'a different ask' })),
+    ).toBeUndefined();
+    expect(taken).toHaveLength(4);
+  });
+
+  it('still counts the ceiling for asks a handler answered', () => {
+    const { channel, taken } = openDeferred();
+
+    for (const id of ['a', 'b', 'c']) {
+      expect(send(channel, ask({ id, text: `ask ${id}` }))).toBeUndefined();
+    }
+    const answer = send(channel, ask({ id: 'd', text: 'ask d' }));
+
+    expect(answer?.state).toBe('budget');
+    expect(taken).toHaveLength(AGENT_ASK_BUDGET);
+  });
+
+  it('is still reachable only from the framed window, at its own origin', () => {
+    const { channel, taken } = openDeferred();
+
+    expect(send(channel, ask(), { source: NESTED_WINDOW })).toBeUndefined();
+    expect(send(channel, ask(), { origin: OTHER_ORIGIN })).toBeUndefined();
+    expect(
+      send(channel, ask(), { frameWindow: NESTED_WINDOW }),
+    ).toBeUndefined();
+    expect(taken).toHaveLength(0);
+  });
+
+  it('keeps the reader’s mute ahead of any handler', () => {
+    const taken: unknown[] = [];
+    const channel = createAgentAskChannel({
+      hasPairedSession: () => true,
+      now: () => clock,
+      mutes: {
+        read: () => true,
+        write: () => undefined,
+      },
+      answerAsk: (envelope, deferral) => {
+        taken.push({ envelope, deferral });
+        return true;
+      },
+    });
+    channel.setLaunchedUrl(FRAME_URL);
+
+    const answer = send(channel, ask());
+
+    expect(answer?.state).toBe('muted');
+    expect(taken).toHaveLength(0);
+  });
+
+  it('reports an ask’s outcome only into that ask’s own record', () => {
+    const { channel, taken } = openDeferred();
+    expect(send(channel, ask({ id: 'a' }))).toBeUndefined();
+
+    clock += 60_000;
+    expect(
+      send(channel, ask({ id: 'b', text: 'a second, different ask' })),
+    ).toBeUndefined();
+    taken[1]?.deferral.settled('drafted');
+
+    // A late verdict for the first ask must not overwrite the second's.
+    taken[0]?.deferral.settled('failed');
+
+    clock += 1_000;
+    const answer = send(
+      channel,
+      ask({ id: 'c', text: 'a second, different ask' }),
+    );
+    expect(answer?.state).toBe('drafted');
   });
 });

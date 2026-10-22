@@ -87,9 +87,21 @@ import {
 import { FrameIconImage } from '~/components/images/FrameIconImage';
 import { Image } from '~/components/images/Image';
 import {
+  AgentAskApproval,
+  createAgentAskApproval,
+} from '~/components/miniApp/agentAskApproval';
+import { AgentAskCard } from '~/components/miniApp/AgentAskCard';
+import {
   AGENT_ASK_CAPABILITY,
+  agentAskAnswer,
+  AgentAskMuteStore,
   createAgentAskChannel,
+  createSessionMuteStore,
 } from '~/components/miniApp/agentAskChannel';
+import {
+  ComposerOpening,
+  createAgentAskHandlers,
+} from '~/components/miniApp/agentAskHandlers';
 import {
   createLegacyWalletChannel,
   LegacyWalletProvider,
@@ -129,7 +141,13 @@ import { useExternalNavigate } from '~/hooks/navigation/useExternalNavigate';
 import { useNavigateToConversation } from '~/hooks/navigation/useNavigateToConversation';
 import { useSolanaMiniAppProvider } from '~/hooks/useSolanaMiniAppProvider';
 import { ComposeCastModal } from '~/lazy/components';
+import {
+  AgentServiceSession,
+  chatWithAgent,
+  listAgents,
+} from '~/lib/agentService';
 import { cn } from '~/lib/utils';
+import { observeWriteEvidence } from '~/snapchain/nodeApi/writeEvidenceWatch';
 import { CastComposerIntent } from '~/types';
 import { trackError } from '~/utils/errorUtils';
 import { logError } from '~/utils/logUtils';
@@ -357,6 +375,35 @@ function InnerMiniAppContent({
   const agentSession = useAgentSession();
   const agentSessionPairedRef = useRef(false);
   agentSessionPairedRef.current = agentSession.status === 'paired';
+  // The session itself, read at ask time: a `draft` is one chat message to
+  // whichever agent this browser is paired with when the reader approves
+  // (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §5 — the app never names it).
+  const agentSessionRef = useRef<AgentServiceSession | null>(null);
+  agentSessionRef.current = agentSession.session;
+
+  // The ask bridge's own furniture, built once for this window:
+  //
+  //   agentAskMutes      where the reader's mute lives (session storage, keyed
+  //                      by origin) — the channel and the card share one store,
+  //                      so the card's own control is the channel's answer (§4)
+  //   agentAskApproval   the decision in front of the reader (§4's store)
+  //   agentAskHandlers   the two asks that end in Fiddy's own composer (§3.2,
+  //                      §3.3)
+  const agentAskMutesRef = useRef<AgentAskMuteStore | null>(null);
+  if (agentAskMutesRef.current === null) {
+    agentAskMutesRef.current = createSessionMuteStore();
+  }
+  const agentAskMutes = agentAskMutesRef.current;
+
+  const agentAskApprovalRef = useRef<AgentAskApproval | null>(null);
+  if (agentAskApprovalRef.current === null) {
+    agentAskApprovalRef.current = createAgentAskApproval();
+  }
+  const agentAskApproval = agentAskApprovalRef.current;
+
+  // The app's own manifest name, as the card's aside — never its heading, and
+  // read when the ask arrives rather than when the listener is built.
+  const frameNameRef = useRef<string | undefined>(undefined);
 
   const [showSplashScreen, setShowSplashScreen] = useState(true);
   const [backState, setBackState] = useState<Back.BackState>(
@@ -385,6 +432,11 @@ function InnerMiniAppContent({
     enabled: !!url,
   });
   const frame = useGloballyCachedFrame(data);
+
+  // The name the app chose for itself, kept out of the render and read by the
+  // ask card as an aside: the heading is the origin, which is the only name the
+  // shell can verify (§4).
+  frameNameRef.current = frame?.name;
 
   const unavailable = invalidUrl || (!debug && (harmful || frame?.harmful));
 
@@ -552,6 +604,90 @@ function InnerMiniAppContent({
     [context],
   );
 
+  const [castIntentAndPromise, setCastIntentAndPromise] = useState<{
+    castIntent: CastComposerIntent;
+    onSuccess: ((value: ComposeCast.Result<false>) => void) | undefined;
+  }>();
+
+  /**
+   * The route an ask ends in: the shell's own composer, over the mini app
+   * window, through exactly the state `composeCast` already uses above.
+   *
+   * This is the whole of the bridge's reach into a write. `draft` puts the
+   * agent's answer in it; `post` puts the app's own words in it (read on the
+   * card first, quoted and inert); and in both cases the next thing that can
+   * happen is the reader's own press of Cast
+   * (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.2, §3.3).
+   */
+  const openAskComposer = useCallback(
+    (intent: { text: string; embeds?: string[] }): ComposerOpening => {
+      let resolveClosed: (outcome: { cast: boolean }) => void = () => undefined;
+      const closed = new Promise<{ cast: boolean }>((resolve) => {
+        resolveClosed = resolve;
+      });
+      setCastIntentAndPromise({
+        castIntent: {
+          text: intent.text,
+          embeds: intent.embeds ?? [],
+        },
+        onSuccess: (value) =>
+          resolveClosed({ cast: value !== undefined && value.cast !== null }),
+      });
+      return { closed };
+    },
+    [],
+  );
+
+  /**
+   * `draft` and `post`, and nothing else (S3 answers `remind`). Everything the
+   * handler needs is the shell's own: the paired session this browser holds, one
+   * chat message to the agent that session is for, the composer above, and the
+   * write seam's own evidence — which is what tells `posted` from `unknown` from
+   * `failed`, and is never a guess (`~/snapchain/nodeApi/writeEvidenceWatch`).
+   */
+  const agentAskHandlers = useMemo(
+    () =>
+      createAgentAskHandlers({
+        approval: agentAskApproval,
+        agent: async () => {
+          const session = agentSessionRef.current;
+          if (!session) {
+            return undefined;
+          }
+          try {
+            // The agent this browser's session is for: the first one the
+            // service lists, which is the one the agent surface opens on by
+            // default (`~/pages/agent/AgentPage.tsx`). The app can never name,
+            // choose or influence it (§5).
+            const agents = await listAgents(session);
+            const first = agents[0];
+            return first ? { session, agentId: first.id } : undefined;
+          } catch {
+            return undefined;
+          }
+        },
+        chat: (target, message) =>
+          chatWithAgent(
+            target.session as AgentServiceSession,
+            target.agentId,
+            message,
+          ),
+        composer: openAskComposer,
+        writes: { observe: observeWriteEvidence },
+      }),
+    [agentAskApproval, openAskComposer],
+  );
+
+  // A new window is a new ask. Closing or replacing the mini app ends the wait
+  // in front of the reader honestly (nothing is carried for an app that is no
+  // longer on screen), and the next window's asks start from its own origin.
+  useEffect(
+    () => () => {
+      agentAskApproval.decline();
+    },
+    [agentAskApproval, url],
+  );
+
   const [endpoint, setEndpoint] = useState<HostEndpoint | undefined>(undefined);
   useEffect(() => {
     const iframe = iframeLoaderRef.current?.iframe;
@@ -591,8 +727,9 @@ function InnerMiniAppContent({
   // nothing at all — not even a refusal, because a reply is itself an oracle.
   //
   // The answer goes back to the frame's own origin, the way `createIframeEndpoint`
-  // above addresses this app. Nothing here reaches the agent, the composer or the
-  // write seam: in this slice every well-formed ask is answered `unavailable`,
+  // above addresses this app. `draft` and `post` are answered by the handlers
+  // above, in their own time (a reader's decision, a chat message, the reader's
+  // own composer); every other well-formed ask is still answered `unavailable`,
   // which is the honest state for a shell that has no path for it yet.
   useEffect(() => {
     const iframe = iframeLoaderRef.current?.iframe;
@@ -601,8 +738,61 @@ function InnerMiniAppContent({
     }
 
     const frameOrigin = new URL(url).origin;
+    // The element, as a value this closure can read: its `contentWindow` is
+    // read live at answer time, because a reload hands back a new one.
+    const frameElement = iframe;
     const channel = createAgentAskChannel({
       hasPairedSession: () => agentSessionPairedRef.current,
+      // The reader's own mute, shared with the card: muting from the card is
+      // this channel's `muted` answer for the rest of the window (§4).
+      mutes: agentAskMutes,
+      answerAsk: (envelope, deferral) => {
+        if (!agentAskHandlers.answers(envelope.ask)) {
+          // Nothing here has a path for it: this channel's own `unavailable`
+          // stands, which is S1's honest answer and S3's to replace.
+          return false;
+        }
+        // The channel says nothing for this ask; the handlers answer it when
+        // they have a real state, and the app hears exactly that word.
+        void agentAskHandlers
+          .answer(envelope, {
+            origin: deferral.origin,
+            ...(frameNameRef.current === undefined
+              ? {}
+              : { name: frameNameRef.current }),
+          })
+          .then((state) => {
+            // §4's duplicate window remembers the truth, not a placeholder.
+            deferral.settled(state);
+            answerFrame(state);
+          })
+          .catch(() => {
+            // The shell could not finish the ask: the app hears the honest
+            // `failed` rather than a promise that never lands, and the reader
+            // has been told (S1's sentence says so).
+            deferral.settled('failed');
+            answerFrame('failed');
+          });
+
+        function answerFrame(state: Parameters<typeof agentAskAnswer>[1]) {
+          const frameWindow = deferral.frameWindow as {
+            postMessage?: (message: unknown, targetOrigin: string) => void;
+          };
+          // The window that asked, if it is still the window on screen: a
+          // reload or another app is a different window object, and an answer
+          // is never posted into somebody else's page.
+          if (
+            frameWindow === frameElement.contentWindow &&
+            typeof frameWindow?.postMessage === 'function'
+          ) {
+            frameWindow.postMessage(
+              agentAskAnswer(envelope.id, state),
+              deferral.origin,
+            );
+          }
+        }
+        return true;
+      },
     });
     channel.setLaunchedUrl(url);
 
@@ -628,7 +818,7 @@ function InnerMiniAppContent({
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [url]);
+  }, [url, agentAskHandlers, agentAskMutes]);
 
   const triggerBack = useCallback(() => {
     if (backState.visible) {
@@ -746,11 +936,6 @@ function InnerMiniAppContent({
     maximizeMiniApp,
     setMiniAppLoadingMessage,
   } = useMinimizableWindowContext();
-  const [castIntentAndPromise, setCastIntentAndPromise] = useState<{
-    castIntent: CastComposerIntent;
-    onSuccess: ((value: ComposeCast.Result<false>) => void) | undefined;
-  }>();
-
   const handleComposeCast = useCallback(
     <close extends boolean | undefined = undefined>(
       options: ComposeCast.Options<close>,
@@ -1529,6 +1714,19 @@ function InnerMiniAppContent({
                 />
               </React.Suspense>
             )}
+            {/*
+              The ask card, drawn by the shell inside this window's own tree —
+              the same place as the composer above, over the app's cross-origin
+              frame, and deliberately not a corner toast and not the agent rail
+              (which only renders on the home feed)
+              (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §4).
+            */}
+            <AgentAskCard
+              approval={agentAskApproval}
+              origin={pinnedMiniAppOrigin(url)}
+              mutes={agentAskMutes}
+              {...(frame?.name === undefined ? {} : { name: frame.name })}
+            />
           </>
         )}
       </div>

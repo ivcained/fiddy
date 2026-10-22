@@ -22,6 +22,7 @@ import { isDev } from '~/constants/env';
 import { useRecentFetch } from '~/contexts/RecentFetchProvider';
 import { askForPostingKey } from '~/snapchain/accounts/postingKeyApproval';
 import { isNodeBackedClientEnabled } from '~/snapchain/nodeApi';
+import { noteWriteEvidence } from '~/snapchain/nodeApi/writeEvidenceWatch';
 import { resolveEffectiveNodeBaseUrl } from '~/snapchain/nodeChoice';
 import {
   createProviderBackedFetch,
@@ -115,6 +116,11 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         // carried once they approve it (`postingKeyApproval` is the store that
         // screen and this seam share).
         askForPostingKey,
+        // One write, one piece of evidence, handed on to whoever in the app has
+        // to read it rather than guess — today the mini app agent bridge's
+        // `post` ask (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.3). Read-only:
+        // nothing about a write changes, and nothing is kept here.
+        onWriteEvidence: noteWriteEvidence,
       }).fetch;
       // The address the build was configured with is the only input that can
       // change under a running tab and needs the adapter rebuilt; the live

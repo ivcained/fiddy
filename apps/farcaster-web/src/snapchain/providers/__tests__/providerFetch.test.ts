@@ -104,6 +104,42 @@ describe('createProviderBackedFetch: a node provider', () => {
     expect(calls.length).toBe(1);
     expect(handle.log[0]!.providerId).toBe('build-configured');
   });
+
+  it('hands a write’s own evidence on to whoever in the app must read it', async () => {
+    // S2's `post` ask is told `posted` / `unknown` / `failed` from exactly this
+    // (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.3): the seam already records
+    // what happened to a write, and a surface inside the app could not read it.
+    // What is pinned here is that the option reaches the adapter the seam
+    // builds, unchanged, and that passing it changes nothing else.
+    const seen: unknown[] = [];
+    let adapterOptions: Record<string, unknown> = {};
+    const factory = ((options: Record<string, unknown>) => {
+      adapterOptions = options;
+      return {
+        fetch: (async () => jsonResponse({ result: {} })) as typeof fetch,
+        reads: {} as never,
+        log: [],
+      };
+    }) as unknown as typeof import('~/snapchain/nodeApi/nodeBackedFetch').createNodeBackedFetch;
+
+    const handle = createProviderBackedFetch({
+      getActiveProvider: () => ownNodeProvider('https://mine.example'),
+      getSignedInFid: () => 3,
+      nodeBaseUrl: '/snapchain-api',
+      fetchImpl: fetch,
+      createNodeAdapter: factory,
+      onWriteEvidence: (evidence) => seen.push(evidence),
+    });
+
+    await handle.fetch('https://farcaster.xyz/~api/v2/me');
+
+    expect(typeof adapterOptions.onWriteEvidence).toBe('function');
+    (adapterOptions.onWriteEvidence as (evidence: unknown) => void)({
+      accepted: true,
+      landed: true,
+    });
+    expect(seen).toEqual([{ accepted: true, landed: true }]);
+  });
 });
 
 describe('createProviderBackedFetch: Farcaster’s own public server', () => {
