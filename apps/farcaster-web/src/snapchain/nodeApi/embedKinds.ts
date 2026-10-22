@@ -402,3 +402,33 @@ export const createEmbedKindResolver = (
 
   return { kindOf, classify, settle };
 };
+
+/**
+ * The resolver the surfaces that render a URL use — a direct message's picture
+ * links today (`splitDirectCastMessageImageTokens`).
+ *
+ * WHY A SHARED ONE
+ *
+ * The node-backed adapter keeps a resolver of its own for the embeds it
+ * classifies while it reads a feed (`reads.ts`). A renderer that meets a URL the
+ * adapter has never seen — a DM body is text, not an embed — needs the same
+ * answers without a second round of probes, and needs them to outlive the
+ * component that asked. So there is one of these per page load: the first
+ * surface that needs it creates it, everything after that shares the cache.
+ *
+ * Both instances read and write the same persisted entry
+ * (`EMBED_KIND_STORAGE_KEY`), so an answer learned by either is known to the
+ * other on the next load — and an answer learned in a conversation is what lets
+ * a DM list say "shared an image" without a probe of its own.
+ *
+ * Created lazily: importing this module must not touch storage (the tests
+ * import it, and so does a page that never renders a message).
+ */
+let clientResolver: EmbedKindResolver | undefined;
+
+export const clientEmbedKindResolver = (): EmbedKindResolver => {
+  if (clientResolver === undefined) {
+    clientResolver = createEmbedKindResolver();
+  }
+  return clientResolver;
+};

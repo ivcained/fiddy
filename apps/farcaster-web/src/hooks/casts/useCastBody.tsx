@@ -32,13 +32,11 @@ import { UnsupportedEmbed } from '~/components/attachments/UnsupportedEmbed';
 import { VideoAttachment } from '~/components/attachments/VideoAttachment';
 import { ImageLightboxModal } from '~/components/modals/ImageLightboxModal';
 import { LinkifiedText } from '~/components/text/LinkifiedText';
-import { useUserAppContext } from '~/contexts/UserAppContextProvider';
 import { getRenderableEmbeds } from '~/utils/castUtils';
 
 type CastBody = {
   nonLinkfiedText: string;
   text: ReactNode;
-  isTruncatedCastText: boolean;
 
   hasAttachments: boolean;
   hasNonCarouselAttachments: boolean;
@@ -47,8 +45,6 @@ type CastBody = {
   castAttachment: React.ReactNode;
   nonCarouselAttachments: React.ReactNode;
 };
-
-const TRUNCATE_SHOW_MORE_BUFFER = 10;
 
 const removeTrailingSpaceUrl = ({
   text,
@@ -601,14 +597,12 @@ const useCastBody = ({
   cast,
   castText = cast.text,
   isFocusedCast,
-  truncateCastText,
   draggingRef,
   onMiniAppLaunch,
 }: {
   cast: ApiCast;
   castText?: string;
   isFocusedCast: boolean;
-  truncateCastText: boolean;
   draggingRef: React.RefObject<boolean>;
   onMiniAppLaunch?: () => void;
 }): CastBody => {
@@ -640,26 +634,6 @@ const useCastBody = ({
   });
 
   const bodyText = bodyTextOverride;
-
-  const { regularCastByteLimit } = useUserAppContext();
-
-  const shouldTruncate = useMemo(() => {
-    // One could argue that we should probably be using the byte len check here.
-    // For the first iteration of the release we are okay giving more content on home
-    // feed instead of being really strict since mentions and URLs are also part of the
-    // cast text length here.
-    return (
-      truncateCastText &&
-      !isFocusedCast &&
-      bodyText.length > regularCastByteLimit + TRUNCATE_SHOW_MORE_BUFFER
-    );
-  }, [bodyText, isFocusedCast, regularCastByteLimit, truncateCastText]);
-
-  const textToLinkify = useMemo(() => {
-    return shouldTruncate
-      ? `${bodyText.slice(0, regularCastByteLimit)}...`
-      : bodyText;
-  }, [bodyText, regularCastByteLimit, shouldTruncate]);
 
   const tokenMentions = useMemo(() => {
     if (typeof cast.embeds !== 'undefined' && cast.embeds.urls.length !== 0) {
@@ -696,7 +670,7 @@ const useCastBody = ({
   const linkifiedCastBodyText = (
     <LinkifiedText
       key="cast-text"
-      content={textToLinkify}
+      content={bodyText}
       mentions={cast.mentions}
       channelMentions={cast.channelMentions}
       tokenMentions={tokenMentions}
@@ -708,7 +682,6 @@ const useCastBody = ({
   return {
     nonLinkfiedText: bodyTextOverride,
     text: linkifiedCastBodyText,
-    isTruncatedCastText: shouldTruncate,
     castAttachment: castAttachment,
     nonCarouselAttachments: nonCarouselAttachments,
     hasNonCarouselAttachments: hasNonCarouselAttachments,

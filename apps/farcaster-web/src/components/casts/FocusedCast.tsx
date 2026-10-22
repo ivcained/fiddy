@@ -101,7 +101,6 @@ const FocusedCastContent: React.FC<FocusedCastProps> = React.memo(
     } = useCastBody({
       cast,
       castText: displayText,
-      truncateCastText: context.truncateCastText,
       isFocusedCast: true,
       draggingRef,
     });
