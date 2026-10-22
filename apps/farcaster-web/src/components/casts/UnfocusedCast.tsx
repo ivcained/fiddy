@@ -23,6 +23,7 @@ import { Replies } from '~/components/casts/actions/Replies';
 import { CastAttachmentsSection } from '~/components/casts/CastAttachmentsSection';
 import { CastAuthorLine } from '~/components/casts/CastAuthorLine';
 import { CastTranslationTopHat } from '~/components/casts/CastTranslationTopHat';
+import { ClampedCastBody } from '~/components/casts/ClampedCastBody';
 import { DeletedCast } from '~/components/casts/DeletedCast';
 import { FeedItemTopHat } from '~/components/casts/FeedItemTopHat';
 import { IncludeReasonTopHat } from '~/components/casts/IncludeReasonTopHat';
@@ -47,18 +48,6 @@ import { ApiCastWithContext } from '~/types';
 import { useHorizontalDragScroll } from '~/utils/castUtils';
 
 import { ShareCast } from './actions/ShareCast';
-
-const EXTRA_WHITESPACE_FOR_SHOW_MORE_HANDLING = ' ';
-
-// https://gist.ake.cx/redoPop/184082fcfa28bb14380097457a666f2f
-function useClampCheck(): [boolean, React.RefCallback<HTMLElement>] {
-  const [clamped, setClamped] = React.useState(false);
-
-  const ref: React.RefCallback<HTMLElement> = (el) =>
-    setClamped(Boolean(el && el.scrollHeight > el.clientHeight));
-
-  return [clamped, ref];
-}
 
 type UnfocusedCastProps = Omit<CastProps, 'isFocused'> & {
   CastTopHatForNotificationsComponent?: ReactNode;
@@ -89,8 +78,6 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
     isAdminGatedFeedCast = false,
   }) => {
     const { cast, context } = castWithContext;
-
-    const [isClamped, ref] = useClampCheck();
 
     const {
       isFirstInList,
@@ -136,7 +123,6 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
     const {
       nonLinkfiedText,
       text: processedText,
-      isTruncatedCastText,
       hasAttachments,
       hasNonCarouselAttachments,
       castAttachment,
@@ -147,7 +133,6 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
       cast,
       castText: displayText,
       isFocusedCast: false,
-      truncateCastText: shouldTruncateCastText,
       draggingRef,
       onMiniAppLaunch: isAppsDialog ? onMiniAppLaunch : undefined,
     });
@@ -267,9 +252,7 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
 
     const currentUser = useCachedCurrentUser();
 
-    const onShowMoreClick = useCallback((event: MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
+    const onExpandCastBody = useCallback(() => {
       setShowFullCastBody(true);
     }, []);
 
@@ -453,37 +436,18 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
                   )}
                 <div className="flex flex-row pl-[72px] pr-4">
                   <div className="flex flex-col whitespace-pre-wrap break-words text-base leading-5 tracking-normal">
-                    <div
-                      className={cn(
-                        shouldTruncateCastText && 'line-clamp-feed',
-                        '[overflow-wrap:anywhere]',
-                      )}
-                      ref={ref}
+                    {/*
+                      One measurement, one button, re-taken whenever the text
+                      changes or the box it is drawn in resizes: see
+                      `ClampedCastBody`.
+                    */}
+                    <ClampedCastBody
+                      fold={shouldTruncateCastText}
+                      text={nonLinkfiedText}
+                      onExpand={onExpandCastBody}
                     >
                       {processedText}
-                      {isTruncatedCastText &&
-                        EXTRA_WHITESPACE_FOR_SHOW_MORE_HANDLING}
-                      {isTruncatedCastText && !showFullCastBody && (
-                        <button
-                          type="button"
-                          className="inline cursor-pointer border-0 bg-transparent p-0 text-link hover:underline"
-                          onClick={onShowMoreClick}
-                          onMouseDown={(event) => event.stopPropagation()}
-                        >
-                          Show more
-                        </button>
-                      )}
-                    </div>
-                    {isClamped && !showFullCastBody && (
-                      <button
-                        type="button"
-                        className="inline cursor-pointer border-0 bg-transparent p-0 text-left text-link hover:underline"
-                        onClick={onShowMoreClick}
-                        onMouseDown={(event) => event.stopPropagation()}
-                      >
-                        Show more
-                      </button>
-                    )}
+                    </ClampedCastBody>
                   </div>
                 </div>
                 <CastAttachmentsSection
