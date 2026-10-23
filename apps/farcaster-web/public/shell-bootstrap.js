@@ -55,7 +55,10 @@
     '--bg-action-secondary': 'soft',
   };
   // The two sizes, and the faces this client already has.
-  var SIZES = { '--fiddy-radius': ['round', 24], '--fiddy-look-border': ['borderWidth', 4] };
+  var SIZES = {
+    '--fiddy-radius': ['round', 24],
+    '--fiddy-look-border': ['borderWidth', 4],
+  };
   var FONTS = {
     rounded: "'SF Pro Rounded', ui-rounded, system-ui, sans-serif",
     inter: "'Inter', sans-serif",
