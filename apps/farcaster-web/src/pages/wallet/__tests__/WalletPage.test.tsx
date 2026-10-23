@@ -15,7 +15,10 @@
  *      talk to. Signed out there is none, and the page says that rather than
  *      showing a button that would do nothing;
  *   5. the account's own wallet is named when this device holds one, and while
- *      the accounts are still being read nothing is claimed at all.
+ *      the accounts are still being read nothing is claimed at all;
+ *   6. the Fiddy balance — the other half of what the tab bar's "Wallet" is
+ *      about — is mounted, and it is the *balance* (a credit spent inside
+ *      Fiddy) rather than a claim about anybody's wallet.
  *
  * WHY THE WALLET IS A REAL CONTEXT AND NOT A STUBBED RETURN. The page reacts to
  * a wallet that connects *while* the connect step is open, and a stubbed hook
@@ -84,6 +87,14 @@ vi.mock('~/components/fiddy/useFiddyBrand', () => ({
 
 vi.mock('~/components/wallet/PreferredWalletDialog', () => ({
   PreferredWalletSelector: () => <div data-fiddy="chooser" />,
+}));
+
+// The Fiddy balance at the top of the page reads Fiddy's own funding service
+// through React Query and the client's wallet context. What it renders is
+// measured where it lives (`AddFundsSheet.test.tsx`, `fiddyCredit.test.ts`);
+// this page's job is to mount it, which is what the stand-in below proves.
+vi.mock('~/components/fiddy/FiddyFunding', () => ({
+  FiddyBalanceSection: () => <div data-fiddy="balance-home" />,
 }));
 
 const CONNECTED = '0x1111111111111111111111111111111111111111';
@@ -159,6 +170,11 @@ describe('the wallet page', () => {
     expect(subLine()).toContain('pays for what your agent uses');
     expect(subLine()).toContain('signs every payment you approve');
     expect(subLine()).toContain('never holds it');
+  });
+
+  it('mounts the Fiddy balance it is named after', () => {
+    renderPage();
+    expect(document.querySelector('[data-fiddy="balance-home"]')).toBeTruthy();
   });
 
   it('mounts the real wallet surface, not a notice about one', () => {

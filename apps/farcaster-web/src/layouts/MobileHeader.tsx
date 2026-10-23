@@ -22,6 +22,7 @@ import { Link as RouterLink, useLocation } from 'react-router-dom';
 
 import { AvatarImage } from '~/components/avatar/AvatarImage';
 import { AccountSwitcherEntry } from '~/components/fiddy/accounts/AccountSwitcher';
+import { FiddyBalanceChipConnected } from '~/components/fiddy/FiddyFunding';
 import { ComposeCastButton } from '~/components/forms/buttons/ComposeCastButton';
 import { ExternalLink } from '~/components/links/ExternalLink';
 import { NavLinkBadge } from '~/components/links/NavLinkBadge';
@@ -496,6 +497,10 @@ const MobileHeaderInner: FC = memo(() => {
             >
               <SearchIcon size={18} className="text-default" />
             </button>
+
+            {/* The Fiddy balance, on the phone too: the number alone, and only
+                once there is one to show. */}
+            <FiddyBalanceChipConnected compact />
 
             {/* Whose node answered, on the phone too — one word and a dot. */}
             <NodeStatusPill short />

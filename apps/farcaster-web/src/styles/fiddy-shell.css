@@ -1575,3 +1575,321 @@ html.fiddy-dark-shell body {
   line-height: 1.55;
   color: var(--fiddy-ink-dim);
 }
+
+/* ---------- the Fiddy balance: chip, home, and adding funds ----------
+   One idea, three sizes. The chip is the number in the chrome; the balance home
+   is that number explained with its recent movements; the add-funds sheet is
+   the only place the number can move. All of it is the design's own language —
+   glass ground, chartreuse accent, rounded 18px — and none of it is a new
+   visual concept. */
+
+.fiddy-chip-link {
+  display: inline-flex;
+  flex: none;
+}
+
+.fiddy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--fiddy-glass-border);
+  background: var(--fiddy-glass);
+  color: var(--fiddy-ink);
+  font-size: 13px;
+  font-weight: 700;
+  flex: none;
+}
+
+.fiddy-chip:hover {
+  border-color: color-mix(in oklab, var(--fiddy-accent), transparent 55%);
+}
+
+.fiddy-chip svg {
+  color: var(--fiddy-accent);
+  flex: none;
+}
+
+.fiddy-chip-label {
+  color: var(--fiddy-ink-dim);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* The number is the whole chip on a phone: the bar already carries the node
+   pill, search and the compose action, and a second word would be a crowd. */
+.fiddy-chip-compact {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.fiddy-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border-radius: var(--fiddy-radius);
+  border: 1px solid var(--fiddy-glass-border);
+  background: var(--fiddy-glass);
+}
+
+.fiddy-balance-amount {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fiddy-balance-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fiddy-ink-dim);
+}
+
+.fiddy-balance-amount strong {
+  font-size: 34px;
+  line-height: 1.1;
+  font-weight: 800;
+  color: var(--fiddy-accent);
+}
+
+.fiddy-balance-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fiddy-balance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fiddy-balance-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--fiddy-glass-border);
+}
+
+.fiddy-balance-list li:first-child {
+  border-top: 0;
+}
+
+.fiddy-balance-movement {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fiddy-balance-movement b {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.fiddy-balance-movement small {
+  font-size: 11.5px;
+  color: var(--fiddy-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.fiddy-balance-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* ---------- adding funds ---------- */
+
+.fiddy-top-up {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.fiddy-top-up-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fiddy-top-up-title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.fiddy-top-up-sub {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fiddy-ink-dim);
+}
+
+.fiddy-amounts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fiddy-amount {
+  height: 54px;
+  border-radius: 14px;
+  border: 1px solid var(--fiddy-glass-border);
+  background: var(--fiddy-glass);
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--fiddy-ink);
+}
+
+.fiddy-amount:hover {
+  border-color: color-mix(in oklab, var(--fiddy-accent), transparent 55%);
+}
+
+.fiddy-amount-selected {
+  border-color: var(--fiddy-accent);
+  color: var(--fiddy-on-accent);
+  background: var(--fiddy-accent);
+}
+
+.fiddy-amount-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fiddy-amount-field > span {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--fiddy-ink-dim);
+}
+
+.fiddy-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: 14px;
+  border: 1px solid var(--fiddy-glass-border);
+  background: var(--fiddy-glass);
+  padding: 4px 14px;
+}
+
+.fiddy-review-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--fiddy-glass-border);
+}
+
+.fiddy-review-row:first-child {
+  border-top: 0;
+}
+
+.fiddy-review-label {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fiddy-ink-dim);
+  flex: none;
+}
+
+.fiddy-review-value {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+  min-width: 0;
+}
+
+.fiddy-review-value code {
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.fiddy-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--fiddy-glass-border);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fiddy-ink-dim);
+  flex: none;
+}
+
+.fiddy-copy-btn:hover {
+  color: var(--fiddy-ink);
+}
+
+.fiddy-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--fiddy-accent), transparent 65%);
+  background: color-mix(in oklab, var(--fiddy-accent), transparent 92%);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.fiddy-pending-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fiddy-progress {
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--fiddy-glass-border);
+  background: var(--fiddy-glass);
+}
+
+.fiddy-failure {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fiddy-failure-code code,
+.fiddy-failure-hash {
+  font-size: 12.5px;
+  color: var(--fiddy-ink-dim);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+  display: block;
+}
+
+.fiddy-failure-hash {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--fiddy-glass-border);
+  background: var(--fiddy-glass);
+  font-size: 12px;
+}
+
+.fiddy-page-inner .fiddy-top-up .fiddy-primary-btn,
+.fiddy-page-inner .fiddy-top-up .fiddy-secondary-btn,
+.fiddy-page-inner .fiddy-top-up .fiddy-quiet-btn {
+  width: 100%;
+}

@@ -6,11 +6,17 @@
  * The mark is the 3D baby (`FiddyMark3D`): it paints as a still of its own
  * first frame and animates once the model is fetched and drawn, which is why the
  * brand here is a component and not an <img>.
+ *
+ * The Fiddy balance sits next to that mark, because it is the one number the
+ * whole client runs on and the chrome is where somebody looks for it. It is a
+ * link to the balance home, and it appears only when there is a balance to
+ * show — see `FiddyBalanceChip`.
  */
 
 import { FC, memo } from 'react';
 
 import { AvatarImage } from '~/components/avatar/AvatarImage';
+import { FiddyBalanceChipConnected } from '~/components/fiddy/FiddyFunding';
 import { FiddyMark3D } from '~/components/fiddy/FiddyMark3D';
 import { Link } from '~/components/links/Link';
 import { NodeStatusPill } from '~/components/snapchain/NodeStatusPill';
@@ -36,6 +42,9 @@ const FiddyTopBar: FC = memo(() => {
         fiddy
       </Link>
       <div className="fiddy-grow" />
+      {/* The balance, beside the mark it belongs to. Renders nothing until
+          there is a number, so the chrome never carries a placeholder. */}
+      <FiddyBalanceChipConnected />
       <NodeStatusPill
         className="fiddy-node-pill"
         labelClassName="hidden md:inline"
