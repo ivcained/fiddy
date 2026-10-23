@@ -7,10 +7,10 @@ import {
   Grid3X3Icon,
   HomeIcon,
   Megaphone,
-  Mic,
   Send,
   Server,
   UserPlusIcon,
+  Users,
   Wallet,
 } from 'lucide-react';
 import React from 'react';
@@ -127,19 +127,31 @@ const AuthedLeftSideBar: React.FC = React.memo(() => {
           <NavLinkLabel>Notifications</NavLinkLabel>
           <NavLinkBadge count={notificationsCount} subtle={false} />
         </NavLink>
-        <NavLink
-          to="spacesDiscovery"
-          params={{}}
-          searchParams={{}}
-          title="Spaces"
-        >
+        {/* Spaces is Together — one project, one board, your people — because
+            that is what a space is in Fiddy: you create one, a Farcaster
+            identity joins it, and the board is shared. The entry used to point
+            at the fork's Spaces (live audio rooms), which is a hosted product
+            this client has neither a read nor a write for: the create button
+            there asked for `POST /v1/audio-rooms` and could only ever answer
+            "nothing was signed and nothing was sent". Never offer an action
+            that cannot work — name what is missing where it would sit, the way
+            Direct Casts above does. See ~/snapchain/nodeApi/hostedRoutes
+            (`/v1/audio-rooms`) and ~/pages/spaces/SpacesPage. */}
+        <NavLink to="together" params={{}} searchParams={{}} title="Spaces">
           <NavLinkIcon>
             <div className="relative translate-y-[-1.25px]">
-              <Mic size={20} />
+              <Users size={20} />
             </div>
           </NavLinkIcon>
           <NavLinkLabel>Spaces</NavLinkLabel>
         </NavLink>
+        <div
+          className="fiddy-nav-note"
+          data-fiddy="audio-rooms-soon"
+          role="status"
+        >
+          Audio rooms <span className="fiddy-soon">soon</span>
+        </div>
         <NavLink to="discover" params={{}} searchParams={{}} title="Apps">
           <NavLinkIcon>
             <div className="relative translate-y-[-1.25px]">
