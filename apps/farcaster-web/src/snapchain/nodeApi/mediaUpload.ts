@@ -38,12 +38,13 @@
  *
  * WHAT DOES NOT LEAVE THE DEVICE
  *
- * The bytes are prepared before they are sent: a photo is re-encoded (≤2048px
- * JPEG) and a video's location/device boxes are overwritten, so the picture
- * reaches the host and the camera's metadata does not. See `./photoPrivacy` for
- * what that does and does not cover. A file nothing can be done to is still
- * sent — an unscrubbable photo is not a reason to lose somebody's post — and the
- * result says whether anything was changed.
+ * The bytes are prepared before they are sent: a photo is re-encoded (≤2048px,
+ * JPEG — or PNG when anything in it is see-through, so a sticker or a logo
+ * keeps its transparency) and a video's location/device boxes are overwritten,
+ * so the picture reaches the host and the camera's metadata does not. See
+ * `./photoPrivacy` for what that does and does not cover. A file nothing can be
+ * done to is still sent — an unscrubbable photo is not a reason to lose
+ * somebody's post — and the result says whether anything was changed.
  */
 
 import { type ScrubEnvironment, scrubForUpload } from './photoPrivacy';

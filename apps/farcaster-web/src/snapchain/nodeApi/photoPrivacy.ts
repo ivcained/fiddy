@@ -9,11 +9,19 @@
  *
  * WHAT HAPPENS
  *
- *  - JPEG, PNG and WebP are re-encoded as a JPEG no larger than 2048px on the
- *    long edge (quality 0.88). Draw the pixels onto a fresh canvas and encode it
- *    again, and every metadata block a camera or a screenshot tool wrote is
- *    simply not in the output — there is nothing to strip, because the bytes are
- *    new. Downscaling also means a 12MP photo stops being 4MB.
+ *  - JPEG, PNG and WebP are re-encoded no larger than 2048px on the long edge
+ *    (quality 0.88). Draw the pixels onto a fresh canvas and encode it again,
+ *    and every metadata block a camera or a screenshot tool wrote is simply not
+ *    in the output — there is nothing to strip, because the bytes are new.
+ *    Downscaling also means a 12MP photo stops being 4MB.
+ *  - A picture with a see-through pixel is encoded as PNG, and everything else
+ *    as JPEG. A logo, a sticker, a cut-out or a graphic is not a photograph:
+ *    writing one out as an opaque JPEG bakes a white box behind every
+ *    transparent pixel, and on this app's dark background that box is the first
+ *    thing anyone would see. The drawn pixels are scanned for alpha before the
+ *    encode decides (once, and never for a JPEG input — that type has no alpha
+ *    channel at all). This is the shape upstream quilcast chose for it
+ *    (92d1aeead4af, MIT): see the note on `scanAlpha` below.
  *  - MP4 and MOV lose their `udta` (location, device) and `meta` boxes: those
  *    bytes are overwritten in place with a `free` box, which keeps every offset
  *    and size untouched, so the video plays exactly as before.
@@ -41,6 +49,9 @@ export const PHOTO_JPEG_QUALITY = 0.88;
 /** Types that are re-encoded. */
 const RE_ENCODABLE_PHOTO = /^image\/(jpeg|png|webp)$/i;
 
+/** The input type that cannot be see-through, so it is never scanned. */
+const JPEG_PHOTO = /^image\/jpeg$/i;
+
 /** Types whose metadata boxes are overwritten in place. */
 const SCRUBBABLE_VIDEO = /^video\/(mp4|quicktime)$/i;
 
@@ -53,20 +64,94 @@ export interface PhotoScrubResult {
   reason?: string;
 }
 
+/** A decoded picture, as `createImageBitmap` hands one back. */
+export interface DecodedPhoto {
+  width: number;
+  height: number;
+}
+
+/** The types a re-encoded picture comes back as: PNG while anything in it is
+ *  see-through, JPEG otherwise. */
+export type PhotoEncoding = 'image/jpeg' | 'image/png';
+
 /** The browser pieces this module needs, so a test can supply its own. */
 export interface ScrubEnvironment {
-  decode?: (file: Blob) => Promise<{ width: number; height: number }>;
-  /** Encode the drawn result; the real one is `canvas.toBlob`. */
-  encode?: (
-    bitmap: { width: number; height: number },
+  decode?: (file: Blob) => Promise<DecodedPhoto>;
+  /**
+   * True when any pixel of the drawn picture is see-through.
+   *
+   * This is a step of its own rather than a branch hidden inside `encode`
+   * because the decision it feeds — PNG or JPEG — belongs to `scrubPhoto`,
+   * where a test can see it. The price is that the browser draws the picture
+   * once to scan it and once to encode it; at ≤2048px that is a few
+   * milliseconds in front of an upload that takes seconds, and it keeps the
+   * scan replaceable with a fake.
+   */
+  scanAlpha?: (
+    bitmap: DecodedPhoto,
     width: number,
     height: number,
+  ) => Promise<boolean>;
+  /** Encode the drawn result as `type`; the real one is `canvas.toBlob`. */
+  encode?: (
+    bitmap: DecodedPhoto,
+    width: number,
+    height: number,
+    type: PhotoEncoding,
   ) => Promise<Blob | null>;
 }
 
+/** A re-encode needs all three steps; anything less is no re-encode at all. */
+type CompleteScrubEnvironment = Required<ScrubEnvironment>;
+
+/** The environment, or nothing when this browser cannot supply every step. */
+const completeEnvironment = (
+  environment: ScrubEnvironment | undefined,
+): CompleteScrubEnvironment | undefined => {
+  const env = environment ?? browserEnvironment();
+
+  return env.decode && env.scanAlpha && env.encode
+    ? { decode: env.decode, scanAlpha: env.scanAlpha, encode: env.encode }
+    : undefined;
+};
+
 const browserEnvironment = (): ScrubEnvironment => ({
   decode: (file) => createImageBitmap(file),
-  encode: async (bitmap, width, height) => {
+  scanAlpha: async (bitmap, width, height) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    // `willReadFrequently` is this canvas's whole reason for existing: it is
+    // drawn once and read straight back, and never shown.
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+
+    if (!context) {
+      // A browser that cannot make this context cannot make the encoder's
+      // either, so nothing is re-encoded and nothing is white-filled behind a
+      // transparent pixel. See `encode` below.
+      return false;
+    }
+
+    context.drawImage(
+      bitmap as unknown as CanvasImageSource,
+      0,
+      0,
+      width,
+      height,
+    );
+
+    const { data } = context.getImageData(0, 0, width, height);
+
+    // Alpha is every fourth byte. Stop at the first see-through pixel there is.
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 255) {
+        return true;
+      }
+    }
+
+    return false;
+  },
+  encode: async (bitmap, width, height, type) => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -76,10 +161,14 @@ const browserEnvironment = (): ScrubEnvironment => ({
       return null;
     }
 
-    // A JPEG has no alpha channel, so transparency has to land on something:
-    // white, which is what a photo viewer would show.
-    context.fillStyle = '#fff';
-    context.fillRect(0, 0, width, height);
+    if (type === 'image/jpeg') {
+      // A JPEG has no alpha channel, so transparency has to land on something:
+      // white, which is what a photo viewer would show. A picture that really
+      // is see-through never reaches this branch — it is encoded as PNG.
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, width, height);
+    }
+
     context.drawImage(
       bitmap as unknown as CanvasImageSource,
       0,
@@ -89,13 +178,14 @@ const browserEnvironment = (): ScrubEnvironment => ({
     );
 
     return new Promise<Blob | null>((resolve) => {
-      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', PHOTO_JPEG_QUALITY);
+      // The quality belongs to JPEG; `toBlob` ignores it for a PNG.
+      canvas.toBlob((blob) => resolve(blob), type, PHOTO_JPEG_QUALITY);
     });
   },
 });
 
 /** Release a decoded bitmap if the browser gives us a way to. */
-const closeBitmap = (bitmap: { width: number; height: number }) => {
+const closeBitmap = (bitmap: DecodedPhoto) => {
   const closable = bitmap as unknown as { close?: () => void };
 
   if (typeof closable.close === 'function') {
@@ -126,9 +216,9 @@ export const scrubPhoto = async ({
     };
   }
 
-  const env = environment ?? browserEnvironment();
+  const env = completeEnvironment(environment);
 
-  if (!env.decode || !env.encode) {
+  if (!env) {
     return { file, changed: false, reason: 'this browser cannot re-encode' };
   }
 
@@ -142,7 +232,14 @@ export const scrubPhoto = async ({
     const height = Math.max(1, Math.round(bitmap.height * scale));
 
     try {
-      const encoded = await env.encode(bitmap, width, height);
+      // A JPEG cannot hold a see-through pixel, so scanning one is work with an
+      // answer we already know (upstream quilcast skips it for the same reason,
+      // 92d1aeead4af).
+      const seeThrough = JPEG_PHOTO.test(file.type)
+        ? false
+        : await env.scanAlpha(bitmap, width, height);
+      const type: PhotoEncoding = seeThrough ? 'image/png' : 'image/jpeg';
+      const encoded = await env.encode(bitmap, width, height, type);
 
       if (!encoded || encoded.size === 0) {
         return {
