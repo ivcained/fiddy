@@ -22,6 +22,7 @@
  *      bootstrap's agree on the token list, the limits and the colour rule.
  */
 
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,10 @@ import {
 } from '~/utils/lookTheme';
 
 import { createUnfurlHandler } from '../../server/unfurl/handler.mjs';
+import {
+  carriesLookBody,
+  readLookBody,
+} from '../../server/unfurl/lookBody.mjs';
 import {
   cleanLook as cleanLookOnHost,
   createLookStore,
@@ -447,5 +452,107 @@ describe('one model, three files', () => {
     for (const varName of LOOK_VARS) {
       expect(varName.startsWith('--')).toBe(true);
     }
+  });
+});
+
+/**
+ * The socket's half of the contract: what a body PAST the cap does.
+ *
+ * This block exists because of a MEASURED failure on fiddy.fun (2026-10-23,
+ * card t_d85d8520): the first shape of the reader destroyed the request as soon
+ * as a share body crossed the cap, so no answer was ever written — nginx logged
+ * a closed upstream and its `error_page 502 = @fiddy_shell` answered the POST
+ * with `405 Not Allowed` and an HTML page, while the service's own log said
+ * `400`, because the whitespace placeholder it was handed read as an EMPTY
+ * body. Every test above hands the handler a string and so could not see any of
+ * it. These cases read a request the way the service does.
+ */
+const fakeRequest = () => {
+  const request = new EventEmitter() as EventEmitter & {
+    destroyed: boolean;
+    destroy: () => void;
+    destroyCalls: number;
+  };
+  request.destroyed = false;
+  request.destroyCalls = 0;
+  request.destroy = () => {
+    request.destroyed = true;
+    request.destroyCalls += 1;
+  };
+  return request;
+};
+
+const readPast = async (
+  chunks: Buffer[],
+): Promise<{ body: string; request: ReturnType<typeof fakeRequest> }> => {
+  const request = fakeRequest();
+  const reading = readLookBody(request, LOOK_LIMITS.bytes);
+  for (const chunk of chunks) {
+    request.emit('data', chunk);
+  }
+  request.emit('end');
+  return { body: await reading, request };
+};
+
+describe('a share body past the cap is answered, never abandoned', () => {
+  it('keeps the socket open and hands the model one byte over the cap', async () => {
+    const { body, request } = await readPast([
+      Buffer.alloc(3000, 0x61),
+      Buffer.alloc(3000, 0x61),
+      Buffer.alloc(3000, 0x61),
+    ]);
+
+    // The regression: destroying the request closed the socket before the
+    // model's sentence could be written, and nginx answered 405 HTML instead.
+    expect(request.destroyCalls).toBe(0);
+    expect(request.destroyed).toBe(false);
+
+    // What the model is handed is over the cap, and NOT blank: the sentence a
+    // person reads is the model's own ("too big"), never "came through empty".
+    expect(Buffer.byteLength(body, 'utf8')).toBe(LOOK_LIMITS.bytes + 1);
+    expect(body.trim().length).toBeGreaterThan(0);
+    const refusal = shareableLook(body);
+    expect(refusal.ok).toBe(false);
+    expect(refusal.status).toBe(413);
+    expect(refusal.error).toBe('That look is too big to share.');
+  });
+
+  it('hands a body inside the cap to the model byte for byte', async () => {
+    const look = JSON.stringify({ ...A_LOOK, name: 'Mossy 🌿 ünïcode' });
+    const { body } = await readPast([
+      Buffer.from(look.slice(0, 40)),
+      Buffer.from(look.slice(40)),
+    ]);
+    expect(body).toBe(look);
+    expect(shareableLook(body).ok).toBe(true);
+  });
+
+  it('is inclusive at the cap: at it the body is read, one byte past it is too big', async () => {
+    const atCap = Buffer.alloc(LOOK_LIMITS.bytes, 0x78);
+    const overCap = Buffer.alloc(LOOK_LIMITS.bytes + 1, 0x78);
+    const inside = await readPast([atCap]);
+    const past = await readPast([overCap]);
+    expect(Buffer.byteLength(inside.body, 'utf8')).toBe(LOOK_LIMITS.bytes);
+    expect(Buffer.byteLength(past.body, 'utf8')).toBe(LOOK_LIMITS.bytes + 1);
+    expect(shareableLook(inside.body).status).toBe(400);
+    expect(shareableLook(past.body).status).toBe(413);
+  });
+
+  it('settles on a request that errors mid-body rather than rejecting', async () => {
+    const request = fakeRequest();
+    const reading = readLookBody(request, LOOK_LIMITS.bytes);
+    request.emit('data', Buffer.from('{"bg":"#161715"}'));
+    request.emit('error', new Error('aborted'));
+    await expect(reading).resolves.toBe('{"bg":"#161715"}');
+  });
+
+  it('reads a body only from the POST that shares a look', () => {
+    expect(carriesLookBody('POST', '/look')).toBe(true);
+    expect(carriesLookBody('POST', '/look?from=app')).toBe(true);
+    expect(carriesLookBody('GET', '/look')).toBe(false);
+    expect(carriesLookBody('POST', '/look/91fd1eb7f0')).toBe(false);
+    expect(carriesLookBody('POST', '/unfurl/cards/look/91fd1eb7f0.png')).toBe(
+      false,
+    );
   });
 });

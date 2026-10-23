@@ -38,24 +38,36 @@ type SharedLookCardProps = {
 const SharedLookCard: React.FC<SharedLookCardProps> = React.memo(
   ({ id, by, variant = 'page', className }) => {
     const shared = useSharedLook(id);
-    const { wornLook, putOnLook } = useWornLook();
+    const { wornLook, putOnLook, takeOffLook } = useWornLook();
     /** What was worn before this look went on, so undo can put it back. */
     const [previous, setPrevious] = React.useState<Look | undefined>(undefined);
-    const [undone, setUndone] = React.useState(false);
 
     const putOn = React.useCallback(
       (look: Look) => {
         setPrevious(wornLook);
-        setUndone(false);
         putOnLook(look);
       },
       [putOnLook, wornLook],
     );
 
+    // UNDO PUTS BACK WHAT WAS THERE — which is usually NOTHING, and nothing is
+    // not "put on the empty look": `putOnLook` refuses an empty look by design
+    // (it is the guard that keeps a half-written draft off the screen), so
+    // handing it `{}` left the shared look worn and the undo press did nothing.
+    // MEASURED 2026-10-23 on fiddy.fun, card t_d85d8520: the link's own page,
+    // wearing the look for the first time, then Undo — the palette stayed and
+    // `fiddy-look` still held it. Nothing worn before means take it off.
+    //
+    // What the card SHOWS is `isWorn` alone, and that is the other half of the
+    // same rule: an undo leaves this look off, so the card is back to offering
+    // it ("Put this look on"), never claiming it is saved.
     const undo = React.useCallback(() => {
-      putOnLook(previous ?? {});
-      setUndone(true);
-    }, [previous, putOnLook]);
+      if (previous) {
+        putOnLook(previous);
+      } else {
+        takeOffLook();
+      }
+    }, [previous, putOnLook, takeOffLook]);
 
     if (shared.state === 'loading') {
       return (
@@ -108,7 +120,7 @@ const SharedLookCard: React.FC<SharedLookCardProps> = React.memo(
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
-          {isWorn || undone ? (
+          {isWorn ? (
             <>
               <span
                 className="text-sm text-faint"
@@ -116,16 +128,14 @@ const SharedLookCard: React.FC<SharedLookCardProps> = React.memo(
               >
                 Saved — you can undo this
               </span>
-              {!undone && (
-                <DefaultButton
-                  size="sm"
-                  variant="muted"
-                  data-fiddy="shared-look-undo"
-                  onClick={undo}
-                >
-                  Undo
-                </DefaultButton>
-              )}
+              <DefaultButton
+                size="sm"
+                variant="muted"
+                data-fiddy="shared-look-undo"
+                onClick={undo}
+              >
+                Undo
+              </DefaultButton>
             </>
           ) : (
             <DefaultButton
