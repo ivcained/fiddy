@@ -85,7 +85,8 @@ bin/fiddy node up --local</span></pre>
 
     <div class="provider">
       <div class="phead"><strong>AWS</strong><span class="price">~$285/mo · default cloud path</span></div>
-      <p class="dim prow">Open <a href="https://console.aws.amazon.com" target="_blank" rel="noopener">console.aws.amazon.com</a> → the <strong>CloudShell</strong> icon (<code style="font-family:var(--mono)">&gt;_</code> top bar) — pre-authenticated. One line:</p>
+      <p style="margin:10px 0 4px"><a class="btn" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener">Open AWS CloudShell ↗</a></p>
+      <p class="dim prow">CloudShell opens pre-authenticated in your account. One line inside:</p>
       <pre class="pcmd"><span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span></pre>
       <p class="dim prow" style="font-size:13px"><strong>Why AWS is the default:</strong> Hetzner caps new accounts at 1024 GB of volume
       storage — a resize past that is refused with <code style="font-family:var(--mono)">resource_limit_exceeded</code>,
