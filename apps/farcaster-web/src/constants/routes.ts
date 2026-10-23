@@ -68,6 +68,7 @@ import {
   LiveAudioRoomPage,
   LocationUsersPage,
   LoginRedirectToAppPage,
+  LookPage,
   MagicLinkPage,
   ManageAppPage,
   ManageChannelsForCategoryPage,
@@ -205,6 +206,28 @@ const routes = {
     search: {},
     family: family('explore'),
     Component: PublicFeedPage,
+  },
+  /**
+   * A look someone shared, at `/look/<id>`.
+   *
+   * A root path, like `/feed` and `/explore` above, and for the same reason: the
+   * link has to work for whoever opens it. `reservedRouteNames.ts` derives the
+   * reserved set from this table, so `look` is held the moment this entry
+   * exists — a bare `/look/...` can never resolve as the profile of whoever is
+   * called @look, and `hydratePath` rewrites links to it into the `/u`
+   * namespace like any other app-owned name.
+   *
+   * The link carries the look's id and nothing else: a share id is a hash of
+   * the checked look, so the same look handed to two people is one link.
+   */
+  look: {
+    path: '/look/:id',
+    params: { id: '' } as {
+      id: string;
+    },
+    search: {},
+    family: family('home'),
+    Component: LookPage,
   },
   publicExplore: {
     path: '/explore',

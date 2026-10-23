@@ -14,7 +14,8 @@
  */
 
 import { cardUrl, pageTags, renderPageHtml } from './shellMeta.mjs';
-import { castPage, profilePage } from './pages.mjs';
+import { castPage, lookPage, profilePage } from './pages.mjs';
+import { lookFacts, shareableLook } from './looks.mjs';
 import { CARD_HEIGHT, CARD_WIDTH } from './cards.mjs';
 
 const HTML_TTL_MS = 5 * 60 * 1000;
@@ -66,12 +67,33 @@ const text = (status, body, headers = {}) => ({
   body,
 });
 
+/** A JSON answer, with the same no-store discipline the health route uses. */
+const json = (status, value, headers = {}) => ({
+  status,
+  headers: {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    ...headers,
+  },
+  body: `${JSON.stringify(value)}\n`,
+});
+
 export const createUnfurlHandler = ({
   origin = 'https://fiddy.fun',
   shellSource,
   siteCard,
   renderCard,
   reader,
+  /**
+   * Where shared looks live (`looks.mjs`), or nothing.
+   *
+   * A host that cannot store a look still renders one it has: this is the only
+   * difference, and it is why the route table below can answer `GET` without
+   * one. A missing store is `undefined` rather than an error, so a self-hosted
+   * copy without the service's state directory serves the app and its look
+   * links refuse in one sentence.
+   */
+  looks,
   now = () => Date.now(),
   htmlTtlMs = HTML_TTL_MS,
   missTtlMs = MISS_TTL_MS,
@@ -212,7 +234,13 @@ export const createUnfurlHandler = ({
           imageUrl: cardUrl(
             origin,
             facts.kind,
-            facts.kind === 'cast' ? facts.card.hash : facts.card.fid,
+            // One place, three kinds: a cast is its hash, a profile its fid, a
+            // look the id of the checked body it was stored under.
+            facts.kind === 'look'
+              ? facts.card.id
+              : facts.kind === 'cast'
+                ? facts.card.hash
+                : facts.card.fid,
           ),
         });
         return {
@@ -250,14 +278,80 @@ export const createUnfurlHandler = ({
 
   return {
     /**
-     * @param {{method: string, path: string}} request
+     * @param {{method: string, path: string, body?: string}} request
      * @returns {Promise<{status: number, headers: Record<string,string>, body: string|Buffer}>}
      */
-    async handle({ method, path }) {
+    async handle({ method, path, body }) {
+      const [, ...segments] = path.split('?')[0].split('/');
+
+      // A shared look is the ONE thing anyone can send here, and it is a
+      // checked body or a refusal (`looks.mjs`). `body` is read by the caller
+      // (capped) so this stays testable without a socket.
+      // (`segments` is the path's parts after the leading slash: `/look` is
+      // one part, `/look/<id>` is two.)
+      if (method === 'POST' && segments[0] === 'look' && segments.length === 1) {
+        if (!looks) {
+          return json(503, {
+            error: "Fiddy can't save looks on this host right now.",
+          });
+        }
+        const shareable = shareableLook(body);
+        if (!shareable.ok) {
+          return json(shareable.status, { error: shareable.error });
+        }
+        try {
+          const { id } = await looks.put(shareable.body);
+          return json(200, { id });
+        } catch (error) {
+          // The store failed (a full disk, a read-only directory). Say so; a
+          // stored look is immutable, so nothing half-written can be read back
+          // as one — the id IS the contents.
+          return json(503, {
+            error: "Fiddy couldn't save that look just now.",
+            why: headerNote(error?.message ?? String(error)),
+          });
+        }
+      }
+
       if (method !== 'GET' && method !== 'HEAD') {
         return text(405, 'only GET\n');
       }
-      const [, ...segments] = path.split('?')[0].split('/');
+
+      // A shared look, as the data the app reads (`/look/<id>.json`) or as the
+      // page a crawler reads (`/look/<id>`, below with the cast and profile
+      // pages). Both come from the same checked body.
+      if (segments[0] === 'look' && segments[1]) {
+        let raw;
+        try {
+          raw = decodeURIComponent(segments[1]);
+        } catch {
+          // A segment that is not text is not a look id; the answer is the same
+          // one an unknown id gets.
+          raw = '';
+        }
+        const wantsJson = raw.toLowerCase().endsWith('.json');
+        const id = wantsJson ? raw.slice(0, -'.json'.length) : raw;
+
+        const look = looks ? await looks.get(id) : undefined;
+        if (wantsJson) {
+          return look
+            ? json(200, { id, look })
+            : json(404, {
+                // One sentence, in the app's own voice: the same one the client
+                // shows, so a link that cannot be read says the same thing
+                // wherever it is read.
+                error: "That look link doesn't work any more.",
+              });
+        }
+
+        // `by` deliberately does NOT come from the query string. A page that
+        // credited whoever the URL named would let anyone put anyone's handle on
+        // a look; the app's card names the author of the CAST that carried the
+        // link instead, which is a fact this host can be held to.
+        return page(`/look/${id}`, async () =>
+          look ? lookPage({ origin, id, look }) : undefined,
+        );
+      }
 
       if (segments[0] === 'unfurl' && segments[1] === 'health') {
         return {
@@ -353,6 +447,15 @@ export const createUnfurlHandler = ({
               return profilePage({ origin, fid: id, ...facts }).card;
             }),
           );
+        }
+        if (kind === 'look') {
+          return card('look', id, async () => {
+            const look = looks ? await looks.get(id) : undefined;
+            if (!look) {
+              throw new Error('that look is not stored here');
+            }
+            return { kind: 'look', ...lookFacts({ id, look }) };
+          });
         }
       }
 

@@ -59,3 +59,17 @@ export const SealedKeyNotice = lazyWithPreload(() =>
     default: res.SealedKeyNotice,
   })),
 );
+
+/* The look editor: the colour controls, the sliders and the share call, all of
+   which only exist once someone opens Settings → Theme → "Make your own".
+   Nothing on a feed needs them, so they live in their own chunk and the entry
+   chunk stays the size it was (card t_d85d8520 keeps that budget). */
+type LookEditorComponent =
+  typeof import('~/components/looks/LookEditor').LookEditor;
+
+export const LookEditorModal: PreloadableComponent<LookEditorComponent> =
+  lazyWithPreload(() =>
+    import('~/components/looks/LookEditor').then((res) => ({
+      default: res.LookEditor,
+    })),
+  );

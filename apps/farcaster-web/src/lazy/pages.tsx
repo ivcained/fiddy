@@ -328,6 +328,15 @@ export const PublicExplorePage = lazyWithPreload(() =>
   })),
 );
 
+/* A look someone shared: one link, one palette, no account needed to wear it.
+   Public like the browse surface above, and lazy like everything else here so
+   the entry chunk does not carry a page nobody has opened. */
+export const LookPage = lazyWithPreload(() =>
+  import('~/pages/look/LookPage').then((res) => ({
+    default: res.LookPage,
+  })),
+);
+
 export const HomeFeedPage = lazyWithPreload(() =>
   import('~/pages/homeFeed/HomeFeedPage').then((res) => ({
     default: res.HomeFeedPage,

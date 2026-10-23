@@ -226,7 +226,11 @@ export default [
     // they are not under `~/` (that alias is src, which the browser bundle
     // owns), and a test that drove a copy would prove nothing about the code
     // the host runs.
-    files: ['src/__tests__/unfurlService.test.ts'],
+    files: [
+      'src/__tests__/unfurlService.test.ts',
+      // …and the same for the shared looks it now stores (card t_d85d8520).
+      'src/__tests__/lookService.test.ts',
+    ],
     rules: {
       'no-restricted-imports': 'off',
     },
