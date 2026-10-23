@@ -207,10 +207,22 @@ fi
 # from the build under release, with no network, and held to the rules the shell
 # itself just passed (its own tags, byte-identical body, no inline script). A
 # page that would ship wrong is a release that does not ship.
+#
+# The refusal below is followed by what to do about it, because the check itself
+# now prints the handler's own reason for every card that fell back (it retries a
+# card once first, so a starved renderer no longer refuses at all). Measured
+# 2026-10-23: without both of those this step refused twice on a build that was
+# fine — see card t_7413507e.
 UNFURL_CHECK="$STAGE/base/apps/farcaster-web/server/unfurl/self-check.mjs"
 UNFURL_OUT="$STAGE/unfurl-self-check"
 node "$UNFURL_CHECK" "$APP/index.html" "$UNFURL_OUT" \
-  || { echo "REFUSING to ship: the per-page unfurl pages do not hold against this build" >&2; exit 1; }
+  || { echo "REFUSING to ship: the per-page unfurl pages do not hold against this build" >&2
+       echo "  the checks above name the cause; read it before touching the build:" >&2
+       echo "  - a RENDERER cause (timeout, spawn error, exited N, python missing) is this machine, not this build." >&2
+       echo "    Re-run the whole step by hand on the same stage, then re-cut if it passes:" >&2
+       echo "      node $UNFURL_CHECK $APP/index.html /tmp/unfurl-self-check" >&2
+       echo "  - a PAGE-FACTS cause (they could not be read) or a tag/shell cause is a property of the build: fix it first." >&2
+       exit 1; }
 
 echo "  adapter  ok"
 echo "  media    ok"

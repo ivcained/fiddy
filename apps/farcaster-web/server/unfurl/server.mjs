@@ -127,7 +127,12 @@ const server = createServer(async (request, response) => {
   }
   response.end(answer.body);
   const note = answer.headers['x-unfurl'] ?? '-';
-  process.stdout.write(`${request.method} ${path} ${answer.status} ${note}\n`);
+  // A card on the fallback path says WHY in the same line the service logs, so
+  // the host's log answers the question a refused release used to leave open.
+  const cause = answer.headers['x-unfurl-note'];
+  process.stdout.write(
+    `${request.method} ${path} ${answer.status} ${note}${cause ? ` (${cause})` : ''}\n`,
+  );
 });
 
 server.listen(port, host, () => {

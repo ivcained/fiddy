@@ -23,7 +23,11 @@
  *   6. the CARD each page promises is drawn by the real renderer, from this
  *      build's own mascot, and is not the site card — the picture, not just the
  *      pixels. A page's `og:image` is a promise to a platform, and the site card
- *      is also 1200x630 (see the note at the card checks).
+ *      is also 1200x630 (see the note at the card checks);
+ *   7. a card that falls back to the site card SAYS WHY, in the handler's own
+ *      words, printed with the failing check — and the printout ends with what
+ *      to do about it (re-cut the release, or fix the build), so a refusal
+ *      costs one run instead of three.
  *
  * The rendered documents are written to `<outDir>/` so the ritual (and a person)
  * can grep what will actually be served.
@@ -41,8 +45,9 @@ import {
   CARD_HEIGHT,
 } from './cards.mjs';
 
+const selfPath = fileURLToPath(import.meta.url);
 const webRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
+  path.dirname(selfPath),
   '..',
   '..',
 );
@@ -230,10 +235,31 @@ const cards = {
 const cardBytes = {};
 for (const [kind, answer] of Object.entries(cards)) {
   cardBytes[kind] = answer.body;
+  const cause = answer.headers['x-unfurl-note'];
+  const ownCard =
+    answer.status === 200 && answer.headers['x-unfurl'] === `card:${kind}`;
   check(
     `${kind} card is that page's own card`,
-    answer.status === 200 && answer.headers['x-unfurl'] === `card:${kind}`,
+    ownCard,
     `${answer.status} ${answer.headers['x-unfurl']}`,
+  );
+  // MEASURED 2026-10-23 (card t_7413507e): this file refused a release twice on
+  // the cards alone and named no cause — the handler had the renderer's error in
+  // a cache note that nothing printed, so a starved renderer and a broken card
+  // looked the same, and the release had to be re-cut blind. The reason now
+  // travels on the answer, is printed HERE with the failing check, and is itself
+  // checked: a card that falls back without saying why is a failure of this
+  // service, not only of this build.
+  if (!ownCard) {
+    note(`  ${kind} card did not draw for this page — the handler's own reason:`);
+    note(
+      `    ${cause ?? 'NONE RECORDED (the card route fell back without a reason)'}`,
+    );
+  }
+  check(
+    `${kind} card, when it does not draw, says why`,
+    ownCard || Boolean(cause),
+    ownCard || cause ? undefined : 'no x-unfurl-note on a fallback',
   );
   const size = pngSize(answer.body);
   check(
@@ -271,6 +297,20 @@ if (failures.length > 0) {
   for (const failure of failures) {
     console.error(`  - ${failure}`);
   }
+  // WHAT TO DO NEXT, decided by the cause printed above the failure list. This
+  // is the half this check was missing on 2026-10-23: it refused twice while the
+  // build was fine, and told nobody which of these three it was, which cost a
+  // card two release runs (t_7413507e).
+  console.error(
+    [
+      '  what to do next, read off the cause above:',
+      '  - the cause names the RENDERER (a timeout, a spawn error, "exited 1", a python that is not there): this machine, not this build.',
+      `    Re-run this file by hand on the same stage — node ${selfPath} <stage>/base/apps/farcaster-web/dist/index.html /tmp/unfurl-self-check — and if it passes, RE-CUT the release.`,
+      '    If it fails again, fix the renderer before shipping: python3 -c "import PIL.Image; print(PIL.__version__)".',
+      "  - the cause names this PAGE'S FACTS (they could not be read): the build's reader answered nothing — fix the build (or the node it reads), not the release.",
+      '  - anything else above (tags, shell bytes, inline script, a fallback that named no reason at all) is a property of the build: fix it before shipping.',
+    ].join('\n'),
+  );
   process.exit(1);
 }
 console.log(
