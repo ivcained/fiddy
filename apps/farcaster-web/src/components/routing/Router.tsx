@@ -5,6 +5,8 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthedRoutes } from '~/components/routing/AuthedRoutes';
 import { Redirect } from '~/components/routing/Redirect';
 import { RedirectIfAtPath } from '~/components/routing/RedirectIfAtPath';
+import { ReservedHandleGuard } from '~/components/routing/ReservedHandleGuard';
+import { reservedHandleRoutes } from '~/constants/reservedHandleRoutes';
 import { defaultRoute, redirects, routes } from '~/constants/routes';
 import { authTokenKey } from '~/constants/storage';
 import { DebugProvider } from '~/contexts/DebugProvider';
@@ -586,48 +588,62 @@ const Router: React.FC = () => {
               We must also adhere to this ordering in `routes` to accommodate vanity routes, unfortunately.
 
             */}
-              <Route
-                path={routes.conversationWithUsername.path}
-                element={<routes.conversationWithUsername.Component />}
-              />
-              <Route
-                path={routes.conversationReactionsWithUsername.path}
-                element={<routes.conversationReactionsWithUsername.Component />}
-              />
-              <Route
-                path={routes.conversationRecastsWithUsername.path}
-                element={<routes.conversationRecastsWithUsername.Component />}
-              />
-              <Route
-                path={routes.conversationQuotesWithUsername.path}
-                element={<routes.conversationQuotesWithUsername.Component />}
-              />
-              <Route
-                path={routes.followingWithUsername.path}
-                element={<routes.followingWithUsername.Component />}
-              />
-              <Route
-                path={routes.followersWithUsername.path}
-                element={<routes.followersWithUsername.Component />}
-              />
-              <Route
-                path={routes.profileSnapCastsWithUsername.path}
-                element={<routes.profileSnapCastsWithUsername.Component />}
-              />
-              <Route
-                path={routes.profileAssetsWithUsername.path}
-                element={<routes.profileAssetsWithUsername.Component />}
-              />
-              <Route
-                path={routes.profileCastsWithUsername.path}
-                element={<routes.profileCastsWithUsername.Component />}
-              />
-              <Route
-                path={routes.profileCastsAndRepliesWithUsername.path}
-                element={
-                  <routes.profileCastsAndRepliesWithUsername.Component />
-                }
-              />
+              <Route element={<ReservedHandleGuard />}>
+                <Route
+                  path={routes.conversationWithUsername.path}
+                  element={<routes.conversationWithUsername.Component />}
+                />
+                <Route
+                  path={routes.conversationReactionsWithUsername.path}
+                  element={
+                    <routes.conversationReactionsWithUsername.Component />
+                  }
+                />
+                <Route
+                  path={routes.conversationRecastsWithUsername.path}
+                  element={<routes.conversationRecastsWithUsername.Component />}
+                />
+                <Route
+                  path={routes.conversationQuotesWithUsername.path}
+                  element={<routes.conversationQuotesWithUsername.Component />}
+                />
+                <Route
+                  path={routes.followingWithUsername.path}
+                  element={<routes.followingWithUsername.Component />}
+                />
+                <Route
+                  path={routes.followersWithUsername.path}
+                  element={<routes.followersWithUsername.Component />}
+                />
+                <Route
+                  path={routes.profileSnapCastsWithUsername.path}
+                  element={<routes.profileSnapCastsWithUsername.Component />}
+                />
+                <Route
+                  path={routes.profileAssetsWithUsername.path}
+                  element={<routes.profileAssetsWithUsername.Component />}
+                />
+                <Route
+                  path={routes.profileCastsWithUsername.path}
+                  element={<routes.profileCastsWithUsername.Component />}
+                />
+                <Route
+                  path={routes.profileCastsAndRepliesWithUsername.path}
+                  element={
+                    <routes.profileCastsAndRepliesWithUsername.Component />
+                  }
+                />
+              </Route>
+              {/* `/u/<handle>`: one explicit address for an account whose name
+                  the app owns (`/feed`, `/explore`, …). Derived from the vanity
+                  routes above, so the two address families cannot drift. */}
+              {reservedHandleRoutes.map((route) => (
+                <Route
+                  key={route.path}
+                  path={route.path}
+                  element={<route.Component />}
+                />
+              ))}
             </Route>
             {/* Authed routes without scaffolding */}
             <Route element={<AuthedRoutes />}>
