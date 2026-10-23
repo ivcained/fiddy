@@ -21,8 +21,9 @@
  *      the same card.
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -447,6 +448,10 @@ describe('a card that cannot be drawn', () => {
     expect(headers['content-type']).toBe('image/png');
     expect(headers['x-unfurl']).toBe('card:site');
     expect(body).toEqual(siteCard);
+    // The site card is a real picture, but it is not this page's, and the answer
+    // no longer pretends otherwise: the reason rides with it.
+    expect(headers['x-unfurl-note']).toContain('pillow is not installed');
+    expect(headers['x-unfurl-note']).toContain('2 attempts');
   });
 
   it('answers 503 when there is no site card to fall back to', async () => {
@@ -481,6 +486,161 @@ describe('a card that cannot be drawn', () => {
     expect(status).toBe(200);
     expect(headers['x-unfurl']).toBe('card:profile');
     expect(body).toEqual(drawn);
+  });
+});
+
+describe('the reason a card fell back, and the one retry before it does', () => {
+  // MEASURED 2026-10-23 (card t_7413507e): release-client.sh step 3 refused a
+  // release twice, on the CARDS alone, with no cause named — `handler.card()`
+  // kept the renderer's error in a cache note that nothing printed, so a starved
+  // renderer and a broken card looked identical and the release had to be re-cut
+  // blind (the same command by hand passed minutes later). Two rules came out of
+  // it and both are pinned here: a card the renderer fails ONCE is drawn on the
+  // second attempt, and a card that really cannot be drawn carries its reason on
+  // the answer (`x-unfurl-note`), in the health JSON, and so in the gate's own
+  // output.
+  const drawn = Buffer.from(
+    '89504e470d0a1a0a0000000d49484452000004b000000276',
+    'hex',
+  );
+  const castUrl = `/unfurl/cards/cast/${DW_R.cast.hash}.png`;
+  const withReader = { reader: fakeReader({ cast: () => DW_R }) };
+
+  /** One handler, asked several times: the caches are part of what is under test. */
+  const ask = async (h: unknown, url: string) =>
+    (await (
+      h as {
+        handle: (r: { method: string; path: string }) => Promise<unknown>;
+      }
+    ).handle({ method: 'GET', path: url })) as {
+      status: number;
+      headers: Record<string, string>;
+      body: string | Buffer;
+    };
+
+  it('draws again, instead of falling back, when the renderer fails once', async () => {
+    let calls = 0;
+    const { status, headers, body } = await read(castUrl, {
+      ...withReader,
+      renderCard: async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new Error('the card renderer did not finish within 20000ms');
+        }
+        return drawn;
+      },
+    });
+    expect(calls).toBe(2);
+    expect(status).toBe(200);
+    expect(headers['x-unfurl']).toBe('card:cast');
+    expect(headers['x-unfurl-note']).toBeUndefined();
+    expect(body).toEqual(drawn);
+  });
+
+  it('names the renderer, both attempts included, when it fails twice', async () => {
+    let calls = 0;
+    const { status, headers } = await read(castUrl, {
+      ...withReader,
+      renderCard: async () => {
+        calls += 1;
+        throw new Error(
+          `render-card.py exited 3: no Pillow here (attempt ${calls})`,
+        );
+      },
+    });
+    expect(calls).toBe(2);
+    expect(status).toBe(200);
+    expect(headers['x-unfurl']).toBe('card:site');
+    expect(headers['x-unfurl-note']).toContain(
+      'the renderer did not draw it in 2 attempts',
+    );
+    for (const attempt of ['attempt 1', 'attempt 2']) {
+      expect(headers['x-unfurl-note']).toContain(attempt);
+    }
+  });
+
+  it("names the page, not the renderer, when this page's facts cannot be read", async () => {
+    const { headers } = await read(castUrl, {
+      reader: fakeReader(),
+      renderCard: async () => drawn,
+    });
+    expect(headers['x-unfurl']).toBe('card:site');
+    expect(headers['x-unfurl-note']).toContain(
+      "this page's own facts could not be read",
+    );
+    expect(headers['x-unfurl-note']).not.toContain('renderer did not draw');
+  });
+
+  it('keeps the reason inside what a response header can carry', async () => {
+    const { headers } = await read(castUrl, {
+      ...withReader,
+      renderCard: async () => {
+        throw new Error(`boom\r\nx-injected: yes\u0007 ${'long '.repeat(200)}`);
+      },
+    });
+    const cause = headers['x-unfurl-note'];
+    expect(cause).not.toMatch(/[\r\n]/);
+    expect(cause).not.toContain('\u0007');
+    expect(cause.length).toBeLessThanOrEqual(300);
+  });
+
+  it('carries the reason on the 503 too, when there is no site card', async () => {
+    const { status, headers } = await read(castUrl, {
+      ...withReader,
+      siteCard: undefined,
+      renderCard: async () => {
+        throw new Error('pillow is not installed');
+      },
+    });
+    expect(status).toBe(503);
+    expect(headers['x-unfurl']).toBe('card:unavailable');
+    expect(headers['x-unfurl-note']).toContain('pillow is not installed');
+  });
+
+  it('keeps the reason where /unfurl/health can be asked for it', async () => {
+    const failing = {
+      ...withReader,
+      renderCard: async () => {
+        throw new Error('the card renderer did not finish within 20000ms');
+      },
+    };
+    const h = handler(failing);
+    await ask(h, castUrl);
+    const { body } = await ask(h, '/unfurl/health');
+    const health = JSON.parse(String(body)) as {
+      cardFallbacks: number;
+      lastCardFallback: { key: string; note: string; at: string } | null;
+    };
+    expect(health.cardFallbacks).toBe(1);
+    expect(health.lastCardFallback?.key).toBe(`cast:${DW_R.cast.hash}`);
+    expect(health.lastCardFallback?.note).toContain('2 attempts');
+    expect(h.sizes().cardFallbacks).toBe(1);
+  });
+
+  it('does not hold a fallback for the hour a drawn card is cached for', async () => {
+    let clock = 1_000_000;
+    let calls = 0;
+    const h = handler({
+      ...withReader,
+      now: () => clock,
+      renderCard: async () => {
+        calls += 1;
+        if (calls <= 2) {
+          throw new Error('starved');
+        }
+        return drawn;
+      },
+    });
+    expect((await ask(h, castUrl)).headers['x-unfurl']).toBe('card:site');
+    expect(calls).toBe(2);
+    // Inside the miss window the same answer is reused: no third spawn.
+    expect((await ask(h, castUrl)).headers['x-unfurl']).toBe('card:site');
+    expect(calls).toBe(2);
+    // Past it the card is drawn again — a failure is never cached for the hour.
+    clock += 31_000;
+    const later = await ask(h, castUrl);
+    expect(later.headers['x-unfurl']).toBe('card:cast');
+    expect(calls).toBe(3);
   });
 });
 
@@ -618,4 +778,55 @@ describe('the copy a card carries', () => {
       renderPageHtml('<html><body>nothing</body></html>', 'x'),
     ).toThrow(/no <\/head>/);
   });
+});
+
+describe('the release self-check, measured the way the ritual runs it', () => {
+  // The gate is only as good as its refusal. MEASURED 2026-10-23 (card
+  // t_7413507e): step 3 refused a release twice, printed `card:site` for both
+  // pages and nothing else, while the build itself was fine — the same command
+  // by hand passed minutes later. These run the file the ritual runs, out of
+  // this checkout, and hold it to the two halves of the fix: a refusal NAMES the
+  // cause, and it says what to do next.
+  const shell = path.join(webRoot, 'index.html');
+  const selfCheck = path.join(webRoot, 'server', 'unfurl', 'self-check.mjs');
+
+  const run = (python: string) => {
+    const out = mkdtempSync(path.join(os.tmpdir(), 'unfurl-self-check-'));
+    const result = spawnSync(process.execPath, [selfCheck, shell, out], {
+      encoding: 'utf8',
+      env: { ...process.env, PYTHON: python },
+    });
+    return {
+      printed: `${result.stdout ?? ''}${result.stderr ?? ''}`,
+      status: result.status,
+    };
+  };
+
+  it('names the renderer and what to do about it, instead of refusing silently', () => {
+    // A python that STARTS and fails the way a broken one does, rather than a
+    // missing file: this is the failure a person cannot tell from a broken
+    // build, so it is the one the refusal has to describe.
+    const out = mkdtempSync(path.join(os.tmpdir(), 'unfurl-broken-python-'));
+    const broken = path.join(out, 'python3');
+    writeFileSync(broken, '#!/bin/sh\necho "no Pillow here" >&2\nexit 3\n', {
+      mode: 0o755,
+    });
+    const { printed, status } = run(broken);
+    expect(status).toBe(1);
+    expect(printed).toContain('card did not draw for this page');
+    expect(printed).toContain('the card renderer exited 3: no Pillow here');
+    expect(printed).toContain('what to do next');
+    expect(printed).toContain('RE-CUT the release');
+  }, 30_000);
+
+  it.skipIf(!pillowReady)(
+    'passes on this build, with every card drawn and no fallback unnamed',
+    () => {
+      const { printed, status } = run('python3');
+      expect(status).toBe(0);
+      expect(printed).toContain('unfurl self-check ok');
+      expect(printed).not.toContain('NONE RECORDED');
+    },
+    30_000,
+  );
 });

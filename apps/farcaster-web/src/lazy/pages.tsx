@@ -308,6 +308,18 @@ export const HomeLandingPage = lazyWithPreload(() =>
   })),
 );
 
+export const PublicFeedPage = lazyWithPreload(() =>
+  import('~/pages/publicBrowse/PublicBrowsePage').then((res) => ({
+    default: res.PublicFeedPage,
+  })),
+);
+
+export const PublicExplorePage = lazyWithPreload(() =>
+  import('~/pages/publicBrowse/PublicBrowsePage').then((res) => ({
+    default: res.PublicExplorePage,
+  })),
+);
+
 export const HomeFeedPage = lazyWithPreload(() =>
   import('~/pages/homeFeed/HomeFeedPage').then((res) => ({
     default: res.HomeFeedPage,

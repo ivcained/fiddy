@@ -147,6 +147,9 @@
 @import './styles/fiddy-accounts.css';
 /* The reminder to back an account up, and the words behind the tap. */
 @import './styles/fiddy-notice.css';
+/* The public browse surface: what a visitor with no account can read at
+   `/feed` and `/explore`. */
+@import './styles/fiddy-public.css';
 @config '../tailwind.config.js';
 
 * {

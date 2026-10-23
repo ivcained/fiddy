@@ -18,6 +18,8 @@ export interface FiddySheetAction {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** `data-fiddy` value for the button, so a test or a probe can name it. */
+  testId?: string;
 }
 
 export interface FiddySheetProps {
@@ -25,6 +27,16 @@ export interface FiddySheetProps {
   sub?: ReactNode;
   children?: ReactNode;
   primary?: FiddySheetAction | null;
+  /**
+   * The second loud action, when a screen really has two ways forward.
+   *
+   * Drawn under the primary and styled with the same weight but no highlight,
+   * because a screen with two equal primaries says nothing. Used by the front
+   * door for "Look around first": reading the network costs nothing and needs
+   * no account, so it is a way in rather than a footnote. Never a replacement
+   * for the quiet way out, which stays quiet.
+   */
+  secondary?: FiddySheetAction | null;
   /**
    * Draw the primary action as the thing that just became the point of the
    * screen. Set only when something the visitor did has earned it — a filled-in
@@ -53,6 +65,7 @@ export const FiddySheet = memo<FiddySheetProps>(
     sub,
     children,
     primary = null,
+    secondary = null,
     primaryHighlight = false,
     quiet = null,
     note = null,
@@ -99,7 +112,7 @@ export const FiddySheet = memo<FiddySheetProps>(
           <div className="fiddy-sheet-content">{children}</div>
         ) : null}
 
-        {primary || quiet ? (
+        {primary || secondary || quiet ? (
           <div className="fiddy-sheet-actions">
             {primary ? (
               <button
@@ -110,6 +123,17 @@ export const FiddySheet = memo<FiddySheetProps>(
                 disabled={primary.disabled}
               >
                 {primary.label}
+              </button>
+            ) : null}
+            {secondary ? (
+              <button
+                type="button"
+                className="fiddy-secondary-btn"
+                data-fiddy={secondary.testId}
+                onClick={secondary.onClick}
+                disabled={secondary.disabled}
+              >
+                {secondary.label}
               </button>
             ) : null}
             {quiet ? (

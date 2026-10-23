@@ -76,6 +76,7 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
     isAppsDialog = false,
     onMiniAppLaunch,
     isAdminGatedFeedCast = false,
+    readOnly = false,
   }) => {
     const { cast, context } = castWithContext;
 
@@ -464,7 +465,10 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
                       minWidth: mdAvatarDiameter + 16,
                     }}
                   />
-                  <UnfocusedCastActions castWithContext={castWithContext} />
+                  <UnfocusedCastActions
+                    castWithContext={castWithContext}
+                    readOnly={readOnly}
+                  />
                 </div>
               </div>
             </div>
@@ -480,12 +484,39 @@ UnfocusedCastContent.displayName = 'UnfocusedCastContent';
 
 function UnfocusedCastActions({
   castWithContext,
+  readOnly = false,
 }: {
   castWithContext: ApiCastWithContext;
+  readOnly?: boolean;
 }) {
   const isSignedIn = useIsSignedIn();
 
   const { context, cast } = castWithContext;
+
+  // Reading only, on purpose: a visitor with no account can see what a cast is
+  // worth (the numbers the network really holds) and share it, and nothing that
+  // needs an account is drawn at all. The surface that renders this says what
+  // signing in would add, once, rather than a dead button under every cast.
+  if (readOnly) {
+    return (
+      <div
+        className="flex w-full flex-row items-center gap-4 text-muted"
+        data-fiddy="read-only-cast-actions"
+      >
+        <span className="text-xs" data-fiddy="read-only-replies">
+          {cast.replies.count}
+          {cast.replies.count === 1 ? ' reply' : ' replies'}
+        </span>
+        <span className="text-xs" data-fiddy="read-only-recasts">
+          {cast.recasts?.count ?? 0} recasts
+        </span>
+        <span className="text-xs" data-fiddy="read-only-likes">
+          {cast.reactions?.count ?? 0} likes
+        </span>
+        <ShareCast cast={cast} isFocused={context.isFocused} />
+      </div>
+    );
+  }
 
   if (!isSignedIn) {
     return (

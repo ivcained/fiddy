@@ -97,6 +97,8 @@ import {
   ProfileStarterPacksWithoutUsernamePage,
   ProfileStarterPacksWithUsernamePage,
   ProUpsellPage,
+  PublicExplorePage,
+  PublicFeedPage,
   RecentSearchPage,
   RecoveryInitiatePage,
   RecoveryPage,
@@ -186,6 +188,30 @@ export type RouteFamily =
   | 'saved';
 
 const routes = {
+  /**
+   * The public browse window, and the discovery view of the same read.
+   *
+   * `/feed` and `/explore` are ROOT paths on purpose: they are the two URLs a
+   * visitor types when they want to see what a network is saying, and both are
+   * reserved names (see `reservedRouteNames.ts`, which derives them from this
+   * table), so a bare `/feed` can never be the profile of whoever is called
+   * @feed. Real routes here are what make that reservation worth anything: the
+   * page reads real casts with no account (`publicFeedWindow.ts`).
+   */
+  publicFeed: {
+    path: '/feed',
+    params: {},
+    search: {},
+    family: family('explore'),
+    Component: PublicFeedPage,
+  },
+  publicExplore: {
+    path: '/explore',
+    params: {},
+    search: {},
+    family: family('explore'),
+    Component: PublicExplorePage,
+  },
   homeFeed: {
     path: '/',
     params: {},

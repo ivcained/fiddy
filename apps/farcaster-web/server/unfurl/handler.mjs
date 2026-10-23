@@ -22,6 +22,44 @@ const MISS_TTL_MS = 30 * 1000;
 const CARD_TTL_MS = 60 * 60 * 1000;
 const AUTHOR_TTL_MS = 60 * 60 * 1000;
 
+/**
+ * How many times a card is drawn before the page is answered with the site card.
+ *
+ * Two, not one: the renderer is a python3 subprocess, and a machine under load
+ * can fail the spawn, blow the deadline or lose its interpreter without
+ * anything being wrong with the build. Measured 2026-10-23 (load average ~13,
+ * card t_7413507e): a release refused twice on the CARDS alone — `card:site`
+ * for both pages — while the same self-check by hand on the same stage passed
+ * minutes later and a third run shipped. A single retry turns that class of
+ * refusal into a pass, and it does NOT hide a real one: both attempts have to
+ * fail before the site card is served, and the note says so.
+ */
+const CARD_ATTEMPTS = 2;
+/** A yield, not a backoff: a spawn that failed instantly (EAGAIN under load) has a moment. */
+const CARD_RETRY_PAUSE_MS = 250;
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * A value that can be written into a response header.
+ *
+ * The note carries a renderer's own words, and a message with a newline in it
+ * (a spawn error, the tail of a python traceback) makes `writeHead` throw — a
+ * card on the fallback path would then be a 500 instead of a picture. One line,
+ * printable, bounded. The same string goes in the header, the health JSON, the
+ * service log and the self-check's output, so the gate and the service cannot
+ * disagree about why a card fell back.
+ */
+const headerNote = (value, max = 300) => {
+  const line = String(value)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\r\n\t\v\f\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/[^\x20-\x7e]+/g, '?')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return line.length > max ? `${line.slice(0, max - 3)}...` : line;
+};
+
 const text = (status, body, headers = {}) => ({
   status,
   headers: { 'content-type': 'text/plain; charset=utf-8', ...headers },
@@ -64,13 +102,32 @@ export const createUnfurlHandler = ({
     });
   };
 
-  const png = (buffer, note) => ({
+  /**
+   * The last few cards that fell back to the site card, with the reason each
+   * one did. Bounded, newest last, and reported by `/unfurl/health`: a person
+   * looking at this service — or at a refused release that asked it — must be
+   * able to tell a starved renderer from a broken card.
+   */
+  const cardFallbacks = [];
+  const rememberCardFallback = (key, note) => {
+    cardFallbacks.push({
+      key,
+      at: new Date(now()).toISOString(),
+      note: headerNote(note),
+    });
+    if (cardFallbacks.length > 5) {
+      cardFallbacks.shift();
+    }
+  };
+
+  const png = (buffer, note, cause) => ({
     status: 200,
     headers: {
       'content-type': 'image/png',
       'cache-control': `public, max-age=${Math.floor(cardTtlMs / 1000)}`,
       'content-length': String(buffer.length),
       'x-unfurl': note,
+      ...(cause ? { 'x-unfurl-note': headerNote(cause) } : {}),
     },
     body: buffer,
   });
@@ -79,36 +136,65 @@ export const createUnfurlHandler = ({
    * A card, or the site card, or — if even that is missing — a 503.
    *
    * The site card is the fallback on purpose: it is 1200x630, it is this
-   * product's art, and it is the picture this URL unfurled with yesterday.
+   * product's art, and it is the picture this URL unfurled with yesterday. What
+   * it is NOT is an answer that explains itself, so the reason travels with it:
+   * `x-unfurl-note` on the response, the same line in the health JSON, in the
+   * service's log, and printed by the release self-check. A release that
+   * refuses on the cards now says whether the reader, the renderer or neither
+   * was at fault.
    */
   const card = async (kind, id, buildPayload) => {
     const key = `${kind}:${id}`;
     const entry = await cached(cardCache, key, cardTtlMs, async () => {
+      let payload;
       try {
         // `buildPayload` is a function returning a PROMISE of this page's card
         // description (`reader.cast(hash).then(…)`), so it is awaited here: the
         // renderer takes a payload, and handing it an unresolved promise is a
         // card the renderer cannot read a kind out of — every page then answers
         // the SITE card while sounding like it drew its own.
-        const payload = await buildPayload();
-        return { ok: true, png: await renderCard(payload) };
+        payload = await buildPayload();
       } catch (error) {
+        // A page that could not be READ is not a renderer that could not DRAW,
+        // and the note says which: the first is a fact about this page (there is
+        // no card for it), the second a fact about this machine.
         return {
           ok: false,
-          note: `card failed: ${error.message}`,
+          note: `card failed, this page's own facts could not be read: ${error.message}`,
           png: undefined,
         };
       }
+      const attempts = [];
+      for (let attempt = 1; attempt <= CARD_ATTEMPTS; attempt += 1) {
+        try {
+          return { ok: true, png: await renderCard(payload), attempt };
+        } catch (error) {
+          attempts.push(error.message);
+          if (attempt < CARD_ATTEMPTS) {
+            await pause(CARD_RETRY_PAUSE_MS);
+          }
+        }
+      }
+      return {
+        ok: false,
+        note:
+          `card failed, the renderer did not draw it in ${CARD_ATTEMPTS} attempts: ` +
+          attempts.join(' | '),
+        png: undefined,
+      };
     });
     if (entry.png) {
       return png(entry.png, `card:${kind}`);
     }
+    const cause = entry.note ?? 'the card route recorded no reason';
+    rememberCardFallback(key, cause);
     const fallback = typeof siteCard === 'function' ? siteCard() : siteCard;
     if (fallback?.length) {
-      return png(fallback, 'card:site');
+      return png(fallback, 'card:site', cause);
     }
     return text(503, `no card for ${key}\n`, {
       'x-unfurl': 'card:unavailable',
+      'x-unfurl-note': headerNote(cause),
     });
   };
 
@@ -190,6 +276,10 @@ export const createUnfurlHandler = ({
             reads: reader.size?.() ?? 0,
             html: htmlCache.size,
             cards: cardCache.size,
+            // A page answered with the site card is a page whose card route
+            // failed; the reason is here rather than only in a log nobody kept.
+            cardFallbacks: cardFallbacks.length,
+            lastCardFallback: cardFallbacks[cardFallbacks.length - 1] ?? null,
           })}\n`,
         };
       }
@@ -314,6 +404,7 @@ export const createUnfurlHandler = ({
       html: htmlCache.size,
       cards: cardCache.size,
       authors: authorCache.size,
+      cardFallbacks: cardFallbacks.length,
     }),
     cardSize: { width: CARD_WIDTH, height: CARD_HEIGHT },
   };

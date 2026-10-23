@@ -74,7 +74,9 @@ export type OnboardingRouteName =
   | 'fiddyWelcomeName'
   | 'fiddyWelcomeBrain'
   | 'fiddyWelcomeApps'
-  | 'fiddyWelcomeReady';
+  | 'fiddyWelcomeReady'
+  /** The public browse window, opened from the front door with no account. */
+  | 'publicFeed';
 
 export interface FiddyOnboardingPageProps {
   step: OnboardingStep;
@@ -289,11 +291,19 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
                 : 'Say hi',
               onClick: () => go('fiddyWelcomeName'),
             }}
+            // Reading is not a commitment: no name, no brain, no account. This
+            // is the one press that shows a visitor the network itself, and it
+            // sits with the primary action so it is visible before any scroll.
+            secondary={{
+              label: 'Look around first',
+              onClick: () => go('publicFeed'),
+              testId: 'browse-cta',
+            }}
             quiet={{
               label: 'Already on Farcaster? Go social',
               onClick: () => setIsSigningIn(true),
             }}
-            note="No account needed for this part. Fiddy only asks for Farcaster when you want to post to it, and it can make you one if you don't have it."
+            note="No account needed for this part, and none for reading either: 'Look around first' opens the network as it is right now. Fiddy only asks for Farcaster when you want to post to it, and it can make you one if you don't have it."
             titleRef={titleRef}
           >
             <ul className="fiddy-promise">
