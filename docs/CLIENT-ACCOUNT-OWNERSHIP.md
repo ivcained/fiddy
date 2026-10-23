@@ -76,6 +76,20 @@ described inside `types`. `~/lib/heldWallet` derives that domain type from the
 domain actually present, in the standard field order — a field that is not there
 is a field that does not belong in the hash.
 
+### The defect the probe's own stage G found
+
+`JSON.stringify` throws on a BigInt, and the message the node's gasless KEY_ADD
+builds carries `fid` as one (`buildKeyAddMessage` in `farcaster-node-client`).
+The first run of stage G therefore failed with "your Google sign-up would not
+sign that" — a sentence about the provider — while the provider had never been
+asked anything: the recorded calls held `eth_signTransaction` and no
+`eth_signTypedData_v4` at all. `~/lib/heldWallet` now converts every BigInt to
+the hex quantity a quantity takes over this RPC before serialising, which is the
+shape every EIP-712 implementation on the other side accepts (eth-sig-util's
+`numberToBN`, viem's encoder, ethers' `BigNumberish`) and hashes as the same
+uint256 a locally held key would have hashed. Pinned by a unit test that signs
+the KEY_ADD-shaped payload, not a tidied-up version of it.
+
 ## What a person sees
 
 - **The account screen** leads with "Make this a Farcaster account" and keeps "I

@@ -89,12 +89,22 @@ export class SnapchainNodeClient {
       throw new Error('SnapchainNodeClient requires a baseUrl');
     }
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
-    const globalFetch = (globalThis as { fetch?: unknown }).fetch;
-    const fetchImpl = options.fetch ?? (globalFetch as FetchLike | undefined);
+    const globalFetch = (globalThis as { fetch?: unknown }).fetch as
+      | FetchLike
+      | undefined;
+    const fetchImpl = options.fetch ?? globalFetch;
     if (!fetchImpl) {
       throw new Error('No fetch implementation available — pass options.fetch');
     }
-    this.fetchImpl = fetchImpl;
+    // THE GLOBAL IS BOUND, AN INJECTED ONE IS NOT. A browser's `fetch` is a
+    // method of `Window`: held on this instance and called as
+    // `this.fetchImpl(...)`, it answers "Failed to execute 'fetch' on 'Window':
+    // Illegal invocation" — MEASURED 2026-10-23 in the client's own social
+    // sign-up probe, where the account flow's node reads never left the page
+    // (`useNodeClient` builds a client exactly this way). Node's fetch tolerates
+    // the receiver, which is why this was only ever visible in a browser. An
+    // injected fetch is the caller's own function and is handed on untouched.
+    this.fetchImpl = options.fetch ? options.fetch : fetchImpl.bind(globalThis);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.headers = options.headers ?? {};
   }

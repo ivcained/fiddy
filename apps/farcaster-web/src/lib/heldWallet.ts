@@ -138,6 +138,43 @@ const DOMAIN_FIELDS: readonly [string, string][] = [
   ['salt', 'bytes32'],
 ];
 
+/**
+ * The same payload, in a shape `JSON.stringify` can carry.
+ *
+ * WHY THIS IS NOT OPTIONAL. EIP-712 messages are built with BigInts — the node's
+ * own gasless KEY_ADD carries `fid` as one (`buildKeyAddMessage`, in
+ * `farcaster-node-client`) — and `JSON.stringify` THROWS on a BigInt ("Do not
+ * know how to serialize a BigInt"). The throw happens before the provider is
+ * asked anything, so the person is told their sign-up "would not sign that" when
+ * in fact nobody was ever asked. MEASURED 2026-10-23 in the acceptance probe's
+ * stage G: the call count showed only `eth_signTransaction`.
+ *
+ * A quantity goes over as a hex string, which is the shape every EIP-712
+ * implementation on the other side of an RPC accepts (eth-sig-util's
+ * `numberToBN`, viem's encoder, ethers' `BigNumberish`), and which the wallet
+ * hashes as the same uint256 a locally held key would have hashed.
+ */
+export const jsonSafe = (value: unknown): unknown => {
+  if (typeof value === 'bigint') {
+    return hexQuantity(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(jsonSafe);
+  }
+
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        jsonSafe(entry),
+      ]),
+    );
+  }
+
+  return value;
+};
+
 /** The domain type for the domain that is actually there. */
 export const eip712DomainType = (
   domain: Record<string, unknown> = {},
@@ -170,8 +207,8 @@ export const signTypedDataParams = (
       ...typedData.types,
     },
     primaryType: typedData.primaryType,
-    domain: typedData.domain ?? {},
-    message: typedData.message,
+    domain: jsonSafe(typedData.domain ?? {}),
+    message: jsonSafe(typedData.message),
   }),
 ];
 

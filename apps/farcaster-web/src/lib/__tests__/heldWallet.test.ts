@@ -144,6 +144,45 @@ describe('the typed data a held wallet is asked to sign', () => {
       { name: 'verifyingContract', type: 'address' },
     ]);
   });
+
+  it('carries a message whose numbers are BigInts, which JSON cannot hold', () => {
+    // The shape the node's own gasless KEY_ADD builds (`buildKeyAddMessage` in
+    // `farcaster-node-client` hands the signer `fid` as a BigInt). Before this
+    // was converted, JSON.stringify threw, the provider was never asked, and
+    // the person was told their sign-up "would not sign that".
+    const typedData = {
+      domain: {
+        name: 'Farcaster SignedKeyRequest',
+        version: '1',
+        chainId: 10,
+        verifyingContract: '0x00000000fc9ab05c4b19ab0b47cd8ee7ae0d4c5a',
+      },
+      types: {
+        SignedKeyRequest: [
+          { name: 'requestFid', type: 'uint256' },
+          { name: 'key', type: 'bytes' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      },
+      primaryType: 'SignedKeyRequest',
+      message: {
+        requestFid: 21088n,
+        key: `0x02${'ff'.repeat(32)}`,
+        deadline: 1_700_000_000n,
+      },
+    } as const;
+
+    const [, payload] = signTypedDataParams(HELD, typedData);
+    const parsed = JSON.parse(payload) as { message: Record<string, unknown> };
+
+    expect(parsed.message).toEqual({
+      // A quantity over this RPC is a hex string; the wallet hashes the same
+      // uint256 a locally held key would have hashed.
+      requestFid: `0x${21088n.toString(16)}`,
+      key: `0x02${'ff'.repeat(32)}`,
+      deadline: `0x${1_700_000_000n.toString(16)}`,
+    });
+  });
 });
 
 describe('an account whose words are held for it', () => {

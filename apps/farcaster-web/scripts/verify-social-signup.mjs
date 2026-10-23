@@ -329,6 +329,10 @@ const createNodeStub = () => {
         '',
       );
 
+      state.reads.push(
+        `${request.method()} ${path}${new URL(request.url()).search}`,
+      );
+
       if (path === '/v1/info') {
         return fulfil(route, { version: 'probe', numShards: 1, syncHeight: 1 });
       }
@@ -1728,7 +1732,7 @@ const runClaimRoute = async (browser, width) => {
   check(
     `G4 ${width}px: the registration was signed by the sign-up's own window`,
     finished && signCalls.includes('eth_signTransaction'),
-    `finished=${finished} calls=${signCalls.join(' | ')} sheet=${JSON.stringify(sheetState)} node=${JSON.stringify(node.state.reads.slice(0, 10))} chainSent=${chain.sent.length}`,
+    `finished=${finished} calls=${signCalls.join(' | ')} sheet=${JSON.stringify(sheetState)} node=${JSON.stringify(node.state.reads.slice(0, 10))} chainSent=${chain.sent.length} pageErrors=${JSON.stringify(pageErrors.slice(-2))}`,
   );
   check(
     `G5 ${width}px: and broadcast by the app itself, one transaction to the registrar`,

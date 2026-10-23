@@ -485,3 +485,69 @@ describe('deterministic test seams', () => {
     expect(paths).toEqual(['/v1/info', '/v1/castsByFid', '/v1/signersByFid']);
   });
 });
+
+describe('the fetch a client without one of its own uses', () => {
+  /**
+   * MEASURED 2026-10-23, in this client's own social sign-up probe (stage G):
+   * the account flow's node reads never left the page, and the reason was
+   * "Failed to execute 'fetch' on 'Window': Illegal invocation" — a browser's
+   * `fetch` is a method of `Window`, so calling it off an instance throws. Node
+   * tolerates the receiver, which is why every test in this file passed while a
+   * browser did not. The reporter here is the receiver, which is the only thing
+   * that differs between the two.
+   */
+  it('calls the global fetch with the global as its receiver', async () => {
+    const original = globalThis.fetch;
+    const receivers: unknown[] = [];
+
+    globalThis.fetch = function (this: unknown) {
+      receivers.push(this);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({ version: 'bound-node', numShards: 1, syncHeight: 1 }),
+      });
+    } as unknown as typeof fetch;
+
+    try {
+      const bound = new SnapchainNodeClient({ baseUrl: 'https://node.invalid' });
+      const info = await bound.info();
+
+      expect(info.version).toBe('bound-node');
+      expect(receivers).toHaveLength(1);
+      expect(receivers[0]).toBe(globalThis);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('hands an injected fetch on exactly as it was given', async () => {
+    const injected = async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({ version: 'injected-node', numShards: 1, syncHeight: 1 }),
+    });
+    const receivers: unknown[] = [];
+    const report = function (this: unknown) {
+      receivers.push(this);
+      return injected();
+    };
+
+    const client = new SnapchainNodeClient({
+      baseUrl: 'https://node.invalid',
+      fetch: report as unknown as (input: string) => Promise<{
+        ok: boolean;
+        status: number;
+        text(): Promise<string>;
+      }>,
+    });
+
+    await client.info();
+
+    // Not bound to the global: it is the caller's own function, and a caller
+    // that closes over something (a timeout, credentials, a retry) needs it.
+    expect(receivers[0]).not.toBe(globalThis);
+  });
+});
