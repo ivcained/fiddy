@@ -109,6 +109,20 @@ What it does, and why each step is not optional:
    visitor's own machine for the board. Override with
    `FIDDY_BUILD_TOGETHER_API_URL=<origin>` if the service ever moves off
    fiddy.fun's origin (docs/TOGETHER.md has the CORS caveat).
+   `VITE_PRIVY_APP_ID` (optional — the Google/X doors of the sign-up screen) is
+   the one other build-time switch. Unset means the feature is **absent, not
+   broken**: no social door is drawn and Farcaster sign-in is exactly as it was,
+   which is what every build before 2026-10-22 shipped. Set it to the public app
+   id of the ONE Privy app (the console in legitmate-farcaster exports the same
+   value as `NEXT_PUBLIC_PRIVY_APP_ID`; never a second integration), and the two
+   doors ship. The id is public by design and rides in the bundle; the secret
+   half, `PRIVY_APP_SECRET`, is a server value and nothing in this client reads
+   it. Which of the doors actually answers is a switch in the Privy dashboard
+   (`disallowed_login_method`), not a line of code.
+   **To judge whether a live build has the doors, do not grep for the buttons'
+   words:** `Continue with Google` is in every bundle, because the provider list
+   is code. Grep the served entry chunk for the app id's own value — that is the
+   only thing that distinguishes a release with the doors from one without.
 3. **Local gate.** The built bundle must contain the adapter's 501 sentence, the
    media path, the configured node **and the Together route literal, and must
    NOT contain the `127.0.0.1:8766` fallback** — asserted over every built asset
