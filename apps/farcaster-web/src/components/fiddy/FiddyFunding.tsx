@@ -195,9 +195,11 @@ export const FiddyBalanceHome = memo<FiddyBalanceHomeProps>(
         searchParams={{}}
         title="Add funds"
         className="fiddy-primary-btn"
-        data-fiddy="balance-add-funds"
       >
-        Add funds
+        {/* `Link` forwards a fixed prop set and drops anything else, so the
+            marker a probe (and this screen's own tests) reach for lives on the
+            label inside it rather than on the anchor. */}
+        <span data-fiddy="balance-add-funds">Add funds</span>
         <ChevronRight size={16} aria-hidden="true" />
       </Link>
 
