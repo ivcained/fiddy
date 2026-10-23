@@ -36,7 +36,13 @@ export default defineConfig(async (env) => {
   const resolved = typeof base === 'function' ? await base(env) : base;
   return {
     ...resolved,
-    cacheDir: path.join(appRoot, '.probe-vite-cache'),
+    // Its own cache directory, and one more per server when several of these
+    // are up at once (the sign-up probe runs three): two dev servers sharing a
+    // dep cache make each other answer `504 Outdated Optimize Dep` whenever one
+    // re-optimizes, which reads as a broken app rather than a cache collision.
+    cacheDir:
+      process.env.PROBE_VITE_CACHE_DIR ??
+      path.join(appRoot, '.probe-vite-cache'),
     server: {
       ...resolved.server,
       proxy: {
