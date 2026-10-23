@@ -96,6 +96,27 @@ describe('the list of accounts', () => {
     expect(await loadLocalAccounts()).toHaveLength(2);
   });
 
+  it('keeps a Farcaster sign-in, which has no address to be checked for', async () => {
+    // MEASURED 2026-10-22: this row used to be dropped on the way out of
+    // storage, because the list only kept records carrying a custody address —
+    // and a Farcaster sign-in has none to carry (see `~/lib/farcasterAccount`).
+    await saveLocalAccount(
+      account({
+        id: 'farcaster:3',
+        custodyAddress: undefined,
+        phrase: undefined,
+        fid: 3,
+        username: 'dwr',
+        walletCustody: 'farcaster-app',
+      }),
+    );
+
+    const accounts = await loadLocalAccounts();
+
+    expect(accounts.map((entry) => entry.id)).toEqual(['farcaster:3']);
+    expect((await loadCurrentAccount())?.fid).toBe(3);
+  });
+
   it('leaves the device on a real account when the selected one is removed', async () => {
     await saveLocalAccount(account({ id: '0xaaa', custodyAddress: '0xaaa' }));
     await saveLocalAccount(account({ id: '0xbbb', custodyAddress: '0xbbb' }));
@@ -163,6 +184,32 @@ describe('the list of accounts', () => {
     expect(store.get('snapchain_app_key_4242')).toBe('0xdead');
   });
 
+  it('takes nothing but the row when a Farcaster sign-in is forgotten', async () => {
+    // A sign-in never installed a key here — the key that owns that account is
+    // in the person's own Farcaster app. A posting key this device was granted
+    // for the same number (by the connect flow, or by an account made here) is
+    // not this row's to delete.
+    await saveLocalAccount(
+      account({
+        id: 'farcaster:3',
+        custodyAddress: undefined,
+        phrase: undefined,
+        fid: 3,
+        username: 'dwr',
+        walletCustody: 'farcaster-app',
+      }),
+    );
+    store.set('snapchain_app_key_3', '0xdead');
+    store.set('snapchain_app_nonce_3', 8);
+
+    await removeLocalAccount('farcaster:3');
+
+    expect(await loadLocalAccounts()).toEqual([]);
+    expect(await loadCurrentAccountId()).toBeUndefined();
+    expect(store.get('snapchain_app_key_3')).toBe('0xdead');
+    expect(store.get('snapchain_app_nonce_3')).toBe(8);
+  });
+
   it('ignores junk that is not an account', async () => {
     store.set('fiddy:accounts', [{ nope: true }, account({ id: '0xaaa' })]);
 
@@ -215,5 +262,25 @@ describe('the session an account signs in with', () => {
     expect(() => buildLocalSessionForAccount(account())).toThrow(
       /has no number yet/,
     );
+  });
+
+  it('signs in as a Farcaster sign-in too, from its number and handle', () => {
+    // This is what the switcher's "Sign in as @dwr" does for such a row: the
+    // same device-only session, built from the number the handshake proved —
+    // which is why the row is selectable even though this device holds no key
+    // for it (see `~/lib/farcasterAccount`).
+    const session = buildLocalSessionForAccount(
+      account({
+        id: 'farcaster:3',
+        custodyAddress: undefined,
+        phrase: undefined,
+        fid: 3,
+        username: 'dwr',
+        walletCustody: 'farcaster-app',
+      }),
+    );
+
+    expect(session.authToken.secret.startsWith('siwf-local:3:')).toBe(true);
+    expect(session.onboardingState.result.state.user?.username).toBe('dwr');
   });
 });

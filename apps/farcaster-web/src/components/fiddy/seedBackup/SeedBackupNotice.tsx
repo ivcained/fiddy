@@ -19,6 +19,17 @@
  * (`heldWordsSlot`) rather than showing an address and calling it a backup. It
  * never says "saved" on the person's behalf, either: the confirm step is a press
  * they make, and until they make it the asking resumes.
+ *
+ * WHO IS NEVER ASKED, AND WHY THAT IS NOT A HOLE. An account that is a Farcaster
+ * sign-in (`~/lib/farcasterAccount`) is not asked at all — nothing is mounted for
+ * it, and nothing is recorded against it. This device holds no words and no
+ * address for such an account and never did; the key that owns it is in the
+ * person's own Farcaster app. A reminder with nothing behind it is a nag, and a
+ * stored "asked just now" for an account nobody can act on would be noise the
+ * moment it mattered. The account screen is what decides this, and the ask that
+ * belongs to a DIFFERENT account (the Google or X sign-up still held beside it)
+ * stays stored under that account's own id, untouched, for when that account is
+ * on screen again.
  */
 
 import { X } from 'lucide-react';
@@ -293,14 +304,28 @@ const SeedBackupNotice: FC<SeedBackupNoticeProps> = memo(
                   className="space-y-2"
                   aria-hidden={revealed ? undefined : true}
                 >
-                  <p className="text-xs text-muted">
-                    {providerName
-                      ? `Your words are held in the ${providerName} sign-up. This is the wallet that owns the account:`
-                      : 'This is the wallet that owns the account:'}
-                  </p>
-                  <p className="font-mono break-all text-xs text-default">
-                    {account.custodyAddress}
-                  </p>
+                  {account.custodyAddress ? (
+                    <>
+                      <p className="text-xs text-muted">
+                        {providerName
+                          ? `Your words are held in the ${providerName} sign-up. This is the wallet that owns the account:`
+                          : 'This is the wallet that owns the account:'}
+                      </p>
+                      <p className="font-mono break-all text-xs text-default">
+                        {account.custodyAddress}
+                      </p>
+                    </>
+                  ) : (
+                    // No words and no address: this device holds nothing at all
+                    // for this account (see `~/lib/farcasterAccount`). Printing
+                    // an empty line here would read as a wallet with no address
+                    // rather than as nothing held.
+                    <p className="text-xs text-muted">
+                      This device holds no words and no address for this
+                      account. The key that owns it is in your own Farcaster
+                      app.
+                    </p>
+                  )}
                   {revealed ? heldWordsSlot : null}
                 </div>
               )}

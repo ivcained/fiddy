@@ -42,10 +42,14 @@
 //      still on screen once the screen has settled, because the account screen
 //      is built again inside one page load and a remount is not a dismissal
 //   E. signing in with Farcaster from that screen reaches the shell, and the
-//      switcher lists BOTH accounts — the social one joined it. MEASURED
-//      2026-10-22: this needed the app to stop showing a signed-in session the
-//      account screen, whose whole subject is the Farcaster account it does not
-//      have yet — see ~/pages/fiddyAccount/FiddyAccountPage
+//      switcher lists BOTH accounts — the Farcaster session joined it, and it is
+//      the one signed in. MEASURED 2026-10-22: this needed the app to stop
+//      showing a signed-in session the account screen, whose whole subject is
+//      the Farcaster account it does not have yet (see
+//      ~/pages/fiddyAccount/FiddyAccountPage) — and then it needed the sign-in
+//      to write its own row into the account book, which it did not do: the
+//      switcher kept listing one account and calling it current while the
+//      session was a different one (see ~/lib/farcasterAccount)
 //   F. a third party that refuses (a provider that throws) does not take the
 //      client with it: the doors say so and the Farcaster way in still stands
 //
@@ -70,6 +74,15 @@ const CHANNEL_TOKEN = 'SOCIALSIGNUP1';
 /** The Farcaster account the stubbed sign-in names: a real, active one. */
 const SIGNED_IN_FID = 3;
 const SIGNED_IN_HANDLE = 'dwr';
+
+/**
+ * The id the app keys a Farcaster sign-in's row by: the number it proved.
+ *
+ * Asserted rather than imported, because a probe that imports the thing it is
+ * checking can agree with a mistake (this is the client's rule from
+ * `~/lib/farcasterAccount`, spelled out here on purpose).
+ */
+const FARCASTER_ROW_ID = `farcaster:${SIGNED_IN_FID}`;
 
 /** The identity the stubbed Privy SDK answers with. A held wallet, and Google. */
 const PRIVY_EMAIL = 'probe@gmail.com';
@@ -917,12 +930,16 @@ const runWithAppId = async (browser, width) => {
 
   await page.waitForTimeout(2_500);
 
-  // Two facts, from the app's own storage rather than from the screen: where
-  // the sign-in left the browser, and which Farcaster account it proved. The
-  // proof is the one the app's own sign-in keeps (`~/lib/siwfSession`), written
-  // for thirty minutes so the agent service can verify ownership later.
-  const current = await page.evaluate(() => {
+  // What the sign-in left behind, read from the app's own storage rather than
+  // from the screen: where the browser went, which Farcaster account it proved,
+  // and what the account book now holds. The proof is the one the app's own
+  // sign-in keeps (`~/lib/siwfSession`), written for thirty minutes so the agent
+  // service can verify ownership later; the book is the row the same sign-in now
+  // writes (`~/lib/farcasterAccount`), which is what the switcher reads below.
+  const current = await page.evaluate(async () => {
     let proof = null;
+    let book = [];
+    let selected = null;
 
     try {
       proof = JSON.parse(
@@ -930,6 +947,18 @@ const runWithAppId = async (browser, width) => {
       );
     } catch {
       proof = null;
+    }
+
+    // The book is read through the app's OWN module rather than by spelling a
+    // localforage key by hand: the question is what the client reads back, and
+    // this is what the switcher itself calls (`useLocalAccounts`).
+    try {
+      const accounts = await import('/src/snapchain/accounts/localAccounts.ts');
+
+      book = await accounts.loadLocalAccounts();
+      selected = await accounts.loadCurrentAccountId();
+    } catch {
+      book = [];
     }
 
     return {
@@ -942,6 +971,10 @@ const runWithAppId = async (browser, width) => {
         .trim(),
       proofFid: proof?.fid ?? null,
       token: document.body.innerText.length,
+      bookIds: Array.isArray(book)
+        ? book.map((account) => account?.id ?? null)
+        : [],
+      selected: selected ?? null,
     };
   });
 
@@ -949,10 +982,11 @@ const runWithAppId = async (browser, width) => {
   // handshake from this screen completes and proves the Farcaster account
   // (`~/lib/siwfSession` keeps the proof), and the app leaves the sign-up screen
   // for the client instead of re-showing the screen that says "no Farcaster
-  // account yet" (see ~/pages/fiddyAccount/FiddyAccountPage). What it does NOT
-  // do is add that Farcaster account to the device's own book, so the switcher
-  // still holds the one account this device made — that gap is carded
-  // separately rather than papered over by E2 below.
+  // account yet" (see ~/pages/fiddyAccount/FiddyAccountPage). What it did NOT do
+  // — and what this stage now measures — is add that Farcaster account to the
+  // device's own book, so the switcher held the one account this device made and
+  // still called it current. Fixed in `~/components/login/LoginWithMobile` +
+  // `~/lib/farcasterAccount`; E2 and E4 below are what hold it.
   check(
     `E1 ${width}px: signing in with Farcaster leaves the sign-up screen and proves that account`,
     shellArrived &&
@@ -988,32 +1022,72 @@ const runWithAppId = async (browser, width) => {
     ),
   }));
 
-  // MEASURED 2026-10-22: one row, and it is the account this device made. A
-  // Sign-In-With-Farcaster session keeps its key in the Farcaster app rather than
-  // here, and nothing in the client writes a book entry for it, so the switcher
-  // does not list it. Named as the gap it is (carded) — the alternative was an
-  // assertion that would have read as a promise the app does not keep.
+  const farcasterRow = sheet.rows.find((row) => row.id === FARCASTER_ROW_ID);
+  const socialRow = sheet.rows.find(
+    (row) => row.id === HELD_WALLET.toLowerCase(),
+  );
+
+  // MEASURED 2026-10-22, before the fix: ONE row, the account this device made —
+  // the Farcaster session was in nobody's book, so the switcher could not list
+  // it, and the row that WAS current disagreed with the session the app held.
+  // MEASURED 2026-10-23, after it: two rows, the Farcaster one current.
   check(
-    `E2 ${width}px: the switcher lists the accounts this device holds (the Farcaster session is not one of them yet)`,
-    sheetArrived &&
-      sheet.rows.length === 1 &&
-      sheet.rows[0]?.id === HELD_WALLET.toLowerCase(),
-    `${sheetArrived ? '' : 'the switcher never opened — '}${sheet.rows.map((row) => row.id).join(' | ')}`,
+    `E2 ${width}px: the switcher lists both accounts — the Farcaster session joined it`,
+    sheetArrived && sheet.rows.length === 2 && Boolean(farcasterRow),
+    `${sheetArrived ? '' : 'the switcher never opened — '}${sheet.rows
+      .map((row) => row.id)
+      .join(' | ')} (book: ${current.bookIds.join(' | ')})`,
   );
   check(
-    `E3 ${width}px: the social account joined it, named by its email, and says what it cannot do yet`,
-    sheet.rows.some(
-      (row) =>
-        row.id === HELD_WALLET.toLowerCase() &&
-        row.text.includes(PRIVY_EMAIL) &&
-        /no posting key on this device yet/i.test(row.text),
-    ),
+    `E3 ${width}px: the social account is still listed, named by its email, and says what it cannot do yet`,
+    Boolean(socialRow) &&
+      (socialRow?.text ?? '').includes(PRIVY_EMAIL) &&
+      /no posting key on this device yet/i.test(socialRow?.text ?? ''),
     JSON.stringify(sheet.rows),
   );
   check(
-    `E4 ${width}px: exactly one account is the current one`,
-    sheet.rows.filter((row) => row.current).length === 1,
-    sheet.text.slice(0, 200),
+    `E4 ${width}px: exactly one account is the current one, and it is the Farcaster one`,
+    sheet.rows.filter((row) => row.current).length === 1 &&
+      farcasterRow?.current === true &&
+      current.selected === FARCASTER_ROW_ID,
+    `current=${sheet.rows.find((row) => row.current)?.id} (stored ${current.selected})`,
+  );
+  check(
+    `E5 ${width}px: and its row names the account, says where the sign-in came from, and what this device cannot do yet`,
+    /@dwr/.test(farcasterRow?.text ?? '') &&
+      /your own farcaster app/i.test(farcasterRow?.text ?? '') &&
+      /no posting key on this device yet/i.test(farcasterRow?.text ?? ''),
+    `row=${JSON.stringify(farcasterRow?.text)}`,
+  );
+
+  // Decision 3, measured rather than asserted in prose: the backup ask belongs to
+  // the account whose words are outstanding, and a Farcaster sign-in has none. So
+  // the sign-in must not leave an ask recorded against the session row — and must
+  // not touch the answer the social account already gave in stage D. Both are read
+  // through the app's own storage, the same store `~/lib/seedBackup` writes.
+  const backup = await page.evaluate(
+    async ({ sessionId, socialId }) => {
+      const storage = await import('/src/utils/storageUtils.ts');
+      const seedBackup = await import('/src/lib/seedBackup.ts');
+
+      const read = async (id) =>
+        await storage.getItem({
+          key: seedBackup.seedBackupKeyFor(id),
+          fallback: null,
+        });
+
+      return {
+        session: await read(sessionId),
+        social: await read(socialId),
+      };
+    },
+    { sessionId: FARCASTER_ROW_ID, socialId: HELD_WALLET.toLowerCase() },
+  );
+
+  check(
+    `E6 ${width}px: nothing was asked of the Farcaster account, and the social account's own answer is untouched`,
+    backup.session === null && backup.social?.status === 'saved',
+    JSON.stringify(backup),
   );
 
   await page.screenshot({ path: `${OUT}/social-signup-${width}-switcher.png` });
