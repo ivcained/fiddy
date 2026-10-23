@@ -32,6 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createCardRenderer } from './cards.mjs';
+import { carriesLookBody, readLookBody } from './lookBody.mjs';
 import { createLookStore, LOOK_LIMITS } from './looks.mjs';
 import { createUnfurlHandler } from './handler.mjs';
 import { createLinkReader } from './reader.mjs';
@@ -115,29 +116,14 @@ const handler = createUnfurlHandler({
 });
 
 /**
- * A request body, read up to a cap and no further.
+ * The body of a share request, read by `lookBody.mjs`.
  *
- * The only body this service accepts is a look (`POST /look`), so the cap is
- * the model's own (`LOOK_LIMITS.bytes`): a body that is already too large is
- * refused without being read into this process at all. Anything else with a
- * body is not ours, and the handler answers 405 for it.
+ * Why it is a module of its own: what happens to a body PAST the cap is the
+ * whole contract (read and drop, never destroy the socket — see that file's
+ * header for the 405 this service used to answer with), and a rule that lives
+ * inside this wiring file can only be exercised by a real socket. Everything
+ * else the module needs is the model's own cap.
  */
-const readBody = (request, limit) =>
-  new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-    request.on('data', (chunk) => {
-      size += chunk.length;
-      if (size > limit) {
-        reject(new Error('too large'));
-        request.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    request.on('error', reject);
-  });
 
 const server = createServer(async (request, response) => {
   const path = request.url ?? '/';
@@ -146,16 +132,9 @@ const server = createServer(async (request, response) => {
     const method = request.method ?? 'GET';
     // Only a share POST has a body worth reading; everything else is answered
     // without one, exactly as before.
-    const body =
-      method === 'POST' && path.split('?')[0] === '/look'
-        ? await readBody(request, LOOK_LIMITS.bytes).catch(() =>
-            // A body that ran past the cap is answered by the model's own size
-            // check rather than by a second sentence invented here: what
-            // arrives is a string longer than a look can be, which is exactly
-            // one over-limit body. (`readBody` has already stopped reading it.)
-            ' '.repeat(LOOK_LIMITS.bytes + 1),
-          )
-        : undefined;
+    const body = carriesLookBody(method, path)
+      ? await readLookBody(request, LOOK_LIMITS.bytes)
+      : undefined;
     answer = await handler.handle({ method, path, body });
   } catch (error) {
     // Nothing a request can do should reach here; if something does, the answer
