@@ -300,16 +300,29 @@ try {
     waitUntil: 'domcontentloaded',
     timeout: 60_000,
   });
-  const missing = await tab
-    .locator('[data-fiddy="shared-look-missing"], [data-fiddy="look-page-missing"]')
-    .first()
-    .waitFor({ timeout: 45_000 })
-    .then((node) => node.innerText())
-    .catch(() => '');
+  // Waited for as TEXT, in the page, rather than located as an element and then
+  // read: the card mounts through `loading` → `missing`, so a locator resolved
+  // on one render can be detached by the next before `innerText` is called, and
+  // that read throws — which a probe would report as "no sentence at all"
+  // (measured 2026-10-23, card t_d85d8520: the element WAS there and the run
+  // still said "").
+  const deadShown = await tab
+    .waitForFunction(
+      () =>
+        /That look link doesn't work any more\./.test(document.body.innerText),
+      { timeout: 45_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  const deadText = await tab.evaluate(() =>
+    document.body.innerText.replace(/\s+/g, ' ').slice(0, 300),
+  );
   check(
     'a dead link refuses in one plain sentence, never a blank card',
-    /That look link doesn't work any more\./.test(missing),
-    JSON.stringify(missing),
+    deadShown &&
+      /That look link doesn't work any more\./.test(deadText) &&
+      !/Put this look on/.test(deadText),
+    JSON.stringify(deadText),
   );
 
   await tab
