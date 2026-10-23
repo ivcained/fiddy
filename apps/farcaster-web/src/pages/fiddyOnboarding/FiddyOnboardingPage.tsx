@@ -8,9 +8,16 @@
  * anyone meets. Posting to Farcaster is the opt-in "Go social" action, not the
  * price of entry.
  *
- * TWO STEPS, AND WHY IT IS TWO
+ * THREE STEPS, AND WHAT THE THIRD ONE IS FOR
  * Say hi, then one screen that names your agent and picks what thinks for it,
- * then "ready" — that is the whole way in (the greeting is not a numbered step).
+ * then one optional screen about the Fiddy balance, then "ready" — that is the
+ * whole way in (the greeting is not a numbered step). The balance step is
+ * second-to-last on purpose: it is the only step that can be skipped with a
+ * single press, it never gates making an account, and it sits before the screen
+ * that carries the sign-in because a balance needs a session behind it. The
+ * flow was two steps before it, with no step between the brain and the sign-in;
+ * the funding card asked for a step after the brain pick, and this is where it
+ * went.
  * It used to be four numbered steps: naming and the brain were separate
  * screens, and a third one asked an unauthenticated visitor to allow six apps
  * of which five were dead "soon" switches. That screen asked for a decision
@@ -37,7 +44,7 @@
  */
 
 import { KeyRound, MessageCircle, Plug, ShieldCheck } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
 import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
@@ -51,6 +58,7 @@ import { Page } from '~/components/page/Page';
 import { defaultRoute, routes } from '~/constants/routes';
 import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
 import { useNavigate } from '~/hooks/navigation/useNavigate';
+import { LazyFiddyFundingPanel } from '~/lazy/funding';
 import {
   DEFAULT_AGENT_NAME,
   saveFiddySetup,
@@ -62,11 +70,12 @@ import { loadTrialExchange } from '~/lib/trialChat';
  * The screens this flow renders.
  *
  *   hi     the front door: one sentence and one press, no step number
- *   setup  step 1 of 2 — name your agent, pick what thinks for it
+ *   setup  step 1 of 3 — name your agent, pick what thinks for it
  *   apps   step 3 of the four-step flow this used to be: redirected, see below
- *   ready  step 2 of 2 — "… is ready", and the one sign-in we cannot skip
+ *   funds  step 2 of 3 — the balance: optional, skippable, never a gate
+ *   ready  step 3 of 3 — "… is ready", and the one sign-in we cannot skip
  */
-export type OnboardingStep = 'hi' | 'setup' | 'apps' | 'ready';
+export type OnboardingStep = 'hi' | 'setup' | 'apps' | 'funds' | 'ready';
 
 /** The route names this flow walks through. Each of them is still a route. */
 export type OnboardingRouteName =
@@ -74,6 +83,7 @@ export type OnboardingRouteName =
   | 'fiddyWelcomeName'
   | 'fiddyWelcomeBrain'
   | 'fiddyWelcomeApps'
+  | 'fiddyWelcomeFunds'
   | 'fiddyWelcomeReady'
   /** The public browse window, opened from the front door with no account. */
   | 'publicFeed';
@@ -82,14 +92,16 @@ export interface FiddyOnboardingPageProps {
   step: OnboardingStep;
 }
 
-/** How many steps the way in has, for "Step 1 of 2". */
-const TOTAL_STEPS = 2;
+/** How many steps the way in has, for "Step 2 of 3". */
+const TOTAL_STEPS = 3;
 
 /** Where a screen sits in the flow. The front door and the redirect do not. */
-const stepPosition = (step: OnboardingStep): 1 | typeof TOTAL_STEPS | null => {
+const stepPosition = (step: OnboardingStep): number | null => {
   switch (step) {
     case 'setup':
       return 1;
+    case 'funds':
+      return 2;
     case 'ready':
       return TOTAL_STEPS;
     default:
@@ -161,7 +173,9 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
     const name = draftName.trim().slice(0, 24) || DEFAULT_AGENT_NAME;
     saveFiddySetup({ agentName: name });
     setDraftName(name);
-    go('fiddyWelcomeReady');
+    // The brain is picked; the balance comes next, and it is the one step that
+    // can be waved away with a single press.
+    go('fiddyWelcomeFunds');
   };
 
   const renderStep = () => {
@@ -199,6 +213,32 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
             </label>
 
             <BrainSheet />
+          </FiddySheet>
+        );
+
+      case 'funds':
+        return (
+          <FiddySheet
+            name="funds"
+            step={stepMeta}
+            egg="small"
+            title="Add funds, or add them later."
+            sub="Fiddy's balance is what your agent spends from. Adding to it is optional here, and it never holds up your account."
+            note="A Fiddy balance is a credit you spend inside Fiddy. It is topped up by sending USDC on Base to Fiddy's own address, and Fiddy checks that transfer itself — your wallet stays yours. Smallest top-up is $1."
+            titleRef={titleRef}
+          >
+            {/* The real flow, not a picture of one: the same sheet the wallet
+                page opens. Signed out it says so and refuses the send rather
+                than moving money to a balance that cannot exist — and the one
+                press that leaves this screen is the one below it. */}
+            <Suspense fallback={null}>
+              <LazyFiddyFundingPanel
+                quiet={{
+                  label: 'Add this later',
+                  onClick: () => go('fiddyWelcomeReady'),
+                }}
+              />
+            </Suspense>
           </FiddySheet>
         );
 

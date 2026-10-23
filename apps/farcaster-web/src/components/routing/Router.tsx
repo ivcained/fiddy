@@ -406,6 +406,14 @@ const Router: React.FC = () => {
                 path={routes.wallet.path}
                 element={<routes.wallet.Component />}
               />
+              {/* Adding funds, one step from the balance it adds to. Mounted
+                  beside the wallet page rather than inside the authed gate:
+                  the flow explains itself signed out, and refuses the send it
+                  cannot credit instead of hiding. */}
+              <Route
+                path={routes.fiddyAddFunds.path}
+                element={<routes.fiddyAddFunds.Component />}
+              />
               <Route
                 path={routes.trendingTopic.path}
                 element={<routes.trendingTopic.Component />}
@@ -698,7 +706,7 @@ const Router: React.FC = () => {
               path={routes.fiddyWelcome.path}
               element={<FiddyOnboardingPage step="hi" />}
             />
-            {/* Step 1 of 2. Two addresses, one screen: `/welcome/name` starts at
+            {/* Step 1 of 3. Two addresses, one screen: `/welcome/name` starts at
                 the name, `/welcome/brain` is where the pick-a-brain links of
                 older builds (and the docs) point — both land on the one screen
                 that does both, never on a screen that no longer exists. */}
@@ -709,6 +717,13 @@ const Router: React.FC = () => {
             <Route
               path={routes.fiddyWelcomeBrain.path}
               element={<FiddyOnboardingPage step="setup" />}
+            />
+            {/* Step 2 of 3: add funds, after the brain and before the last
+                screen — skippable with one press, and never a gate on making
+                an account. */}
+            <Route
+              path={routes.fiddyWelcomeFunds.path}
+              element={<FiddyOnboardingPage step="funds" />}
             />
             {/* Kept as a route so an old link is not a 404; the page itself
                 redirects it to the last step (see FiddyOnboardingPage). */}

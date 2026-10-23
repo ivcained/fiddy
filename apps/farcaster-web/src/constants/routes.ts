@@ -49,6 +49,7 @@ import {
   DownloadPage,
   FarcasterConnectPage,
   FiddyAccountPage,
+  FiddyAddFundsPage,
   FiddyAppsPage,
   FiddyBrainsPage,
   FiddyConnectPage,
@@ -1039,6 +1040,16 @@ const routes = {
     family: family('default'),
     Component: FiddyOnboardingPage,
   },
+  /* Step 2 of 3: the balance, offered once the brain is picked and skippable
+     with one press. Before the last screen, because that one carries the
+     sign-in — and a balance needs a session behind it. */
+  fiddyWelcomeFunds: {
+    path: '/welcome/funds',
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyOnboardingPage,
+  },
   fiddyWelcomeReady: {
     path: '/welcome/ready',
     params: {},
@@ -1700,6 +1711,16 @@ const routes = {
     search: {},
     family: family('default'),
     Component: WalletPage,
+  },
+  /* Adding funds: its own address rather than a sheet, so the link can be
+     shared, reloaded and returned to — and so the way in and the wallet page
+     can both point at one screen instead of two implementations of it. */
+  fiddyAddFunds: {
+    path: `${appPathPrefix}/wallet/add-funds`,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: FiddyAddFundsPage,
   },
   referrals: {
     path: `${appPathPrefix}/referrals`,

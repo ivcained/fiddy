@@ -149,7 +149,6 @@ export const SurpBrainPanel = memo(
       };
       // The quote depends on the request size, so it is re-asked when the size
       // changes; the board does not, and is fetched again only on mount.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [deps, guess.tokensPerMessage]);
 
     const plan: PlanReference =

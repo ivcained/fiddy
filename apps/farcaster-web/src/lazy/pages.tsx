@@ -279,6 +279,14 @@ export const FiddyAppsPage = lazyWithPreload(() =>
   })),
 );
 
+/* Adding funds: the balance's own screen. Entered from the way in's second step
+   and from the wallet page, so the sheet is written once and addressed here. */
+export const FiddyAddFundsPage = lazyWithPreload(() =>
+  import('~/pages/fiddyAddFunds/FiddyAddFundsPage').then((res) => ({
+    default: res.FiddyAddFundsPage,
+  })),
+);
+
 /* Connect your Farcaster account: the connect-existing-account path. Its own
    page because it is entered signed out and left by approving on a phone. */
 export const FiddyConnectPage = lazyWithPreload(() =>

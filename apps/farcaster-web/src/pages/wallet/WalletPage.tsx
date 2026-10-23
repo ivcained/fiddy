@@ -1,6 +1,14 @@
 /**
  * The wallet, as a place you can come back to.
  *
+ * TWO THINGS LIVE ON THIS PAGE, AND THEY ARE NOT THE SAME THING. The Fiddy
+ * *balance* at the top is a platform credit: USDC top-ups that Fiddy verified on
+ * Base, spent inside Fiddy, held by nobody. The *wallet* underneath is the
+ * person's own wallet, which pays for what their agent uses and which Fiddy
+ * never holds. The page used to carry only the second, which made the tab bar's
+ * "Wallet" answer half a question; adding funds — the screen the balance links
+ * to — is the other half.
+ *
  * This page used to say "Farcaster Wallet is available on Farcaster mobile" and
  * nothing else — true of the fork it came from, and false of this client, which
  * has a wallet surface of its own. So the page is now that surface: which wallet
@@ -31,6 +39,7 @@
 import React, { memo, useEffect, useState } from 'react';
 
 import { FiddyAccountWallet } from '~/components/fiddy/FiddyAccountWallet';
+import { FiddyBalanceSection } from '~/components/fiddy/FiddyFunding';
 import { FiddySheet } from '~/components/fiddy/FiddySheet';
 import { FiddyWalletHomeConnected } from '~/components/fiddy/FiddyWalletHome';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
@@ -89,11 +98,18 @@ const WalletPage = memo(() => {
         <header className="fiddy-page-head">
           <h1 className="fiddy-page-title">Wallet</h1>
           <p className="fiddy-page-sub">
-            Your wallet pays for what your agent uses — the brain it thinks
-            with, a request at a time — and signs every payment you approve.
-            Nothing leaves it without your say-so, and Fiddy never holds it.
+            Your Fiddy balance is a credit you spend inside Fiddy, topped up
+            with USDC on Base. Below it, the wallet that pays for what your
+            agent uses signs every payment you approve — nothing leaves it
+            without your say-so, and Fiddy never holds it.
           </p>
         </header>
+
+        {/* What this account's Fiddy balance is, and the one press that adds to
+            it. The number comes from Fiddy's own service on this origin and is
+            never invented here; the section carries its own read, so this page
+            does not have to know how a balance is fetched. */}
+        <FiddyBalanceSection />
 
         {!available ? (
           <p className="fiddy-honest-note" data-fiddy="wallet-signed-out">
