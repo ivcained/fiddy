@@ -436,12 +436,23 @@ export const sendRawTransaction = async ({
   return hash;
 };
 
-/** Read the price, sign the registration, send it. Returns what was sent.
+/**
+ * Read the price, sign the registration, send it. Returns what was sent.
  *
- *  `recovery` is who OWNS the account, and it defaults to whoever signs — but a
- *  caller may separate the two, which is the whole point of keeping the payer
- *  distinct from the custody owner: a wallet can put up the fee, and the account
- *  still belongs to the address this device derived from its own words. */
+ * WHO ENDS UP OWNING THE FID, EXACTLY. The registrar this calls is the live
+ * `IdGateway`, and its own source settles it: `register(recovery, extraStorage)`
+ * mints the FID to `msg.sender` and merely records `recovery` as the recovery
+ * address (`idRegistry.register(msg.sender, recovery)`). So the address that
+ * SIGNS is the address that OWNS — which is why a held wallet signing for itself
+ * is how an account the person signed up with comes to hold its number
+ * (`~/lib/heldWallet`, and `docs/CLIENT-ACCOUNT-OWNERSHIP.md`).
+ *
+ * A different signer here would therefore become the owner, not a sponsor that
+ * leaves `custody` in charge: the payer≠owner split is a different call
+ * (`IdGateway.registerFor(to, recovery, deadline, sig, extraStorage)`, against
+ * `to`'s own EIP-712 signature). Nothing here passes one today; this says so out
+ * loud because the comment used to claim the opposite.
+ */
 export const registerFid = async ({
   rpcUrl,
   signer,

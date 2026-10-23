@@ -17,6 +17,17 @@
  * The recovery phrase is generated in this component and lives only in memory
  * until the account is saved on the device. It is never rendered into a URL,
  * never logged, and never sent anywhere.
+ *
+ * TWO WAYS IN, ONE SET OF SCREENS. When a person already has an account here
+ * whose words are held for them — a Google or X sign-up (`~/lib/socialAccount`)
+ * — this sheet is handed that account and its own signing (`~/lib/heldWallet`),
+ * and the flow is the same one minus the phrase step: there are no words for
+ * the person to write down, because the sign-up is holding them. Everything
+ * else is identical on purpose, including which address the fee is sent to —
+ * the difference is that the address is the account they already have rather
+ * than a second one this sheet would have made. The number is registered by
+ * that account, so `IdRegistry.idOf(its wallet)` is the FID: one account on
+ * this device, and it holds the number.
  */
 
 import React, {
@@ -49,6 +60,7 @@ import {
   ID_GATEWAY_ADDRESS,
 } from '~/snapchain/accounts/optimism';
 import {
+  type CustodyAccount,
   custodyAccountFromPhrase,
   generateDeviceSigningKey,
   generateRecoveryPhrase,
@@ -90,14 +102,83 @@ const PROGRESS_ROWS = [
   { key: 'profile', label: 'Your profile is being filled in' },
 ] as const;
 
+/**
+ * An account that already exists here, whose words are held for it.
+ *
+ * Passing this is what makes the FID belong to the account the person signed up
+ * with: the registration is signed by `custody`, so the registrar mints the FID
+ * to its address, and the record that is saved is that same account (same id)
+ * with its number filled in. No second account, and nothing to write down.
+ */
+export interface HeldAccountSetup {
+  /** The account that will own the FID. */
+  account: LocalAccount;
+  /** Its own signing: the sign-up provider's window. */
+  custody: CustodyAccount;
+  /** How that sign-up is named on these screens ('Google', 'X'). */
+  providerName?: string;
+}
+
+/**
+ * The record to keep once the network has given this account its number.
+ *
+ * WHY IT IS A FUNCTION OF ITS OWN, AND WHY IT IS THE WHOLE POINT. For an account
+ * whose words are held for it, this must be the SAME record, by id, that the
+ * sign-up already put in the book — the number is added to the account the
+ * person signed up with, and a second account with a second id is precisely the
+ * defect this replaces (`describeLocalAccount` then reads it as their email, or
+ * their @name, and the switcher shows one row either way). So the held branch
+ * spreads that record and fills in what the network answered; the identity
+ * fields, the custody marker and the id are carried over untouched, and no
+ * phrase is attached, because none was ever here to attach.
+ */
+export const accountAfterRegistration = ({
+  held,
+  custodyAddress,
+  phrase,
+  fid,
+  username,
+  displayName,
+  now = Date.now(),
+}: {
+  held?: HeldAccountSetup;
+  custodyAddress: string;
+  phrase?: string;
+  fid: number;
+  username?: string;
+  displayName?: string;
+  now?: number;
+}): LocalAccount =>
+  held
+    ? {
+        ...held.account,
+        fid,
+        ...(username ? { username } : {}),
+        ...(displayName ? { displayName } : {}),
+        signedInAt: now,
+      }
+    : {
+        id: accountIdFor(custodyAddress),
+        custodyAddress,
+        ...(phrase ? { phrase } : {}),
+        fid,
+        ...(username ? { username } : {}),
+        ...(displayName ? { displayName } : {}),
+        createdAt: now,
+        signedInAt: now,
+      };
+
 export interface CreateAccountSheetProps {
   onClose: () => void;
   /** Called once the account exists on this device, before sign-in. */
   onCreated?: (account: LocalAccount) => void;
+  /** Set when the number is being claimed by an account this device already
+   *  holds (a Google or X sign-up) rather than by one this sheet makes. */
+  held?: HeldAccountSetup;
 }
 
 export const CreateAccountSheet = memo<CreateAccountSheetProps>(
-  ({ onClose, onCreated }) => {
+  ({ onClose, onCreated, held }) => {
     const node = useNodeClient();
     const { signIn } = useAuth();
 
@@ -107,14 +188,26 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
     const [availability, setAvailability] = useState<
       NameAvailability | 'checking'
     >('invalid');
-    const [phrase] = useState(() => generateRecoveryPhrase());
+    // No words are made when the account already has words: a held account's
+    // phrase lives in the sign-up provider's own window, and generating a second
+    // one here would be a second key that owns nothing.
+    const [phrase] = useState(() =>
+      held ? undefined : generateRecoveryPhrase(),
+    );
     const [saved, setSaved] = useState(false);
     const [funding, setFunding] = useState<FundingState | undefined>();
     const [progressIndex, setProgressIndex] = useState(-1);
     const [error, setError] = useState<string | undefined>();
     const [created, setCreated] = useState<LocalAccount | undefined>();
 
-    const custody = useMemo(() => custodyAccountFromPhrase(phrase), [phrase]);
+    const custody = useMemo<CustodyAccount | undefined>(
+      () =>
+        held?.custody ??
+        (phrase ? custodyAccountFromPhrase(phrase) : undefined),
+      [held, phrase],
+    );
+    /** The address the fee has to reach: the account that will own the FID. */
+    const custodyAddress = custody?.address ?? '';
     const rpcUrl = DEFAULT_OPTIMISM_RPC_URL;
     const createAccountRef = useRef(createAccountOnChain);
     createAccountRef.current = createAccountOnChain;
@@ -153,7 +246,7 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
       const read = async () => {
         const state = await readFundingState({
           rpcUrl,
-          address: custody.address,
+          address: custodyAddress,
         });
 
         if (live) {
@@ -168,7 +261,7 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
         live = false;
         clearInterval(timer);
       };
-    }, [step, custody.address, rpcUrl]);
+    }, [step, custodyAddress, rpcUrl]);
 
     const start = useCallback(async () => {
       setStep('working');
@@ -178,6 +271,13 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
       if (!node) {
         setError(
           'Fiddy needs a server to read Farcaster from, and none is set up yet - open Advanced and pick one, then try again',
+        );
+        return;
+      }
+
+      if (!custody) {
+        setError(
+          'There is no key here that can sign for this account - open your account screen and start again from there',
         );
         return;
       }
@@ -198,16 +298,14 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
           displayName: displayNameFor(displayName, username),
         });
 
-        const account: LocalAccount = {
-          id: accountIdFor(custody.address),
-          custodyAddress: custody.address,
-          phrase,
+        const account = accountAfterRegistration({
+          ...(held ? { held } : {}),
+          custodyAddress,
+          ...(phrase ? { phrase } : {}),
           fid: result.fid,
           username,
           displayName: displayNameFor(displayName, username),
-          createdAt: Date.now(),
-          signedInAt: Date.now(),
-        };
+        });
 
         await saveLocalAccount(account);
         onCreated?.(account);
@@ -222,7 +320,17 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
             : 'that did not finish - nothing was lost, and you can try the last step again',
         );
       }
-    }, [node, rpcUrl, custody, username, displayName, phrase, onCreated]);
+    }, [
+      node,
+      rpcUrl,
+      custody,
+      custodyAddress,
+      username,
+      displayName,
+      phrase,
+      held,
+      onCreated,
+    ]);
 
     // Registration starts by itself as soon as the fee has arrived: the person
     // who just sent the money should not have to also press the button.
@@ -298,7 +406,7 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
             sub="This is the @name people will see. You can change it later."
             primary={{
               label: 'Continue',
-              onClick: () => setStep('phrase'),
+              onClick: () => setStep(held ? 'fund' : 'phrase'),
               disabled: availability !== 'free',
             }}
             quiet={{ label: 'Back', onClick: onClose }}
@@ -340,7 +448,8 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
         );
       }
 
-      if (step === 'phrase') {
+      // Never reached for a held account: those words are not here to show.
+      if (step === 'phrase' && !held) {
         return (
           <FiddySheet
             name="create-phrase"
@@ -361,7 +470,11 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
             <button
               type="button"
               className="fiddy-quiet-btn"
-              onClick={() => copy(phrase)}
+              onClick={() => {
+                if (phrase) {
+                  copy(phrase);
+                }
+              }}
             >
               Copy the words
             </button>
@@ -384,16 +497,33 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
           <FiddySheet
             name="create-fund"
             egg="small"
-            title={`Fund @${username}`}
-            sub="Making the account costs a small fee in ETH, paid on the network it lives on. Send it from any wallet or exchange that supports Optimism."
+            title={held ? 'Claim your Farcaster number' : `Fund @${username}`}
+            sub={
+              held
+                ? 'Making a Farcaster account costs a small fee in ETH, paid on the network it lives on. Send it to your own account, the one you signed up with, from any wallet or exchange that supports Optimism.'
+                : 'Making the account costs a small fee in ETH, paid on the network it lives on. Send it from any wallet or exchange that supports Optimism.'
+            }
             primary={{
               label: ready?.enough ? 'Start now' : 'Waiting for the ETH…',
               onClick: () => void start(),
               disabled: !ready?.enough,
             }}
-            quiet={{ label: 'Back', onClick: () => setStep('phrase') }}
-            note="Fiddy never holds your money: the fee goes straight from you to the network."
+            quiet={{
+              label: 'Back',
+              onClick: () => setStep(held ? 'name' : 'phrase'),
+            }}
+            note={
+              held
+                ? `Fiddy never holds your money: the fee goes straight from you to the network. ${held.providerName ?? 'Your sign-up'} will ask you to approve the registration before it is sent.`
+                : 'Fiddy never holds your money: the fee goes straight from you to the network.'
+            }
           >
+            {held ? (
+              <p className="fiddy-sheet-note" data-fiddy="held-account-note">
+                This number is for the account you already have here. Nothing
+                new is made, and there is nothing to write down.
+              </p>
+            ) : null}
             <div className="fiddy-kv">
               <span>Amount</span>
               <b>{ready ? `${eth(ready.needed)} ETH` : '…'}</b>
@@ -409,18 +539,18 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
             </div>
             <div className="fiddy-kv">
               <span>Send to</span>
-              <code data-fiddy="custody-address">{custody.address}</code>
+              <code data-fiddy="custody-address">{custodyAddress}</code>
               <button
                 type="button"
                 className="fiddy-quiet-btn"
-                onClick={() => copy(custody.address)}
+                onClick={() => copy(custodyAddress)}
               >
                 Copy
               </button>
             </div>
             <a
               className="fiddy-quiet-btn"
-              href={`ethereum:${custody.address}@10?value=${
+              href={`ethereum:${custodyAddress}@10?value=${
                 ready ? ready.needed : 0n
               }`}
             >
@@ -493,15 +623,20 @@ export const CreateAccountSheet = memo<CreateAccountSheetProps>(
           name="create-done"
           egg="small"
           title={`You're in as @${created?.username ?? username}`}
-          sub="Your account exists and this device can post for you. Now go and say hello."
+          sub={
+            held
+              ? 'The Farcaster account is part of the account you signed up with now, and this device can post for you.'
+              : 'Your account exists and this device can post for you. Now go and say hello.'
+          }
           primary={{ label: 'Open Fiddy', onClick: () => void openFiddy() }}
           quiet={{ label: 'Later', onClick: onClose }}
           note="Posting to the network is the next step - Fiddy always asks first."
         >
           {error ? <p className="fiddy-error">{error}</p> : null}
           <p className="fiddy-sheet-note">
-            Your words are saved on this device only. If you lose them, this
-            account cannot be recovered by Fiddy.
+            {held
+              ? `The words behind this account stay with your ${held.providerName ?? 'sign-up'}. Fiddy never holds them, and you can take your own copy from your account screen.`
+              : 'Your words are saved on this device only. If you lose them, this account cannot be recovered by Fiddy.'}
           </p>
         </FiddySheet>
       );

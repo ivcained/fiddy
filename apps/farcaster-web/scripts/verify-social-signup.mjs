@@ -11,17 +11,22 @@
 //
 //   SOCIAL_SIGNUP_SERVER=https://localhost:5178 \
 //   SOCIAL_SIGNUP_PLAIN_SERVER=https://localhost:5179 \
+//   SOCIAL_SIGNUP_CLAIM_SERVER=https://localhost:5190 \
 //     node scripts/verify-social-signup.mjs
 //
 // Screenshots land in $SOCIAL_SIGNUP_SHOT_DIR (default: the system temp dir).
 //
-// WHAT IS STUBBED, AND WHAT IS NOT. Only two things are stubbed, and both are
-// the third parties: Privy's browser SDK (served in place of its module, so no
-// real OAuth is attempted and no Privy network call is made) and Farcaster's
-// SIWF relay (stubbed with a REAL SIWE message signed by a throwaway key, so the
-// app's own verifier has to genuinely accept it). Everything else is the app:
+// WHAT IS STUBBED, AND WHAT IS NOT. Only the third parties are stubbed, and
+// every one of them answers in its own shape: Privy's browser SDK (served in
+// place of its module, so no real OAuth is attempted and no Privy network call
+// is made, including the wallet window that signs), Farcaster's SIWF relay
+// (stubbed with a REAL SIWE message signed by a throwaway key, so the app's own
+// verifier has to genuinely accept it), and — for stage G only — the registrar
+// on Optimism, the read node and the name registry, so a whole account can be
+// claimed without one byte reaching a real chain. Everything else is the app:
 // the identity mapping, the account book, the route it lands on, the backup
-// notice's own storage, and the switcher.
+// notice's own storage, the registration it signs and broadcasts, and the
+// switcher.
 //
 // THE RELAY ANSWERS "PENDING" UNTIL A STAGE MEANS IT (`relayApprovesSignIn`).
 // The modal starts a sign-in session as soon as it is drawn, so a relay that
@@ -48,15 +53,36 @@
 //      have yet — see ~/pages/fiddyAccount/FiddyAccountPage
 //   F. a third party that refuses (a provider that throws) does not take the
 //      client with it: the doors say so and the Farcaster way in still stands
+//   G. the account that signed up with Google claims a Farcaster number OF ITS
+//      OWN: the fee is asked for at the address the sign-up holds (not at a
+//      second, freshly generated one), there are no words to write down, the
+//      registration is signed by that window and broadcast by the app, and the
+//      device ends with ONE account — the same id it already had — carrying the
+//      FID the registrar minted. Needs a third dev server (see the recipe):
+//
+//        HTTPS=true VITE_PRIVY_APP_ID=probe-app-id \
+//          VITE_SNAPCHAIN_HTTP_URL=https://probe-node.invalid \
+//          npx vite --config scripts/probe.vite.config.mjs --port 5190 --strictPort
+//
+// ITERATING ON ONE STAGE. `SOCIAL_SIGNUP_ONLY=G` runs stage G at both widths and
+// nothing else (letters may be combined: `AF`); the full run — no variable set —
+// is the acceptance, and is the only thing worth calling green.
 //
 // SAFETY: every non-GET request to anything but the dev servers is aborted and
-// counted, so nothing here can post, register or own anything on a real network.
+// counted, so nothing here can post, register or own anything on a real network
+// (and for stage G, the registrar, the node and the name registry are answered
+// in place, so there is nothing real to reach).
 
+import { createRequire } from 'node:module';
 import os from 'node:os';
 
 import { chromium } from 'playwright';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createSiweMessage } from 'viem/siwe';
+
+/** Which stages to run, for iterating on one of them. Empty means all of them. */
+const ONLY = (process.env.SOCIAL_SIGNUP_ONLY ?? '').toUpperCase();
+const wanted = (stage) => ONLY === '' || ONLY.includes(stage);
 
 const SERVER = process.env.SOCIAL_SIGNUP_SERVER ?? 'https://localhost:5178';
 const PLAIN_SERVER =
@@ -75,6 +101,339 @@ const SIGNED_IN_HANDLE = 'dwr';
 const PRIVY_EMAIL = 'probe@gmail.com';
 const PRIVY_NAME = 'Probe Person';
 const HELD_WALLET = '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063';
+
+/**
+ * Stage G's server: the same app, with a read node that goes nowhere.
+ *
+ * `https://probe-node.invalid` is a name that cannot resolve, and every request
+ * to it is answered by the stub below — so if the stub is ever bypassed the app
+ * gets a connection error (an honest failure) rather than a real node's answer,
+ * and nothing about this stage can reach a real chain or a real node.
+ */
+const CLAIM_SERVER =
+  process.env.SOCIAL_SIGNUP_CLAIM_SERVER ?? 'https://localhost:5190';
+const STUB_NODE = 'https://probe-node.invalid';
+
+/** The endpoint the client signs registrations against, and the registry. */
+const OPTIMISM_ENDPOINT = 'https://mainnet.optimism.io';
+const ID_GATEWAY_ADDRESS = '0x00000000fc25870c6ed6b6c7e41fb078b7656f69';
+const ID_REGISTRY_ADDRESS = '0x00000000fc6c5f01fc30151999387bb99a9f489b';
+
+/** What the stub registrar charges, in wei: the live price on 2026-10-21. */
+const REGISTRATION_PRICE_WEI = 81_402_795_512_410n;
+
+/** The FID the stub registrar mints for the held wallet. */
+const MINTED_FID = 21088;
+
+/** The @name stage G claims: this probe's own, and nobody else's. */
+const CLAIMED_NAME = 'probecbf6';
+
+/** What a person's transfer would put in the account: enough, with room. */
+const FUNDED_BALANCE_WEI = 2_000_000_000_000_000n;
+
+const JSON_HEADERS = { 'content-type': 'application/json' };
+
+/** Anything under this origin, as a route pattern. A regex, because the app
+ *  posts to the bare origin (`https://mainnet.optimism.io`) and reads `/<path>`
+ *  under it (`https://probe-node.invalid/v1/...`), and a glob has to get both
+ *  exactly right to be trusted — MEASURED: a `**` glob did not, and the stage
+ *  silently fell through to the real name registry. */
+const underOrigin = (url) => new RegExp(`^${url.replaceAll('.', '\\.')}`);
+
+/** The same origin, at the path a browser reaches a node through. */
+const nodeProxyOn = (server) =>
+  new RegExp(`^${server.replaceAll('.', '\\.')}/snapchain-api`);
+
+/**
+ * The message decoder, from the app's own dependency.
+ *
+ * WHY IT IS THE REAL ONE. The app's submit path is protobuf, and a stub that
+ * guessed at those bytes would be measuring itself. `@farcaster/core` is the
+ * package that built the message, so the stub reads exactly what the app sent —
+ * the app key it authorised, and the profile values it wrote — and then answers
+ * the app's own read-back with them. Resolved through the workspace package that
+ * depends on it, because that is where pnpm links it.
+ */
+const requireFromWorkspace = createRequire(
+  new URL(
+    '../../../packages/farcaster-node-client/package.json',
+    import.meta.url,
+  ),
+);
+
+let corePackage;
+const decodeSubmitted = (buffer) => {
+  corePackage ??= requireFromWorkspace('@farcaster/core');
+
+  const message = corePackage.Message.decode(
+    new Uint8Array(buffer ?? new ArrayBuffer(0)),
+  );
+  const data = message.data ?? {};
+  // Hex by hand rather than with a Node-only global: this file is linted by the
+  // repo's own config, which does not know Node's globals in `scripts/`.
+  const asHex = (bytes) =>
+    bytes && bytes.length > 0
+      ? `0x${Array.from(bytes)
+          .map((byte) => byte.toString(16).padStart(2, '0'))
+          .join('')}`
+      : null;
+
+  return {
+    type: `MESSAGE_TYPE_${String(data.type ?? '')}`,
+    fid: Number(data.fid ?? 0),
+    hash: asHex(message.hash),
+    key: data.keyAddBody?.key ? asHex(data.keyAddBody.key) : null,
+    userData: data.userDataBody
+      ? {
+          type: Number(data.userDataBody.type ?? 0),
+          value: String(data.userDataBody.value ?? ''),
+        }
+      : null,
+  };
+};
+
+/**
+ * The registrar on Optimism, stubbed: reads answered, and a transaction this
+ * client signed accepted exactly once.
+ *
+ * `fund()` is the person's transfer arriving — stage G waits for the app to ask
+ * for the fee, reads what it asked for, and only then lets the money land, so
+ * the screen a person actually meets is the screen that gets measured. The FID
+ * is minted by the send: `IdRegistry.idOf` answers it from then on, which is the
+ * same read the app itself polls to learn its number.
+ */
+const createChainStub = () => {
+  let funded = false;
+  let registered = false;
+  const sent = [];
+
+  const answer = (route, body, result) =>
+    route.fulfill({
+      status: 200,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ jsonrpc: '2.0', id: body.id ?? 1, result }),
+    });
+
+  return {
+    sent,
+    isRegistered: () => registered,
+    fund: () => {
+      funded = true;
+    },
+    handle: async (route) => {
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      const params = body.params ?? [];
+      const call = params[0] ?? {};
+
+      switch (body.method) {
+        case 'eth_chainId':
+          return answer(route, body, '0xa');
+        case 'eth_getBalance':
+          return answer(
+            route,
+            body,
+            `0x${(funded ? FUNDED_BALANCE_WEI : 0n).toString(16)}`,
+          );
+        case 'eth_getTransactionCount':
+          return answer(route, body, '0x0');
+        case 'eth_estimateGas':
+          return answer(route, body, '0x30d40');
+        case 'eth_gasPrice':
+          return answer(route, body, '0x3b9aca00');
+        case 'eth_maxPriorityFeePerGas':
+          return answer(route, body, '0x5f5e100');
+        case 'eth_sendRawTransaction':
+          sent.push(String(params[0] ?? ''));
+          registered = true;
+          return answer(route, body, `0x${'ab'.repeat(32)}`);
+        case 'eth_call': {
+          const to = String(call.to ?? '').toLowerCase();
+
+          if (to === ID_GATEWAY_ADDRESS) {
+            return answer(
+              route,
+              body,
+              `0x${REGISTRATION_PRICE_WEI.toString(16)}`,
+            );
+          }
+
+          if (to === ID_REGISTRY_ADDRESS) {
+            return answer(
+              route,
+              body,
+              `0x${(registered ? MINTED_FID : 0).toString(16)}`,
+            );
+          }
+
+          return answer(route, body, '0x');
+        }
+        default:
+          return answer(route, body, '0x');
+      }
+    },
+  };
+};
+
+/**
+ * The read node, stubbed: it has already seen everything it was told.
+ *
+ * WHAT IT IS AND IS NOT. It decodes the messages the app submits (with the app's
+ * own decoder, above) and then reports them back on the reads the app makes —
+ * the gasless key on `/v1/signersByFid`, the profile fields on
+ * `/v1/userDataByFid`, and an on-chain signer on `/v1/onChainSignersByFid`,
+ * which is this client's own test for "the node knows this FID at all". It does
+ * not gossip, merge or validate anything; what stage G measures is the app's own
+ * behaviour, and the node here is a third party answering in its own shape.
+ */
+const createNodeStub = () => {
+  const state = { key: null, userData: new Map(), submits: [], reads: [] };
+
+  const messageJson = (decoded) => ({
+    hash: decoded.hash ?? `0x${'00'.repeat(32)}`,
+    signer: `0x${'11'.repeat(32)}`,
+    signature: `0x${'22'.repeat(64)}`,
+    signatureScheme: 'SIGNATURE_SCHEME_ED25519',
+    hashScheme: 'HASH_SCHEME_BLAKE3',
+    data: {
+      type: decoded.type,
+      fid: MINTED_FID,
+      timestamp: Math.floor(Date.now() / 1000),
+      network: 'FARCASTER_NETWORK_MAINNET',
+      ...(decoded.userData
+        ? {
+            userDataBody: {
+              type: decoded.userData.type,
+              value: decoded.userData.value,
+            },
+          }
+        : {}),
+    },
+  });
+
+  const fulfil = (route, body, status = 200) =>
+    route.fulfill({
+      status,
+      headers: JSON_HEADERS,
+      body: JSON.stringify(body),
+    });
+
+  return {
+    state,
+    handle: async (route) => {
+      const request = route.request();
+      // The app reads a cross-origin node through its own same-origin path
+      // (`/snapchain-api/...`, see `~/snapchain/nodeEnv`), and a node it is told
+      // to read directly. Both are this stub, so both are accepted here.
+      const path = new URL(request.url()).pathname.replace(
+        /^\/snapchain-api/,
+        '',
+      );
+
+      if (path === '/v1/info') {
+        return fulfil(route, { version: 'probe', numShards: 1, syncHeight: 1 });
+      }
+
+      if (request.method() === 'POST' && path === '/v1/submitMessage') {
+        const decoded = decodeSubmitted(request.postDataBuffer());
+
+        state.submits.push(decoded.type);
+
+        if (decoded.key) {
+          state.key = decoded.key;
+        }
+
+        if (decoded.userData) {
+          state.userData.set(decoded.userData.type, decoded.userData.value);
+        }
+
+        return fulfil(route, messageJson(decoded));
+      }
+
+      if (path === '/v1/onChainSignersByFid') {
+        // Non-empty is the app's own "the node has seen this FID".
+        return fulfil(route, { events: [{ fid: MINTED_FID }] });
+      }
+
+      if (path === '/v1/signersByFid') {
+        return fulfil(route, {
+          signers: state.key
+            ? [
+                {
+                  source: 'signer',
+                  key: state.key,
+                  keyType: 1,
+                  fid: MINTED_FID,
+                  addedAt: Math.floor(Date.now() / 1000),
+                  nonce: 1,
+                  scopes: ['user'],
+                  ttl: 7_776_000,
+                },
+              ]
+            : [],
+          gaslessSignerCount: state.key ? 1 : 0,
+          gaslessSignerLimit: 1000,
+          currentUserNonce: state.key ? 1 : 0,
+        });
+      }
+
+      if (path === '/v1/userDataByFid') {
+        return fulfil(route, {
+          messages: Array.from(state.userData.entries()).map(
+            ([type, value]) => ({
+              hash: `0x${'33'.repeat(32)}`,
+              data: {
+                type: 'MESSAGE_TYPE_USER_DATA_ADD',
+                fid: MINTED_FID,
+                timestamp: Math.floor(Date.now() / 1000),
+                network: 'FARCASTER_NETWORK_MAINNET',
+                userDataBody: { type, value },
+              },
+            }),
+          ),
+        });
+      }
+
+      return fulfil(route, { error: 'not found' }, 404);
+    },
+  };
+};
+
+/**
+ * The name registry, stubbed: the @name is free, and the claim is accepted.
+ *
+ * A POST to a registry is exactly the kind of write this probe exists to keep
+ * away from the world, so it is answered here — in the shape the registry
+ * answers with — rather than being aborted and counted. What it answered is
+ * recorded, because a stage that asked the real registry for a name would
+ * otherwise look identical to one that asked this.
+ */
+const createNameRegistryStub = () => {
+  const requests = [];
+
+  return {
+    requests,
+    handle: async (route) => {
+      const request = route.request();
+      const method = request.method();
+
+      requests.push(method);
+
+      if (method !== 'POST') {
+        return route.fulfill({
+          status: 404,
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ code: 'not_found' }),
+        });
+      }
+
+      return route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ transfer: { to: MINTED_FID } }),
+      });
+    },
+  };
+};
 
 const signer = privateKeyToAccount(
   '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
@@ -159,6 +518,59 @@ export const usePrivy = () => {
     },
   };
 };
+
+/**
+ * The window that holds the wallet's words, and what this app asks of it.
+ *
+ * WHAT IT IS IMITATING, EXACTLY. A real embedded wallet lives inside the
+ * provider's iframe and answers a deliberately small set of methods, all of them
+ * signing ones (the private key never leaves that frame):
+ *
+ *   eth_signTransaction    returns the SIGNED raw transaction — not a hash —
+ *                          which is what lets this app broadcast it through its
+ *                          own Optimism endpoint with its own guards in force;
+ *   eth_signTypedData_v4   the EIP-712 authorisation the node's gasless KEY_ADD
+ *                          needs from the account's owner.
+ *
+ * Both answers are shaped like the real ones (a raw transaction, a 65-byte
+ * signature), and every ask is recorded, so a stage can prove the app asked its
+ * own sign-up for the signature rather than a key it made up.
+ */
+const heldProvider = {
+  request: async ({ method }) => {
+    globalThis.__privySignCalls = (globalThis.__privySignCalls ?? []).concat([
+      method,
+    ]);
+
+    if (method === 'eth_signTransaction') {
+      return '0x02' + 'ff' + 'ab'.repeat(40);
+    }
+
+    if (method === 'eth_signTypedData_v4') {
+      return '0x' + '1b'.repeat(65);
+    }
+
+    throw new Error('this probe does not answer ' + method);
+  },
+};
+
+export const useWallets = () => {
+  const inSession = signedIn();
+
+  return {
+    wallets: inSession
+      ? [
+          {
+            type: 'wallet',
+            address: ${JSON.stringify(HELD_WALLET)},
+            chainType: 'ethereum',
+            walletClientType: 'privy',
+            getEthereumProvider: () => heldProvider,
+          },
+        ]
+      : [],
+  };
+};
 `;
 
 /**
@@ -176,6 +588,7 @@ export const PrivyProvider = () => {
 
 export const useLogin = () => ({ login: () => undefined });
 export const usePrivy = () => ({ authenticated: false, ready: false, exportWallet: async () => undefined });
+export const useWallets = () => ({ wallets: [] });
 `;
 
 const startedAt = Date.now();
@@ -1086,6 +1499,333 @@ const runRefusingProvider = async (browser) => {
   await context.close();
 };
 
+/** ── G. the account claims a number of its own ───────────────────────────── */
+
+/**
+ * A Google sign-up claims its own Farcaster number, and the device ends with
+ * ONE account carrying it.
+ *
+ * This is the stage the whole card is about, so it measures the whole shape of
+ * it: what the account screen leads with, where the fee is asked for, who signs
+ * the registration, what the node was told, and what this device holds
+ * afterwards. It needs its own server because the node it reads from is a stub
+ * (`VITE_SNAPCHAIN_HTTP_URL=https://probe-node.invalid`, answered below) — the
+ * app's own code path is unchanged, only the third party at the other end is.
+ */
+const runClaimRoute = async (browser, width) => {
+  stage(`G. the account claims its own Farcaster number, at ${width}px`);
+  relayApprovesSignIn = false;
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: true,
+    viewport: { width, height: width < 600 ? 844 : 900 },
+  });
+  const page = await context.newPage();
+  page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 200)));
+
+  const chain = createChainStub();
+  const node = createNodeStub();
+  const registry = createNameRegistryStub();
+
+  await armRoutes(page, { server: CLAIM_SERVER, privy: 'stub' });
+  // Registered AFTER the catch-all, which is what makes them match FIRST: the
+  // registrar, the read node and the name registry are this stage's thirds, and
+  // not one byte of this stage reaches the real ones.
+  await page.route(underOrigin(OPTIMISM_ENDPOINT), (route) =>
+    chain.handle(route),
+  );
+  await page.route(underOrigin(STUB_NODE), (route) => node.handle(route));
+  // The path the app actually uses for a cross-origin node: its own origin plus
+  // `/snapchain-api` (`~/snapchain/nodeEnv` explains why — a browser cannot POST
+  // to a node that answers no preflight). Intercepted here, so the node behind
+  // it is still this stage's stub and the dev server is never asked.
+  await page.route(nodeProxyOn(CLAIM_SERVER), (route) => node.handle(route));
+  await page.route(underOrigin('https://fnames.farcaster.xyz'), (route) =>
+    registry.handle(route),
+  );
+
+  await openLoginModal(page, CLAIM_SERVER, {
+    beforePress: async () => {
+      await waitForPrivyState(page, 'ready');
+    },
+  });
+
+  const doorsUp = await page
+    .waitForSelector('[data-fiddy="social-sign-up-google"]:not([disabled])', {
+      timeout: 180_000,
+    })
+    .then(() => true)
+    .catch(() => false);
+
+  check(
+    `G0 ${width}px: the Google door is usable on the claim server`,
+    doorsUp,
+    '',
+  );
+
+  await pressButton(page, 'Continue with Google');
+
+  const landed = await page
+    .waitForSelector('[data-fiddy="fiddy-account"][data-state="ready"]', {
+      timeout: 180_000,
+    })
+    .then(() => true)
+    .catch(() => false);
+
+  await page.waitForTimeout(2_000);
+
+  const screen = await page.evaluate(() => {
+    const dash = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+    return {
+      url: window.location.pathname,
+      // The sheet's own leading action, not the backup notice's button (which
+      // is the first thing inside the same step, and is not what this is about).
+      primary: dash(
+        document.querySelector(
+          '[data-fiddy-step="account"] .fiddy-sheet-actions .fiddy-primary-btn',
+        )?.textContent,
+      ),
+      quiet: dash(
+        document.querySelector(
+          '[data-fiddy-step="account"] .fiddy-sheet-actions .fiddy-quiet-btn',
+        )?.textContent,
+      ),
+      text: dash(document.body.innerText),
+      hasNumber: document
+        .querySelector('[data-fiddy="fiddy-account"]')
+        ?.getAttribute('data-has-number'),
+    };
+  });
+
+  check(
+    `G1 ${width}px: the account screen leads with claiming a number FOR THIS ACCOUNT`,
+    landed &&
+      screen.url === '/welcome/account' &&
+      /make this a farcaster account/i.test(screen.primary) &&
+      /no farcaster account yet/i.test(screen.text),
+    `primary="${screen.primary}" quiet="${screen.quiet}" hasNumber=${screen.hasNumber} at ${screen.url}`,
+  );
+  check(
+    `G1b ${width}px: it is still the account the sign-up made, named by its email`,
+    /probe@gmail\.com/.test(screen.text) && screen.hasNumber === 'false',
+    screen.text.slice(0, 140),
+  );
+
+  await pressButton(page, 'Make this a Farcaster account');
+
+  const nameStep = await page
+    .waitForSelector('[data-fiddy-step="create-name"]', { timeout: 120_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  const wordsOnNameStep =
+    (await page.$('[data-fiddy="recovery-phrase"]')) !== null;
+
+  check(
+    `G2 ${width}px: the claim starts at the name, with no words to write down`,
+    nameStep && !wordsOnNameStep,
+    `nameStep=${nameStep} words=${wordsOnNameStep}`,
+  );
+
+  await page.fill(
+    '[data-fiddy-step="create-name"] input.fiddy-input',
+    CLAIMED_NAME,
+  );
+
+  const nameFree = await page
+    .waitForFunction(
+      () =>
+        /is free/i.test(
+          document.querySelector('[data-fiddy="name-availability"]')
+            ?.textContent ?? '',
+        ),
+      undefined,
+      { timeout: 60_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+
+  await pressButton(page, 'Continue');
+
+  const fundStep = await page
+    .waitForSelector('[data-fiddy-step="create-fund"]', { timeout: 120_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  const asked = await page.evaluate(() => {
+    const dash = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+    return {
+      address: dash(
+        document.querySelector('[data-fiddy="custody-address"]')?.textContent,
+      ),
+      state: dash(
+        document.querySelector('[data-fiddy="funding-state"]')?.textContent,
+      ),
+      note: dash(
+        document.querySelector('[data-fiddy="held-account-note"]')?.textContent,
+      ),
+      words: Boolean(document.querySelector('[data-fiddy="recovery-phrase"]')),
+      // Why the flow is where it is, when it is not where it should be.
+      availability: dash(
+        document.querySelector('[data-fiddy="name-availability"]')?.textContent,
+      ),
+      name: document.querySelector(
+        '[data-fiddy-step="create-name"] input.fiddy-input',
+      )?.value,
+    };
+  });
+
+  check(
+    `G3 ${width}px: the fee is asked for at the sign-up's own address`,
+    fundStep &&
+      nameFree &&
+      asked.address.toLowerCase() === HELD_WALLET.toLowerCase() &&
+      asked.words === false &&
+      /nothing to write down/i.test(asked.note) &&
+      registry.requests.length > 0,
+    `${JSON.stringify(asked)} registry=${registry.requests.join('|')} fundStep=${fundStep} nameFree=${nameFree}`,
+  );
+
+  await page.screenshot({
+    path: `${OUT}/social-signup-${width}-claim-fund.png`,
+  });
+
+  // The person's transfer arrives. The screen has been read before it does, so
+  // what was measured above is the screen a person sends money from.
+  chain.fund();
+
+  const finished = await page
+    .waitForSelector('[data-fiddy-step="create-done"]', { timeout: 150_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  const signCalls = await page.evaluate(
+    () => globalThis.__privySignCalls ?? [],
+  );
+
+  // What the sheet itself thinks is happening, so a stage that does not finish
+  // says which step it stopped on and in whose words.
+  const sheetState = await page.evaluate(() => {
+    const dash = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+    return {
+      step: dash(
+        document
+          .querySelector('[data-fiddy="create-account"] [data-fiddy-step]')
+          ?.getAttribute('data-fiddy-step'),
+      ),
+      error: dash(
+        document.querySelector('[data-fiddy="create-account"] .fiddy-error')
+          ?.textContent,
+      ),
+      progress: dash(
+        document.querySelector('[data-fiddy="create-progress"]')?.textContent,
+      ),
+    };
+  });
+
+  check(
+    `G4 ${width}px: the registration was signed by the sign-up's own window`,
+    finished && signCalls.includes('eth_signTransaction'),
+    `finished=${finished} calls=${signCalls.join(' | ')} sheet=${JSON.stringify(sheetState)} node=${JSON.stringify(node.state.reads.slice(0, 10))} chainSent=${chain.sent.length}`,
+  );
+  check(
+    `G5 ${width}px: and broadcast by the app itself, one transaction to the registrar`,
+    chain.sent.length === 1 && chain.isRegistered(),
+    `sent=${chain.sent.length} registered=${chain.isRegistered()}`,
+  );
+  check(
+    `G6 ${width}px: the posting key for this device was authorised by that same window`,
+    signCalls.includes('eth_signTypedData_v4') && Boolean(node.state.key),
+    `calls=${signCalls.join(' | ')} key=${node.state.key ? 'yes' : 'no'}`,
+  );
+
+  const book = await readAccountBook(page);
+
+  check(
+    `G7 ${width}px: ONE account on this device, and it holds the FID`,
+    book.accounts.length === 1 &&
+      book.currentId === HELD_WALLET.toLowerCase() &&
+      book.accounts[0]?.fid === MINTED_FID &&
+      book.accounts[0]?.custody === 'privy' &&
+      book.accounts[0]?.phrase === null,
+    JSON.stringify(book),
+  );
+  check(
+    `G7b ${width}px: the same account by every name it had before, plus its number`,
+    book.accounts[0]?.id === HELD_WALLET.toLowerCase() &&
+      book.accounts[0]?.provider === 'google' &&
+      book.accounts[0]?.email === PRIVY_EMAIL &&
+      book.accounts[0]?.label === `@${CLAIMED_NAME}`,
+    JSON.stringify(book.accounts[0]),
+  );
+
+  await pressButton(page, 'Open Fiddy');
+
+  const shellArrived = await page
+    .waitForSelector('[data-fiddy="account-switcher-entry"]', {
+      state: 'attached',
+      timeout: 180_000,
+    })
+    .then(() => true)
+    .catch(() => false);
+
+  await page.waitForTimeout(2_500);
+
+  const afterClaim = await page.evaluate(() => ({
+    url: window.location.pathname,
+    entry: (
+      document.querySelector('[data-fiddy="account-switcher-entry"]')
+        ?.textContent ?? ''
+    )
+      .replace(/\s+/g, ' ')
+      .trim(),
+  }));
+
+  check(
+    `G8 ${width}px: the app is signed in as the account that owns the number`,
+    shellArrived &&
+      afterClaim.url !== '/welcome/account' &&
+      new RegExp(`@${CLAIMED_NAME}`).test(afterClaim.entry),
+    `entry="${afterClaim.entry}" at ${afterClaim.url}`,
+  );
+
+  await page.evaluate(() => {
+    document.querySelector('[data-fiddy="account-switcher-entry"]')?.click();
+  });
+
+  const sheetArrived = await page
+    .waitForSelector('[data-fiddy="account-switcher"]', { timeout: 60_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  await page.waitForTimeout(2_000);
+
+  const rows = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-fiddy-account]')).map(
+      (row) => ({
+        id: row.getAttribute('data-fiddy-account'),
+        text: (row.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      }),
+    ),
+  );
+
+  check(
+    `G9 ${width}px: the switcher lists that one account, and says it can post`,
+    sheetArrived &&
+      rows.length === 1 &&
+      rows[0]?.id === HELD_WALLET.toLowerCase() &&
+      /this device can post/i.test(rows[0]?.text ?? ''),
+    JSON.stringify(rows),
+  );
+
+  await page.screenshot({
+    path: `${OUT}/social-signup-${width}-claim-switcher.png`,
+  });
+  await context.close();
+};
+
 // The system Chrome, as every other probe in this repo does it: the pinned
 // headless shell is not always on the machine, and this probe is about the app,
 // not about which browser build runs it.
@@ -1095,11 +1835,24 @@ const browser = await chromium.launch({
 });
 
 try {
-  await runWithoutAppId(browser, 390);
-  await runWithoutAppId(browser, 1440);
-  await runWithAppId(browser, 390);
-  await runWithAppId(browser, 1440);
-  await runRefusingProvider(browser);
+  if (wanted('A')) {
+    await runWithoutAppId(browser, 390);
+    await runWithoutAppId(browser, 1440);
+  }
+
+  if (wanted('B')) {
+    await runWithAppId(browser, 390);
+    await runWithAppId(browser, 1440);
+  }
+
+  if (wanted('G')) {
+    await runClaimRoute(browser, 390);
+    await runClaimRoute(browser, 1440);
+  }
+
+  if (wanted('F')) {
+    await runRefusingProvider(browser);
+  }
 
   check('the Farcaster relay was stubbed, not the app', true, '');
 
