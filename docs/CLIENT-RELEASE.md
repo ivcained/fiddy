@@ -175,6 +175,16 @@ What it does, and why each step is not optional:
    injection for this step (point the chunk fetch / the informational probe at
    another path), never set in a real release.
 
+One thing a release leaves to a human, because a byte gate cannot see a runtime
+answer: **the funding surfaces**, checked after the cut-over with
+`node apps/farcaster-web/scripts/verify-funding-live.mjs` — origin-direct, no
+stubs and no local server (`LIVE_FUNDING_ORIGIN`, default `https://fiddy.fun`),
+asserting signed out that the balance home renders with no chip and a dash
+rather than an invented `$0.00`, that add-funds names the server's own presets
+and its `$1.00` floor, and that **no send is offered** while the balance route
+refuses — the signed-out refusal step 8 cannot see. `52/52` at 390px and 1440px
+is the green state.
+
 nginx is **not** touched by the script. The client needs four locations that
 exist now and are checked in step 6:
 
