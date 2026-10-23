@@ -17,6 +17,14 @@
  * Every network call goes through `~/lib/agentService`, which never holds a
  * provider key. Capabilities the service has not confirmed are labelled; a
  * failed call says so instead of showing a spinner forever.
+ *
+ * Asking again: the service is read when the surface arrives, and again when
+ * the owner comes back to the tab (`focus`, or the document becoming visible)
+ * or presses "Check again". An agent can start existing while this tab is open
+ * — hatched in another tab, or the service coming back up — and a surface that
+ * reads once per visit leaves the owner looking at "not awake yet" with a
+ * working agent behind it, with only a reload to show it. That was measured on
+ * live: the Agent tab never learned the agent existed.
  */
 
 import { Brain, Plug } from 'lucide-react';
@@ -107,6 +115,22 @@ const errorText = (error: unknown): string => {
 const newMessageId = (): string =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
+/**
+ * How soon a return to the tab may ask the service again. A tab is focused
+ * constantly — every alt-tab, every click back — and none of those is a reason
+ * to call the service. A few seconds is enough to cover the case this exists
+ * for: the owner hatched their agent somewhere else and came back.
+ */
+const RECHECK_MIN_INTERVAL_MS = 5_000;
+
+/**
+ * The one failure a retry cannot change: there is no sign-in proof left to
+ * spend, so asking the service again would say exactly the same sentence. Every
+ * other failure is worth one more ask, because the proof is only spent by a
+ * successful answer.
+ */
+const PROOF_MISSING = 'NO_PROOF';
+
 const AgentPage: React.FC = () => {
   const { status, session, pair, forget } = useAgentSession();
   const setup = useFiddySetup();
@@ -145,6 +169,12 @@ const AgentPage: React.FC = () => {
    * setup names a brain Fiddy itself provides. `started` is a ref rather than
    * state on purpose: this must run at most once per visit, and a re-render must
    * never be able to ask twice.
+   *
+   * The code of the last failed ask is kept in a ref, not in state: it decides
+   * whether a return to the tab may ask again, and reading it from a ref keeps
+   * that decision out of the effect's own inputs. (In the deps, it would re-run
+   * the effect the moment the attempt set its own state, and the cleanup would
+   * throw away the answer that was still in flight.)
    */
   const [autopair, setAutopair] = useState<{
     state: 'idle' | 'running' | 'failed';
@@ -152,7 +182,44 @@ const AgentPage: React.FC = () => {
     provisioning: AutopairProvisioning | null;
   }>({ state: 'idle', sentence: null, provisioning: null });
   const autopairStarted = useRef(false);
+  const autopairFailure = useRef<string | null>(null);
   const trialStarted = useRef(false);
+
+  /**
+   * The signal that the answer may have changed: bumped when the owner comes
+   * back to the tab, and when they press "Check again". Every read of the
+   * service is keyed on it — the agent list when paired, and one more ask for
+   * the owner session when the last ask failed for a reason a retry can change.
+   */
+  const [checkTick, setCheckTick] = useState(0);
+  const lastReturnAt = useRef(0);
+  const lastRetriedTick = useRef(0);
+  const askAgain = useCallback(() => {
+    setCheckTick((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    const onReturn = () => {
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'hidden'
+      ) {
+        return;
+      }
+      const now = Date.now();
+      if (now - lastReturnAt.current < RECHECK_MIN_INTERVAL_MS) {
+        return;
+      }
+      lastReturnAt.current = now;
+      askAgain();
+    };
+    window.addEventListener('focus', onReturn);
+    document.addEventListener('visibilitychange', onReturn);
+    return () => {
+      window.removeEventListener('focus', onReturn);
+      document.removeEventListener('visibilitychange', onReturn);
+    };
+  }, [askAgain]);
 
   /** The exchange the visitor had before signing in, if there was one. */
   const [trial, setTrial] = useState<{
@@ -195,14 +262,28 @@ const AgentPage: React.FC = () => {
   }, []);
 
   // Ask for the owner session: signed in, built-in brain, nothing paired yet.
+  // Once per visit — plus once per return to the tab, when the last ask failed
+  // for a reason a retry can still change. The proof is only spent by a
+  // successful answer, so nothing is lost by asking again; a failure that WAS
+  // the missing proof is not retried, because asking would say the same thing.
   useEffect(() => {
-    if (status !== 'unpaired' || autopairStarted.current) {
+    if (status !== 'unpaired' || !shouldAutopair({ setup, fid })) {
       return;
     }
-    if (!shouldAutopair({ setup, fid })) {
-      return;
+    if (autopairStarted.current) {
+      const failedCode = autopairFailure.current;
+      const retryable =
+        checkTick > 0 &&
+        lastRetriedTick.current !== checkTick &&
+        failedCode !== null &&
+        failedCode !== PROOF_MISSING;
+      if (!retryable) {
+        return;
+      }
+      lastRetriedTick.current = checkTick;
     }
     autopairStarted.current = true;
+    autopairFailure.current = null;
     let cancelled = false;
     setAutopair({ state: 'running', sentence: null, provisioning: null });
 
@@ -212,6 +293,7 @@ const AgentPage: React.FC = () => {
         return;
       }
       if (!outcome.ok) {
+        autopairFailure.current = outcome.code;
         setAutopair({
           state: 'failed',
           sentence: outcome.sentence,
@@ -226,6 +308,7 @@ const AgentPage: React.FC = () => {
         token: outcome.session.token,
       });
       setTab('chat');
+      autopairFailure.current = null;
       setAutopair({
         state: 'idle',
         sentence: null,
@@ -236,7 +319,7 @@ const AgentPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [status, fid, pair, setup]);
+  }, [status, fid, pair, setup, checkTick]);
 
   /** What to call the agent while it is not yet a live instance. */
   const namedAgent = trial.name ?? setup.agentName;
@@ -338,7 +421,10 @@ const AgentPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [paired]);
+    // `checkTick` in the deps is what makes a return to the tab re-read the
+    // service: the agent list, the service's health, and whether hatching is
+    // open. The selected agent stays selected and the conversation is kept.
+  }, [paired, checkTick]);
 
   // Selected agent: its schedule log and its channels.
   useEffect(() => {
@@ -652,7 +738,15 @@ const AgentPage: React.FC = () => {
             }}
           />
 
-          <div className="mt-4 border-t border-[rgba(255,255,255,0.09)] pt-4">
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[rgba(255,255,255,0.09)] pt-4">
+            <button
+              type="button"
+              onClick={askAgain}
+              disabled={autopair.state === 'running'}
+              className="rounded-lg border border-[#d4ff3f] px-3 py-1.5 text-sm font-medium text-[#d4ff3f] hover:bg-[#d4ff3f]/10 disabled:opacity-50"
+            >
+              Check again
+            </button>
             <button
               type="button"
               onClick={() => setView('pair')}
@@ -728,13 +822,22 @@ const AgentPage: React.FC = () => {
           <p className="mb-4 text-xs text-muted">
             {hatchAvailabilityCopy[availability]}
           </p>
-          <button
-            type="button"
-            onClick={() => setView('pair')}
-            className="rounded-lg border border-[#d4ff3f] px-4 py-2 text-sm font-medium text-[#d4ff3f] hover:bg-[#d4ff3f]/10"
-          >
-            Pair a different service
-          </button>
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={askAgain}
+              className="rounded-lg border border-[#d4ff3f] px-4 py-2 text-sm font-medium text-[#d4ff3f] hover:bg-[#d4ff3f]/10"
+            >
+              Check again
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('pair')}
+              className="rounded-lg border border-[rgba(255,255,255,0.09)] px-4 py-2 text-sm text-muted hover:text-default"
+            >
+              Pair a different service
+            </button>
+          </div>
         </section>
       );
     }
