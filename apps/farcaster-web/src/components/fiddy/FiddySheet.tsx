@@ -13,6 +13,7 @@
 import React, { memo, ReactNode, RefObject } from 'react';
 
 import { FiddyEgg } from '~/components/fiddy/FiddyEgg';
+import { FiddyHeroStage } from '~/components/fiddy/FiddyHeroStage';
 
 export interface FiddySheetAction {
   label: string;
@@ -50,6 +51,15 @@ export interface FiddySheetProps {
   note?: ReactNode;
   /** Mascot presence: a hero egg, a small one, or none. */
   egg?: 'hero' | 'small' | 'none';
+  /**
+   * The real 3D Fiddy, where a screen has earned the weight of it.
+   *
+   * `hero` draws the turnable model in the mascot slot instead of the drawn egg
+   * — the front door's stage. A screen that wants the model small (beside a
+   * field, say) puts `FiddyHeroStage` where it belongs in its own layout, since
+   * "beside the form" is a place this component does not have an opinion about.
+   */
+  model?: 'hero' | null;
   /** "Step 2 of 4" — omitted on the first and last screens. */
   step?: { index: number; total: number } | null;
   /** Identifies the screen for verification and for tests. */
@@ -70,6 +80,7 @@ export const FiddySheet = memo<FiddySheetProps>(
     quiet = null,
     note = null,
     egg = 'none',
+    model = null,
     step = null,
     name,
     wide = false,
@@ -100,6 +111,7 @@ export const FiddySheet = memo<FiddySheetProps>(
       <div
         className={`fiddy-sheet-body ${wide ? 'fiddy-sheet-body-wide' : ''}`}
       >
+        {model === 'hero' ? <FiddyHeroStage variant="hero" /> : null}
         {egg === 'hero' ? <FiddyEgg size={112} /> : null}
         {egg === 'small' ? <FiddyEgg size={76} /> : null}
 

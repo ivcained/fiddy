@@ -36,11 +36,18 @@ export default [
     files: ['scripts/**/*.mjs'],
     languageOptions: {
       globals: {
+        // Page globals a probe's in-page callback needs and has no module to
+        // import them from: `atob`/`Blob` to hand the page bytes and module
+        // sources, `clearInterval` to stop a wait the page itself owns.
+        atob: 'readonly',
+        Blob: 'readonly',
         cancelAnimationFrame: 'readonly',
+        clearInterval: 'readonly',
         console: 'readonly',
         document: 'readonly',
         fetch: 'readonly',
         getComputedStyle: 'readonly',
+        HTMLCanvasElement: 'readonly',
         Image: 'readonly',
         // A probe that drives the wallet flows reads the page's own IndexedDB
         // (the key store and the draft store live there); it is a page global,
@@ -48,9 +55,12 @@ export default [
         indexedDB: 'readonly',
         localStorage: 'readonly',
         MutationObserver: 'readonly',
+        PerformanceObserver: 'readonly',
         performance: 'readonly',
         process: 'readonly',
         requestAnimationFrame: 'readonly',
+        setInterval: 'readonly',
+        setTimeout: 'readonly',
         URL: 'readonly',
         window: 'readonly',
         // Node's own, not the page's: a probe bounds its reads of release.json and

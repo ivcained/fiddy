@@ -163,6 +163,124 @@ html.fiddy-dark-shell body {
   object-fit: contain;
 }
 
+/* ---------- the hero Fiddy ----------
+   The front door's mascot, drawn by the same three.js scene the chrome's mark
+   uses. The box is sized here and nowhere else: it is identical before the model
+   is fetched and after it arrives, which is what keeps the page from shifting
+   under a reader who is halfway through the first sentence. Two variants, one
+   geometry: `hero` on the front door, `form` beside the name field. */
+
+.fiddy-hero-stage {
+  position: relative;
+  display: block;
+  flex: none;
+  width: var(--fiddy-hero-box);
+  height: var(--fiddy-hero-box);
+  line-height: 0;
+}
+
+.fiddy-hero-stage-hero {
+  --fiddy-hero-box: 168px;
+}
+
+.fiddy-hero-stage-form {
+  --fiddy-hero-box: 84px;
+}
+
+@media (min-width: 640px) {
+  .fiddy-hero-stage-hero {
+    --fiddy-hero-box: 232px;
+  }
+}
+
+/* A brand glow behind the hero only. The small one beside a form sits inside a
+   row of controls and does not get to light the screen up. */
+.fiddy-hero-stage-hero::before {
+  content: '';
+  position: absolute;
+  inset: -18%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 46%,
+    color-mix(in oklab, var(--fiddy-accent), transparent 84%),
+    transparent 68%
+  );
+  pointer-events: none;
+}
+
+.fiddy-hero-stage-still,
+.fiddy-hero-stage-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.fiddy-hero-stage-still {
+  object-fit: contain;
+  transition: opacity 180ms ease-out;
+}
+
+/* Only the big one is turnable, so only the big one takes the pointer. Vertical
+   panning stays with the page: a visitor scrolling past the hero on a phone must
+   not find their thumb dragging a toy instead. */
+.fiddy-hero-stage-hero .fiddy-hero-stage-canvas {
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.fiddy-hero-stage-hero .fiddy-hero-stage-canvas:active {
+  cursor: grabbing;
+}
+
+.fiddy-hero-stage-form .fiddy-hero-stage-canvas {
+  pointer-events: none;
+}
+
+.fiddy-hero-stage-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.fiddy-hero-stage[data-fiddy-hero='moving'] .fiddy-hero-stage-still {
+  opacity: 0;
+}
+
+/* Stillness stays still: a cross-fade is motion too. */
+@media (prefers-reduced-motion: reduce) {
+  .fiddy-hero-stage-still {
+    transition: none;
+  }
+}
+
+/* The name field, with the little Fiddy beside it. Sideways when there is room
+   for two columns — the mascot watches you type without standing in the way —
+   and stacked above the field when there is not. `align-items: center` on the
+   row is what keeps the 84px model optically on the input's line rather than on
+   the label's. */
+.fiddy-form-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.fiddy-form-row .fiddy-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (min-width: 520px) {
+  .fiddy-form-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+  }
+}
+
 .fiddy-grow {
   flex: 1;
 }
