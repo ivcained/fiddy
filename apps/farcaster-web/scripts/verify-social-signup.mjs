@@ -1060,6 +1060,36 @@ const runWithAppId = async (browser, width) => {
     `row=${JSON.stringify(farcasterRow?.text)}`,
   );
 
+  // Decision 3, measured rather than asserted in prose: the backup ask belongs to
+  // the account whose words are outstanding, and a Farcaster sign-in has none. So
+  // the sign-in must not leave an ask recorded against the session row — and must
+  // not touch the answer the social account already gave in stage D. Both are read
+  // through the app's own storage, the same store `~/lib/seedBackup` writes.
+  const backup = await page.evaluate(
+    async ({ sessionId, socialId }) => {
+      const storage = await import('/src/utils/storageUtils.ts');
+      const seedBackup = await import('/src/lib/seedBackup.ts');
+
+      const read = async (id) =>
+        await storage.getItem({
+          key: seedBackup.seedBackupKeyFor(id),
+          fallback: null,
+        });
+
+      return {
+        session: await read(sessionId),
+        social: await read(socialId),
+      };
+    },
+    { sessionId: FARCASTER_ROW_ID, socialId: HELD_WALLET.toLowerCase() },
+  );
+
+  check(
+    `E6 ${width}px: nothing was asked of the Farcaster account, and the social account's own answer is untouched`,
+    backup.session === null && backup.social?.status === 'saved',
+    JSON.stringify(backup),
+  );
+
   await page.screenshot({ path: `${OUT}/social-signup-${width}-switcher.png` });
   await context.close();
 };

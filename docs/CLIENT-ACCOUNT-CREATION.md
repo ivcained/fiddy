@@ -734,17 +734,21 @@ key this device was granted for that same number is not its to delete.
 
 ### 8.3 What is measured, and where
 
-`apps/farcaster-web/scripts/verify-social-signup.mjs` — **67/67 checks, exit 0**, both
+`apps/farcaster-web/scripts/verify-social-signup.mjs` — **69/69 checks, exit 0**, both
 widths (390 and 1440), two dev servers, the app's own code throughout (only the Privy
 SDK and the SIWF relay are stubbed). Stage E now reads:
 
     PASS E2 390px: the switcher lists both accounts — the Farcaster session joined it — 0x8f3cf7ad23cd3cadbd9735aff958023239c6a063 | farcaster:3 (book: 0x8f3cf7ad23cd3cadbd9735aff958023239c6a063 | farcaster:3)
     PASS E4 390px: exactly one account is the current one, and it is the Farcaster one — current=farcaster:3 (stored farcaster:3)
     PASS E5 390px: and its row names the account, says where the sign-in came from, and what this device cannot do yet — row="@dwrsigned in with your own Farcaster app, no posting key on this device yetsigning in as this one"
+    PASS E6 390px: nothing was asked of the Farcaster account, and the social account's own answer is untouched — {"session":null,"social":{"status":"saved","reminders":1,…}}
 
 (1440px reads identically. The book is read through the app's own
 `~/snapchain/accounts/localAccounts` over the dev server, not by spelling a localforage
-key by hand, and the row text is what the switcher's own markup printed.)
+key by hand, and the row text is what the switcher's own markup printed.) E6 is §8.2's
+decision 3 measured rather than argued: read through `~/utils/storageUtils` with
+`~/lib/seedBackup`'s own key function, there is **no record at all** for the session row,
+and the deferral/save the social account gave in stage D is still exactly there.
 
 `apps/farcaster-web/scripts/verify-account-switching.mjs` — **18/18 checks, exit 0**.
 It went red on this branch for a real reason, and the reason is a fact about the client
@@ -763,8 +767,10 @@ Baseline, said out loud: `npx vitest run` for this app is 1817 passed / 104 fail
 those 104 are 6 wallet-related files failing at `localStorage.clear()` in this Node
 build. Verified pre-existing, not caused here: `src/utils/__tests__/walletActivity.test.ts`
 fails 7/7 on the same worktree with this branch's changes stashed. `tsc -p tsconfig.json
---noEmit` reports 15 errors on this tree, all in the routing/lazy/constants files, none
-in a file this card touched, and the same set before it.
+--noEmit` in this worktree reports 15 errors, all in the routing/lazy/constants files and
+none in a file this card touched; the same set is there with this branch stashed. (CI's
+own `typecheck (farcaster-web)` job passes on this head, so the local count is a fact
+about this worktree's install rather than about the branch.)
 
 ### 8.4 Deliberately not done here
 
