@@ -98,11 +98,24 @@ What it does, and why each step is not optional:
 2. **The build must carry the env.** `VITE_SNAPCHAIN_HTTP_URL` (the node the
    client reads through — without it `isNodeConfigured()` is false and a
    signed-in session lands on the device-only landing), `VITE_FIDDY_MEDIA_URL`
-   (the media host, named even though `https://fiddy.fun` is the default) and
+   (the media host, named even though `https://fiddy.fun` is the default),
    `VITE_TOGETHER_API_URL` (the Together surface's collaboration service; the
-   empty string means "same origin", which is what production is). Current
-   release: node `https://haatz.quilibrium.com`, media `https://fiddy.fun`,
-   together `''`.
+   empty string means "same origin", which is what production is) and
+   `VITE_NEYNAR_API_KEY` (the reader's own Neynar key — Neynar is the **default
+   provider**, so without it the mini-app catalog and every index read answer
+   with a refusal instead of content; the app shipping without it is card
+   `t_e7754140`, measured on live 2026-10-23). Current release: node
+   `https://haatz.quilibrium.com`, media `https://fiddy.fun`, together `''`,
+   and a Neynar key read from a local file.
+   **The key is a FILE, never an argument** (an argument is in `ps` and in shell
+   history), in this order: `$FIDDY_NEYNAR_KEY_FILE` →
+   `~/.fiddy/neynar-api-key` → the wizard's
+   `apps/farcaster-web/.env.local` → `~/.hermes/.env`'s
+   `FIDDY_FARCASTER_NEYNAR_API_KEY`. The script prints only its fingerprint
+   (length + sha256 prefix) and writes it into the *frozen tree* as `.env.local`
+   (mode 0600) for the length of the build, deleting it immediately after. A run
+   with NO key now refuses to ship (`FIDDY_ALLOW_KEYLESS_CLIENT=1` ships that
+   fallback deliberately), because "it quietly shipped keyless" is the bug.
    **`VITE_TOGETHER_API_URL` is not optional.** `src/lib/together.ts` falls back
    to `http://127.0.0.1:8766` when the variable is *undefined*, so a build that
    merely omits it ships a Together page that renders and then asks the

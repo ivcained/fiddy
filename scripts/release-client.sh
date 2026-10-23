@@ -5,7 +5,7 @@
 #
 #   1. a FROZEN tree at the sha under release (git archive) — a release is a
 #      commit, not whatever the working clone happens to hold;
-#   2. a build that CARRIES the three env values the client needs in production:
+#   2. a build that CARRIES the four env values the client needs in production:
 #        VITE_SNAPCHAIN_HTTP_URL  the node the client reads through. Without it
 #                                 `isNodeConfigured()` is false and a signed-in
 #                                 session lands on the device-only landing.
@@ -21,6 +21,23 @@
 #                                 string — "same origin as this app" — because
 #                                 the vhost rewrites /spaces onto the hosted
 #                                 service (docs/TOGETHER.md);
+#        VITE_NEYNAR_API_KEY      the reader's own Neynar key, which is what makes
+#                                 this client's DEFAULT provider usable. Neynar is
+#                                 the declared default read+write server
+#                                 (`src/snapchain/providers/catalog.ts`), and the
+#                                 app catalog and every index read are Neynar's
+#                                 job because a Snapchain node keeps neither. A
+#                                 release without it ships an Apps tab that can
+#                                 only refuse ("add your own Neynar key under
+#                                 Advanced"), which is the fallback rather than
+#                                 the product — MEASURED 2026-10-23: six
+#                                 signed-in surfaces refused on live for exactly
+#                                 this reason (card t_e7754140). It is read from
+#                                 a FILE (below), never from this command line,
+#                                 so the value never reaches `ps` or the shell
+#                                 history, and it is written into the frozen tree
+#                                 as `.env.local` only for the length of the
+#                                 build;
 #   3. a LOCAL gate: the built bundle must contain the adapter's 501 sentence,
 #      the media path and the Together route — and must NOT contain the laptop
 #      fallback above, or we do not ship it at all (the surface ships itself, so
@@ -92,6 +109,24 @@ MEDIA_URL=${FIDDY_BUILD_MEDIA_URL:-https://fiddy.fun}
 # the vhost rewrites /spaces onto the hosted service. Never leave it out — see
 # the header (an undefined value is the laptop fallback).
 TOGETHER_URL=${FIDDY_BUILD_TOGETHER_API_URL-}
+# ── the Neynar key ───────────────────────────────────────────────────────────
+#
+# The default provider's credential, and the reason this script grew a secret
+# path at all: a release that ships without it ships the refusal instead of the
+# product (see the header, and card t_e7754140). Three rules it is read by:
+#
+#   * from a FILE, never from this command line — an argument is visible in `ps`
+#     and lands in shell history, so the value must never be one;
+#   * the release REFUSES to ship without it unless the keyless build is asked
+#     for out loud (`FIDDY_ALLOW_KEYLESS_CLIENT=1`), because "it quietly shipped
+#     without the key" is the defect being fixed, and a quiet fallback is how it
+#     happened;
+#   * the value is never printed. Only its fingerprint (length + sha256 prefix)
+#     is, so a run can be compared across attempts without leaking the secret.
+NEYNAR_KEY_FILE=${FIDDY_NEYNAR_KEY_FILE:-$HOME/.fiddy/neynar-api-key}
+NEYNAR_SECRET_ENV=${FIDDY_NEYNAR_SECRET_ENV:-$HOME/.hermes/.env}
+NEYNAR_SECRET_NAME=${FIDDY_NEYNAR_SECRET_NAME:-FIDDY_FARCASTER_NEYNAR_API_KEY}
+ALLOW_KEYLESS=${FIDDY_ALLOW_KEYLESS_CLIENT:-}
 # Strings only this client build has (the adapter's sentence and our media path).
 #
 # The adapter sentence is the refusal THIS build writes for a read it has no
@@ -134,6 +169,55 @@ REPO=$(cd "$(dirname "$0")/.." && pwd)
 say() { printf '\n== %s\n' "$*"; }
 ssh_() { ssh -o BatchMode=yes "$HOST" "$@"; }
 
+# ── where the Neynar key comes from ──────────────────────────────────────────
+#
+# A file, first hit wins, and every candidate is a FILE (or one line of an env
+# file) because the value must never be an argument: an argument is in `ps`, in
+# the shell history of whoever ran the release, and in any log that echoes the
+# command.
+#
+#   1. $FIDDY_NEYNAR_KEY_FILE       an explicit path, for a build machine
+#   2. ~/.fiddy/neynar-api-key      the standing one-file secret (chmod 600)
+#   3. the wizard's own store — `scripts/fiddy-setup.command` writes
+#      VITE_NEYNAR_API_KEY into `apps/farcaster-web/.env.local`; this clone
+#      first, then the canonical clone
+#   4. the Hermes secret store (~/.hermes/.env, under FIDDY_*_NEYNAR_API_KEY)
+#
+# Nothing here echoes the value: the run prints a fingerprint (length and a
+# sha256 prefix) so two attempts can be compared without leaking the key.
+neynar_key_value() {
+  local file="" key="" value=""
+  for file in "$NEYNAR_KEY_FILE" \
+              "$HOME/.fiddy/neynar-api-key" \
+              "$REPO/apps/farcaster-web/.env.local" \
+              "$HOME/Projects/fiddy/apps/farcaster-web/.env.local"; do
+    [ -n "$file" ] || continue
+    [ -r "$file" ] || continue
+    value=$(sed -n 's/^VITE_NEYNAR_API_KEY=//p' "$file" | head -1 | tr -d '"' | tr -d "'" | tr -d ' \r')
+    if [ -z "$value" ]; then
+      value=$(sed -n 's/^FIDDY_FARCASTER_NEYNAR_API_KEY=//p' "$file" | head -1 | tr -d '"' | tr -d "'" | tr -d ' \r')
+    fi
+    if [ -n "$value" ]; then
+      NEYNAR_KEY_SOURCE=$file
+      printf '%s' "$value"
+      return 0
+    fi
+  done
+  if [ -r "$NEYNAR_SECRET_ENV" ]; then
+    value=$(sed -n "s/^${NEYNAR_SECRET_NAME}=//p" "$NEYNAR_SECRET_ENV" | head -1 | tr -d '"' | tr -d "'" | tr -d ' \r')
+    if [ -n "$value" ]; then
+      NEYNAR_KEY_SOURCE=$NEYNAR_SECRET_ENV
+      printf '%s' "$value"
+      return 0
+    fi
+  fi
+  NEYNAR_KEY_SOURCE=""
+  printf ''
+}
+NEYNAR_KEY_SOURCE=""
+NEYNAR_KEY=$(neynar_key_value)
+neynar_fingerprint() { printf '%s' "$NEYNAR_KEY" | shasum -a 256 | cut -c1-12; }
+
 if [ "${1:-}" = "--rollback" ]; then
   PREV=$(ssh_ "readlink -f $CURRENT")
   PRIOR=$(ssh_ "ls -1dt $RELEASES/*/ | sed -n 2p")
@@ -151,6 +235,14 @@ git -C "$REPO" cat-file -e "$SHA^{commit}" || { echo "no such commit: $SHA" >&2;
 # directory (`--rollback`-style callers may pass a short sha, and /release.json
 # always carries the 40-character one).
 FULL_SHA=$(git -C "$REPO" rev-parse "$SHA^{commit}")
+# The key this build will carry, named before anything is built: an operator
+# needs to see WHICH credential a release is about to bake, and whether there is
+# one at all, without the value ever reaching the terminal.
+if [ -n "$NEYNAR_KEY" ]; then
+  say "neynar key: ${#NEYNAR_KEY} chars, sha256 $(neynar_fingerprint)…, from $NEYNAR_KEY_SOURCE (the value is never printed and never an argument)"
+else
+  say "neynar key: NONE FOUND — step 3 refuses to ship unless FIDDY_ALLOW_KEYLESS_CLIENT=1"
+fi
 
 # The stage is created HERE, after the sha is known, so a default run gets a
 # directory of its own and can never be the run that deletes another run's tree.
@@ -175,15 +267,48 @@ git -C "$REPO" archive "$SHA" | tar -x -C "$STAGE/base"
 ln -s "$REPO/node_modules" "$STAGE/base/node_modules"
 ln -s "$REPO/apps/farcaster-web/node_modules" "$STAGE/base/apps/farcaster-web/node_modules"
 
-say "2/8 vite build (node $NODE_URL, media $MEDIA_URL, together '${TOGETHER_URL}' = same origin)"
+say "2/8 vite build (node $NODE_URL, media $MEDIA_URL, together '${TOGETHER_URL}' = same origin, neynar key ${NEYNAR_KEY:+baked})"
+# The key enters as a FILE, never as an argument (see the resolver above). It is
+# written into the FROZEN tree rather than the working clone, mode 0600, for the
+# length of the build only, and removed the moment the build is done so no copy
+# of it outlives the run.
+NEYNAR_ENV_LOCAL="$STAGE/base/apps/farcaster-web/.env.local"
+if [ -n "$NEYNAR_KEY" ]; then
+  rm -f "$NEYNAR_ENV_LOCAL"
+  ( umask 077; printf 'VITE_NEYNAR_API_KEY=%s\n' "$NEYNAR_KEY" > "$NEYNAR_ENV_LOCAL" )
+fi
 ( cd "$STAGE/base/apps/farcaster-web" && rm -rf dist && \
   VITE_SNAPCHAIN_HTTP_URL="$NODE_URL" VITE_FIDDY_MEDIA_URL="$MEDIA_URL" \
   VITE_TOGETHER_API_URL="$TOGETHER_URL" \
   NODE_OPTIONS=--max-old-space-size=8192 npx vite build > "$STAGE/build.log" 2>&1 ) \
-  || { tail -30 "$STAGE/build.log"; exit 1; }
+  || { tail -30 "$STAGE/build.log"; rm -f "$NEYNAR_ENV_LOCAL"; exit 1; }
+rm -f "$NEYNAR_ENV_LOCAL"
 
-say "3/8 local gate: the bundle carries the adapter, the media path and Together"
+say "3/8 local gate: the bundle carries the adapter, the media path, Together and the Neynar key"
 APP="$STAGE/base/apps/farcaster-web/dist"
+# The Neynar key, in the code that SHIPS. Same rule as everything below: the grep
+# runs over the built assets, and its pattern comes from a FILE (0600, in the
+# stage, deleted immediately) so the secret never lands in `ps`, in the shell
+# history, or in this script's own output. A keyless bundle is allowed only when
+# it is asked for out loud — the quiet version of that is the defect this gate
+# exists to close (card t_e7754140: a release shipped without the key, and the
+# app catalog plus every index read refused on live for it).
+if [ -n "$NEYNAR_KEY" ]; then
+  NEYNAR_GREP="$STAGE/neynar-key.grep"
+  ( umask 077; printf '%s\n' "$NEYNAR_KEY" > "$NEYNAR_GREP" )
+  if ! grep -rqsF --include='*.js' -f "$NEYNAR_GREP" "$APP/assets"; then
+    rm -f "$NEYNAR_GREP"
+    echo "REFUSING to ship: the built JavaScript does not carry VITE_NEYNAR_API_KEY, so the app catalog and every index read would refuse on the live site" >&2
+    exit 1
+  fi
+  rm -f "$NEYNAR_GREP"
+elif [ -z "$ALLOW_KEYLESS" ]; then
+  echo "REFUSING to ship: no Neynar key was found." >&2
+  echo "  looked in: $NEYNAR_KEY_FILE, ~/.fiddy/neynar-api-key, $REPO/apps/farcaster-web/.env.local and the canonical clone's, $NEYNAR_SECRET_ENV (\$$NEYNAR_SECRET_NAME)" >&2
+  echo "  Neynar is this client's default provider, so a keyless bundle answers the mini-app catalog and every index read with a refusal, and no reader setup fixes a BUILD-time credential." >&2
+  echo "  Put the key in a file (chmod 600 ~/.fiddy/neynar-api-key) and re-run, or set FIDDY_ALLOW_KEYLESS_CLIENT=1 to ship that fallback deliberately." >&2
+  exit 1
+fi
 grep -rqs --include='*.js' "$GATE_ADAPTER" "$APP/assets" || { echo "MISSING adapter sentence in the build" >&2; exit 1; }
 grep -rqs "$GATE_MEDIA" "$APP/assets" || { echo "MISSING media path in the build" >&2; exit 1; }
 grep -rqs "$NODE_URL" "$APP/assets" || { echo "MISSING the configured node in the build" >&2; exit 1; }
@@ -215,6 +340,11 @@ node "$UNFURL_CHECK" "$APP/index.html" "$UNFURL_OUT" \
 echo "  adapter  ok"
 echo "  media    ok"
 echo "  node     ok ($NODE_URL)"
+if [ -n "$NEYNAR_KEY" ]; then
+  echo "  neynar   ok (key baked into the chunks; ${#NEYNAR_KEY} chars, sha256 $(neynar_fingerprint)…, from $NEYNAR_KEY_SOURCE)"
+else
+  echo "  neynar   ABSENT (deliberate: FIDDY_ALLOW_KEYLESS_CLIENT=1) — the app catalog and index reads will refuse on this release"
+fi
 echo "  together ok (route literal; no laptop fallback in the chunks, api = '${TOGETHER_URL}' same origin)"
 # The shell the host serves runs under script-src 'self'. An inline <script> in
 # index.html (the theme bootstrap used to be one) or an inline on*= handler (the
