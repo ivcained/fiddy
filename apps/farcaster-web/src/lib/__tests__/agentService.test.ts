@@ -311,7 +311,7 @@ describe('probeBrain', () => {
     ];
     // Signed out, the check goes to the default service with no credential of
     // ours attached: the owner's key is the only one in the request.
-    expect(url).toBe('https://mate.legitclub.com/api/agents/brains/probe');
+    expect(url).toBe('https://fiddy.fun/api/agents/brains/probe');
     expect(init.method).toBe('POST');
     expect(Object.keys(init.headers).sort()).toEqual([
       'accept',

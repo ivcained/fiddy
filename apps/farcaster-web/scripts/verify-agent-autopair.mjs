@@ -252,7 +252,7 @@ const runCase = async (browser, { label, ownerSession }) => {
   });
 
   // The agent service itself: health, the catalog, and the owner's agents.
-  await page.route('https://mate.legitclub.com/**', async (route) => {
+  await page.route('https://fiddy.fun/api/**', async (route) => {
     const url = new URL(route.request().url());
     seen.agentApi.push({
       path: url.pathname,
