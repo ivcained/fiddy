@@ -20,6 +20,10 @@
  *                         still answers, as the shell: nothing is invented.
  *   PYTHON                default python3, running render-card.py
  *   READ_TIMEOUT_MS       default 8000, for every upstream read
+ *   FIDDY_LOOKS_DIR       where shared looks are kept (see looks.mjs). Absent
+ *                         means this host stores none: a look it already holds
+ *                         still renders, and a share request refuses in one
+ *                         sentence rather than failing silently.
  */
 
 import { statSync, readFileSync } from 'node:fs';
@@ -28,6 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createCardRenderer } from './cards.mjs';
+import { createLookStore, LOOK_LIMITS } from './looks.mjs';
 import { createUnfurlHandler } from './handler.mjs';
 import { createLinkReader } from './reader.mjs';
 
@@ -97,19 +102,61 @@ const renderCard = createCardRenderer({
   mascotPath,
 }).render;
 
+const looksDir = process.env.FIDDY_LOOKS_DIR;
+const looks = looksDir ? createLookStore({ dir: looksDir }) : undefined;
+
 const handler = createUnfurlHandler({
   origin: process.env.FIDDY_ORIGIN ?? 'https://fiddy.fun',
   shellSource: loadShell,
   siteCard: loadSiteCard,
   renderCard,
   reader,
+  looks,
 });
+
+/**
+ * A request body, read up to a cap and no further.
+ *
+ * The only body this service accepts is a look (`POST /look`), so the cap is
+ * the model's own (`LOOK_LIMITS.bytes`): a body that is already too large is
+ * refused without being read into this process at all. Anything else with a
+ * body is not ours, and the handler answers 405 for it.
+ */
+const readBody = (request, limit) =>
+  new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    request.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error('too large'));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    request.on('error', reject);
+  });
 
 const server = createServer(async (request, response) => {
   const path = request.url ?? '/';
   let answer;
   try {
-    answer = await handler.handle({ method: request.method ?? 'GET', path });
+    const method = request.method ?? 'GET';
+    // Only a share POST has a body worth reading; everything else is answered
+    // without one, exactly as before.
+    const body =
+      method === 'POST' && path.split('?')[0] === '/look'
+        ? await readBody(request, LOOK_LIMITS.bytes).catch(() =>
+            // A body that ran past the cap is answered by the model's own size
+            // check rather than by a second sentence invented here: what
+            // arrives is a string longer than a look can be, which is exactly
+            // one over-limit body. (`readBody` has already stopped reading it.)
+            ' '.repeat(LOOK_LIMITS.bytes + 1),
+          )
+        : undefined;
+    answer = await handler.handle({ method, path, body });
   } catch (error) {
     // Nothing a request can do should reach here; if something does, the answer
     // is still the app rather than a stack trace in a crawler's face.

@@ -75,6 +75,14 @@ const Router: React.FC = () => {
                 path={routes.publicExplore.path}
                 element={<routes.publicExplore.Component />}
               />
+              {/* A look someone shared: the same rule as the two paths above —
+                  no sign-in gate in either direction, because the link is the
+                  thing being handed over. Its own name is reserved by the route
+                  table, so this is what `/look/<id>` resolves to. */}
+              <Route
+                path={routes.look.path}
+                element={<routes.look.Component />}
+              />
               {/* Authed Routes */}
               <Route element={<AuthedRoutes />}>
                 <Route

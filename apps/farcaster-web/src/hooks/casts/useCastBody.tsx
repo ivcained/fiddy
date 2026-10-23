@@ -19,6 +19,7 @@ import React, { ReactNode, useCallback, useMemo } from 'react';
 import { FrameEmbedAttachment } from '~/components/attachments/FrameEmbedAttachment';
 import { GroupInviteAttachment } from '~/components/attachments/GroupInviteAttachment';
 import { ImageAttachments } from '~/components/attachments/ImageAttachments';
+import { LookEmbedAttachment } from '~/components/attachments/LookEmbedAttachment';
 import { OpenGraphAttachment } from '~/components/attachments/OpenGraphAttachment';
 import { QuoteCast } from '~/components/attachments/QuoteCast';
 import { RichOpenGraphCastAttachment } from '~/components/attachments/RichOpenGraphAttachment';
@@ -33,6 +34,7 @@ import { VideoAttachment } from '~/components/attachments/VideoAttachment';
 import { ImageLightboxModal } from '~/components/modals/ImageLightboxModal';
 import { LinkifiedText } from '~/components/text/LinkifiedText';
 import { getRenderableEmbeds } from '~/utils/castUtils';
+import { matchLookUrl } from '~/utils/lookTheme';
 
 type CastBody = {
   nonLinkfiedText: string;
@@ -163,6 +165,21 @@ const useCastAttachment = ({
         );
       }
 
+      // Ours, so we draw it instead of asking the provider for a link card:
+      // a shared look renders as the look itself, with the maker's name and one
+      // button that puts it on (`LookEmbedAttachment`).
+      if (matchLookUrl(openGraphAttachment.url)) {
+        return (
+          <LookEmbedAttachment
+            key={openGraphAttachment.url}
+            url={openGraphAttachment.url}
+            by={cast.author?.username}
+            width={spaceWidth ?? width}
+            height={height}
+          />
+        );
+      }
+
       return (
         <OpenGraphAttachment
           key={openGraphAttachment.url}
@@ -218,6 +235,21 @@ const useCastAttachment = ({
             key={openGraphAttachment.url}
             url={openGraphAttachment.url}
             width={spaceWidth ?? width}
+          />
+        );
+      }
+
+      // Ours, so we draw it instead of asking the provider for a link card:
+      // a shared look renders as the look itself, with the maker's name and one
+      // button that puts it on (`LookEmbedAttachment`).
+      if (matchLookUrl(openGraphAttachment.url)) {
+        return (
+          <LookEmbedAttachment
+            key={openGraphAttachment.url}
+            url={openGraphAttachment.url}
+            by={cast.author?.username}
+            width={spaceWidth ?? width}
+            height={height}
           />
         );
       }

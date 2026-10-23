@@ -53,9 +53,13 @@ ssh_ "cat > $UNIT" <<'UNIT'
 # that page's og: tags and a 1200x630 card drawn for it, and serves the cards
 # and the cast-hash index under /unfurl/. nginx proxies to it on loopback only.
 #
-# It runs as its own unprivileged user with no writable filesystem (ProtectSystem
-# =strict), which is also why the card renderer is told PYTHONDONTWRITEBYTECODE:
-# a __pycache__ next to the script would be a write, and a write is refused.
+# It runs as its own unprivileged user with almost no writable filesystem
+# (ProtectSystem=strict), which is also why the card renderer is told
+# PYTHONDONTWRITEBYTECODE: a __pycache__ next to the script would be a write, and
+# a write is refused. The ONE place it may write is its state directory
+# (/var/lib/fiddy-looks), where a shared look is stored once under a hash of its
+# checked contents — systemd creates it, owns it as the service user and makes it
+# the exception to ProtectSystem.
 [Unit]
 Description=Fiddy per-page unfurl cards (cast and profile pages for crawlers)
 After=network-online.target
@@ -71,6 +75,7 @@ Environment=NODE_ENV=production
 Environment=PORT=3220
 Environment=FIDDY_WEB_ROOT=/var/www/fiddy.fun/current/web
 Environment=SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com
+Environment=FIDDY_LOOKS_DIR=/var/lib/fiddy-looks
 EnvironmentFile=/etc/fiddy-unfurl/unfurl.env
 Restart=on-failure
 RestartSec=3
@@ -78,6 +83,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+StateDirectory=fiddy-looks
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

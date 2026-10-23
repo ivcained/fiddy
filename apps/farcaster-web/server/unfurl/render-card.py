@@ -9,6 +9,8 @@ The payload is one JSON object on stdin:
      "displayName":"Dan Romero","alt":"…"}
     {"kind":"profile","fid":3,"username":"dwr","displayName":"Dan Romero",
      "bio":"…","alt":"…"}
+    {"kind":"look","id":"a1b2c3d4e5","name":"Mossy","palette":{"bg":"#…",
+     "accent":"#…"},"round":18,"borderWidth":1,"font":"rounded"}
 
 WHY THIS IS PYTHON AND NOT THE BROWSER
 
@@ -246,6 +248,129 @@ def draw_profile_card(payload, mascot_path):
     return card.image
 
 
+def draw_look_card(payload, mascot_path):
+    """A shared look, drawn IN THE LOOK'S OWN COLOURS.
+
+    This card is the one thing upstream's theme card cannot be: a picture of the
+    thing itself. The ground is the look's background, the panel its card, the
+    type its ink, the dot its accent — and the row of swatches is the palette a
+    reader can compare against the card they were sent.
+
+    The mascot still is deliberately NOT on this card. It is drawn for
+    #161715 with a chartreuse glow behind it (see `Card._glow`), and pasting
+    that onto a light look would put a dark ground's art on someone's cream
+    page — the one thing a card about a palette must not do. The palette is the
+    subject here, so the palette is what is drawn.
+    """
+    palette = payload.get("palette") or {}
+
+    def colour(key, fallback):
+        value = palette.get(key)
+        if isinstance(value, str) and len(value) == 7 and value.startswith("#"):
+            try:
+                return tuple(int(value[i : i + 2], 16) for i in (1, 3, 5))
+            except ValueError:
+                return fallback
+        return fallback
+
+    bg = colour("bg", BG)
+    card_colour = colour("card", (0x1D, 0x1E, 0x1C))
+    ink = colour("ink", INK)
+    muted = colour("muted", DIM)
+    accent = colour("accent", ACCENT)
+    line = colour("line", card_colour)
+    like = colour("like", accent)
+    recast = colour("recast", accent)
+
+    radius = max(0, min(int(payload.get("round") or 18), 40))
+    border = max(0, min(int(payload.get("borderWidth") or 1, ), 4))
+
+    image = Image.new("RGB", (WIDTH, HEIGHT), bg)
+    draw = ImageDraw.Draw(image)
+    bold = {
+        size: ImageFont.truetype(font_path("bold"), size) for size in (40, 62, 30)
+    }
+    regular = {
+        size: ImageFont.truetype(font_path("regular"), size) for size in (26, 30)
+    }
+
+    # The panel: a look's own card colour, its own corners, its own edges.
+    draw.rounded_rectangle(
+        [PAD_LEFT - 44, 62, WIDTH - 68, HEIGHT - 62],
+        radius=radius * 2,
+        fill=card_colour,
+        outline=line,
+        width=border,
+    )
+
+    draw.text((PAD_LEFT, 108), "fiddy", font=bold[40], fill=accent)
+    draw.text((PAD_LEFT + 132, 122), "· a look", font=regular[26], fill=muted)
+
+    name = payload.get("name") or "A look for Fiddy"
+    kept = keep_glyphs(" ".join(str(name).split())[:60])
+    lines = wrap_text(draw, kept, bold[62], TEXT_WIDTH + 220, 1)
+    draw.text((PAD_LEFT, 196), lines[0] if lines else kept, font=bold[62], fill=ink)
+
+    draw.text(
+        (PAD_LEFT, 292),
+        "colours, corners and type — put it on in one press",
+        font=regular[30],
+        fill=muted,
+    )
+
+    # The palette, as the object it is: one swatch per token a look carries.
+    swatch_y = HEIGHT - 214
+    swatch = 84
+    gap = 18
+    swatches = [
+        ("bg", bg),
+        ("card", card_colour),
+        ("ink", ink),
+        ("muted", muted),
+        ("accent", accent),
+        ("like", like),
+        ("recast", recast),
+        ("line", line),
+    ]
+    x = PAD_LEFT
+    for _token, colour_value in swatches:
+        draw.rounded_rectangle(
+            [x, swatch_y, x + swatch, swatch_y + swatch],
+            radius=max(6, radius),
+            fill=colour_value,
+            outline=muted,
+            width=1,
+        )
+        x += swatch + gap
+
+    draw.text(
+        (PAD_LEFT, HEIGHT - 96),
+        f"fiddy.fun/look/{payload.get('id', '')}",
+        font=regular[26],
+        fill=muted,
+    )
+    return image
+
+
+def wrap_text(draw, value, font, max_width, max_lines):
+    """The same greedy wrap the Card class uses, for the standalone card."""
+    words = value.split(" ") if value else []
+    lines = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if draw.textlength(candidate, font=font) <= max_width or not current:
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+        if len(lines) == max_lines:
+            break
+    if current and len(lines) < max_lines:
+        lines.append(current)
+    return lines
+
+
 def main():
     payload = json.load(sys.stdin)
     mascot_path = os.environ.get("FIDDY_MASCOT_PATH", "fiddy-mark-poster.png")
@@ -256,6 +381,8 @@ def main():
         image = draw_cast_card(payload, mascot_path)
     elif kind == "profile":
         image = draw_profile_card(payload, mascot_path)
+    elif kind == "look":
+        image = draw_look_card(payload, mascot_path)
     else:
         raise SystemExit(f"unknown card kind: {kind!r}")
     image.save(sys.stdout.buffer, format="PNG", optimize=True)

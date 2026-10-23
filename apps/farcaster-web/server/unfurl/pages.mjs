@@ -64,3 +64,40 @@ export const profilePage = ({ origin, fid, author }) => {
     },
   };
 };
+
+/**
+ * A LOOK someone shared (`/look/<id>`): the page a look's link is.
+ *
+ * The words come from the look itself and from whoever carried it — never from
+ * nothing. A look with no name is "A look for Fiddy" rather than an invented
+ * one, and the description says what the thing is good for (put it on), in the
+ * product's own voice: no "theme", no "hex", no "hash".
+ *
+ * `imageAlt` describes the card the host drew for this page, because the tag is
+ * a promise about a picture: this one is drawn in the look's OWN colours, which
+ * is the whole point of it.
+ */
+export const lookPage = ({ origin, id, look }) => {
+  const name =
+    typeof look?.name === 'string' && look.name.trim()
+      ? look.name.trim()
+      : undefined;
+  const title = name ? `${name} — a look for Fiddy` : 'A look for Fiddy';
+  const description =
+    'Colours, corners and type someone chose for Fiddy. Put it on in one press.';
+  return {
+    kind: 'look',
+    url: `${origin}/look/${id}`,
+    title: oneLine(title, 140),
+    description,
+    imageAlt: name
+      ? `A card in the look's own colours, reading \u201c${oneLine(name, 60)}\u201d.`
+      : "A card in the look's own colours.",
+    type: 'website',
+    card: {
+      kind: 'look',
+      id,
+      look,
+    },
+  };
+};
