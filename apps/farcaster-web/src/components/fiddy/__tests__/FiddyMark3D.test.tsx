@@ -14,7 +14,7 @@ const scene = vi.hoisted(() => ({
   mount: vi.fn(),
 }));
 
-vi.mock('~/components/fiddy/fiddyMarkScene', () => ({
+vi.mock('~/components/fiddy/fiddyModelScene', () => ({
   mountFiddyMark: scene.mount,
 }));
 

@@ -41,6 +41,13 @@
  * Voice: no infrastructure words on any of these screens. No node, no protocol,
  * no keys, no scopes. If a sentence needs one of those to be true, the sentence
  * is wrong.
+ *
+ * AND ONE MASCOT, IN TWO SIZES. The front door wears the real 3D Fiddy as its
+ * hero (`FiddyHeroStage variant="hero"`, turnable by hand); the name step wears
+ * the same model at 84px beside the field it is asking you to fill in, where it
+ * is alive but takes no pointer and cannot get between a thumb and the input.
+ * Both are the same three.js scene the chrome's mark uses — see
+ * `~/components/fiddy/FiddyHeroStage`.
  */
 
 import { KeyRound, MessageCircle, Plug, ShieldCheck } from 'lucide-react';
@@ -49,6 +56,7 @@ import { Navigate } from 'react-router-dom';
 
 import { CreateAccountSheet } from '~/components/fiddy/accounts/CreateAccountSheet';
 import { BrainSheet, brainSummary } from '~/components/fiddy/BrainSheet';
+import { FiddyHeroStage } from '~/components/fiddy/FiddyHeroStage';
 import { FiddySheet } from '~/components/fiddy/FiddySheet';
 import { TrialChat } from '~/components/fiddy/TrialChat';
 import { useFiddyBrandGround } from '~/components/fiddy/useFiddyBrand';
@@ -193,24 +201,27 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
             note="Fiddy's own brain is already picked, so you can go straight on — or pick a service you already pay for, or bring your own."
             titleRef={titleRef}
           >
-            <label className="fiddy-field">
-              <span className="fiddy-field-label">Your agent's name</span>
-              <input
-                className="fiddy-input"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={24}
-                placeholder={DEFAULT_AGENT_NAME}
-                value={draftName}
-                onChange={(event) => setDraftName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    commitSetup();
-                  }
-                }}
-              />
-            </label>
+            <div className="fiddy-form-row">
+              <FiddyHeroStage variant="form" />
+              <label className="fiddy-field">
+                <span className="fiddy-field-label">Your agent's name</span>
+                <input
+                  className="fiddy-input"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={24}
+                  placeholder={DEFAULT_AGENT_NAME}
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      commitSetup();
+                    }
+                  }}
+                />
+              </label>
+            </div>
 
             <BrainSheet />
           </FiddySheet>
@@ -322,7 +333,7 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
         return (
           <FiddySheet
             name="hi"
-            egg="hero"
+            model="hero"
             title="Meet Fiddy — your agent, living in your pocket."
             sub="Chat like you message a friend. Fiddy does the busywork, and asks before it acts."
             primary={{

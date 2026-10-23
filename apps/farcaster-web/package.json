@@ -117,7 +117,9 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,json}\" --config ../../.prettierrc.js --ignore-path ../../.prettierignore",
     "lint": "eslint --quiet --max-warnings 1080",
     "lint:fix": "eslint --fix --max-warnings 1080",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "render:hero-poster": "node scripts/render-hero-poster.mjs",
+    "verify:fiddy-hero": "node scripts/verify-fiddy-hero.mjs"
   },
   "browserslist": {
     "production": [

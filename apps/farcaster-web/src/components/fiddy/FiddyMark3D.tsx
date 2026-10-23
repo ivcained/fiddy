@@ -61,7 +61,7 @@ const FiddyMark3D = memo<FiddyMark3DProps>(({ size = FIDDY_MARK_SIZE }) => {
     // The `import()` is the whole point: three.js is a chunk of its own,
     // fetched here and never as part of the shell.
     const timer = window.setTimeout(() => {
-      void import('./fiddyMarkScene')
+      void import('./fiddyModelScene')
         .then(({ mountFiddyMark }) => {
           if (controller.signal.aborted || !host.current) {
             return undefined;
