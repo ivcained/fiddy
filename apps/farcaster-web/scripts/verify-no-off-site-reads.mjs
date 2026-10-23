@@ -33,6 +33,9 @@
 //
 //   - reads that went to the node the build was configured with, and to the page
 //     itself (those are the client working)
+//   - reads to `li.quest`, the wallet's keyless route and price API: it answers
+//     `access-control-allow-origin: *` (measured 2026-10-23) and carries no key,
+//     so it is a read the page is allowed to make
 //   - requests from a third-party frame's own document (Farcaster's wallet
 //     mini-app modal measures itself with its own key; that is inside their
 //     frame, not this page's doing)
@@ -89,6 +92,12 @@ const ALLOWED = [
   /fonts\.gstatic\.com/,
   /^https:\/\/relay\.farcaster\.xyz\//, // stubbed below, as the app's own sign-in
   /^https:\/\/farcaster\.xyz\//,
+  // The wallet's keyless route, price and transfer-status API
+  // (`utils/lifiWallet.ts`, `utils/lifiSwap.ts`). Third-party, but it answers
+  // `access-control-allow-origin: *` and needs no key, so nothing about it
+  // leaves the page unanswerable. Kept explicit so the audit names it instead of
+  // lumping it into "anything else it saw".
+  /^https:\/\/li\.quest\//,
   ...(NODE
     ? [new RegExp(`^${NODE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`)]
     : []),
