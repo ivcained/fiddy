@@ -1,9 +1,11 @@
 // The cards fiddy.fun draws with, rendered from the repo's own art.
 //
-//   node scripts/render-share-card.mjs            # the og card  -> public/fiddy-share-card.png
-//   node scripts/render-share-card.mjs embed      # the embed    -> public/fiddy-embed.png
-//   node scripts/render-share-card.mjs splash     # the splash   -> public/fiddy-splash.png
-//   node scripts/render-share-card.mjs all        # all three
+//   node scripts/render-share-card.mjs                 # the og card -> public/fiddy-share-card.png
+//   node scripts/render-share-card.mjs embed           # the embed   -> public/fiddy-embed.png
+//   node scripts/render-share-card.mjs splash          # the splash  -> public/fiddy-splash.png
+//   node scripts/render-share-card.mjs splash-deploy   # the Deploy a Node mini app's splash
+//                                                      #             -> ../../site/assets/fiddy-splash.png
+//   node scripts/render-share-card.mjs all             # every card
 //
 // Why this exists, and why it is a script rather than a checked-in drawing:
 //
@@ -55,6 +57,19 @@
 //     splash whose drawing is not centred, and `check-manifest.mjs` refuses to
 //     ship one.
 //
+//   * `splash-deploy` is the same 200x200 composition painted for the OTHER
+//     mini app this repo owns: "Deploy a Node" (`site/deploy/index.html`,
+//     launched from a cast as `/client/deploy/`), whose `splashImageUrl` is
+//     `/client/assets/fiddy-splash.png` — a file under `site/`, served by the
+//     microsite's own nginx location, NOT by the client release. What shipped
+//     there was 512x512, on a cream ground the page does not declare, its
+//     mark 28px right of centre (measured 2026-10-22, card t_5890479d) — and
+//     the drawing was not Fiddy at all: it was the SIBLING FSSC app's
+//     judge-baby, the same art leak card t_90a2eee2 found in the listing's
+//     icon and embed. So this variant exists to replace a borrowed watermark
+//     with Fiddy's own mark on Fiddy's own ground, at the size the spec asks,
+//     for the surface that had no way to notice any of it.
+//
 // It uses the Playwright Chromium this repo already installs for its probes, so
 // there is nothing extra to fetch, and it needs no network. The font stack is
 // the system sans the live mini app card was drawn with; the output is a
@@ -78,7 +93,17 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(here, '..');
+const repoRoot = path.resolve(webRoot, '..', '..');
 const mascotPath = path.join(webRoot, 'public', 'fiddy-mark-poster.png');
+
+/**
+ * The brand's ground, and the colour the page paints behind the splash — the
+ * client's manifest `splashBackgroundColor` and the Deploy mini app's
+ * `fc:miniapp.splashBackgroundColor` are both this, and both gates compare the
+ * picture's own ground against the declaration rather than trusting this
+ * constant.
+ */
+const GROUND = '#161715';
 
 /**
  * The three cards, in the poster language the brand already ships: the mascot on
@@ -134,6 +159,23 @@ const CARDS = {
   splash: {
     layout: 'splash',
     file: 'fiddy-splash.png',
+    outDir: path.join(webRoot, 'public'),
+    ground: GROUND,
+    width: 200,
+    height: 200,
+    mark: { size: 100 },
+  },
+  // The same composition for the other mini app this repo owns. It is a
+  // separate entry rather than a shared one because the two pictures live in
+  // two different trees, shipped by two different deploys: the client release
+  // carries `public/`, and the microsite deploy carries `site/`. Neither
+  // release touches the other's copy, and both are drawn from this one script
+  // so they cannot drift apart in art or in placement.
+  'splash-deploy': {
+    layout: 'splash',
+    file: 'fiddy-splash.png',
+    outDir: path.join(repoRoot, 'site', 'assets'),
+    ground: GROUND,
     width: 200,
     height: 200,
     mark: { size: 100 },
@@ -220,9 +262,6 @@ const card = (spec, mascotUrl) => `<!doctype html>
   </body>
 </html>`;
 
-/** The brand's ground, and the colour the manifest paints behind the splash. */
-const GROUND = '#161715';
-
 /**
  * Where the mark's box sits, as an inset from the left/top edge: the number that
  * centres a box of `spec.mark.size` in the canvas. It is asserted to be a whole
@@ -267,7 +306,7 @@ const splashCard = (spec) => `<!doctype html>
       html, body { width: ${spec.width}px; height: ${spec.height}px; overflow: hidden; }
       body {
         position: relative;
-        background: ${GROUND};
+        background: ${spec.ground};
       }
       .mark {
         position: absolute;
@@ -284,9 +323,9 @@ const splashCard = (spec) => `<!doctype html>
   </body>
 </html>`;
 
-// Which cards to draw: the first argument names one (`share`, `embed`, `splash`)
-// or says `all`. An unknown name lists what there is rather than drawing the
-// wrong card.
+// Which cards to draw: the first argument names one (`share`, `embed`, `splash`,
+// `splash-deploy`) or says `all`. An unknown name lists what there is rather
+// than drawing the wrong card.
 const requested = process.argv[2] ?? 'share';
 const names =
   requested === 'all'
@@ -307,25 +346,29 @@ const mascotUrl = `data:image/png;base64,${readFileSync(mascotPath).toString('ba
 // The drawing's box inside that still, measured over the ground the splash will
 // paint it on rather than assumed, with the SAME reader and the SAME rule the
 // release gate uses (`lib/png.mjs`) — so the crop this script takes and the
-// check the gate makes cannot disagree about where the drawing is.
-const markBox = visibleBox(decodePng(readFileSync(mascotPath)), {
-  ground: rgbOf(GROUND),
-});
-if (markBox === null) {
-  console.error(`REFUSING to draw: ${mascotPath} has no visible pixel in it`);
-  process.exit(1);
-}
+// check the gate makes cannot disagree about where the drawing is. The still is
+// decoded once and the box measured per card, because the measurement depends
+// on the ground the card paints.
+const mascotImage = decodePng(readFileSync(mascotPath));
+const markBoxFor = (spec) => {
+  const box = visibleBox(mascotImage, { ground: rgbOf(spec.ground) });
+  if (box === null) {
+    console.error(`REFUSING to draw: ${mascotPath} has no visible pixel in it`);
+    process.exit(1);
+  }
+  return box;
+};
 
 /**
  * Measure a splash the way the release gate does, and refuse to write one whose
- * drawing is not centred: the trade is that a bad render never lands in
- * `public/` at all, rather than landing there and being refused at release time.
- * Returns the measurement so the run can print what it drew.
+ * drawing is not centred: the trade is that a bad render never lands in the tree
+ * at all, rather than landing there and being refused at deploy time. Returns
+ * the measurement so the run can print what it drew.
  */
 const measureSplash = (png, spec) => {
   const image = decodePng(png);
   const ground = dominantColour(image);
-  const drawn = visibleBox(image, { ground: rgbOf(GROUND) });
+  const drawn = visibleBox(image, { ground: rgbOf(spec.ground) });
   if (drawn === null) throw new Error(`${spec.file} has no drawing in it`);
   const centre = boxCentre(drawn);
   const off = Math.max(
@@ -337,9 +380,9 @@ const measureSplash = (png, spec) => {
       `${spec.file} draws its mark centred at (${centre.x},${centre.y}) on a ${spec.width}x${spec.height} canvas whose centre is (${spec.width / 2},${spec.height / 2}) — ${off}px off, and the launch transition paints it exactly there`,
     );
   }
-  if (hex(ground) !== GROUND) {
+  if (hex(ground) !== spec.ground) {
     throw new Error(
-      `${spec.file} is drawn on ${hex(ground)}; the splash is painted on ${GROUND}, and the manifest and the shell both say so`,
+      `${spec.file} is drawn on ${hex(ground)}; this splash is painted on ${spec.ground}, and the page that launches it says so`,
     );
   }
   return { drawn, centre, ground: hex(ground) };
@@ -354,7 +397,7 @@ try {
   for (const name of names) {
     const spec = CARDS[name];
     const splash = spec.layout === 'splash';
-    const outPath = path.join(webRoot, 'public', spec.file);
+    const outPath = path.join(spec.outDir ?? path.join(webRoot, 'public'), spec.file);
     mkdirSync(path.dirname(outPath), { recursive: true });
     const page = await browser.newPage({
       viewport: { width: spec.width, height: spec.height },
@@ -395,7 +438,7 @@ try {
             );
           return canvas.toDataURL('image/png');
         },
-        { src: mascotUrl, crop: markBox },
+        { src: mascotUrl, crop: markBoxFor(spec) },
       );
       await page.evaluate((url) => {
         document.getElementById('mark').src = url;

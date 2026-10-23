@@ -289,7 +289,16 @@ third variant of the same generator (`node scripts/render-share-card.mjs splash`
 the mascot cropped to its own drawing, centred on `#161715` at half the square,
 the share the app icon gives its mark), and `check-manifest.mjs` decodes the PNG
 and refuses a splash whose drawing is not centred, so a cornered mark cannot ship
-silently again.
+silently again. The SAME three ways were then found on the *other* mini app this
+repo owns — "Deploy a Node" (`site/deploy/index.html`, launched as
+`/client/deploy/`), whose splash was 512×512, on cream, 28px off-centre and
+carrying the sibling FSSC app's judge-baby — and it is fixed the same way: a
+fourth variant (`node scripts/render-share-card.mjs splash-deploy`) draws it into
+`site/assets/fiddy-splash.png`, and that tree now has its own gate
+(`scripts/check-microsite-assets.mjs`, in CI and inside
+`scripts/deploy-microsite.sh`) instead of a hand-typed `ssh` pipe (card
+t_5890479d; docs/CLIENT-MICROSITE-HOSTING.md → *The splash*, *What holds the
+shape*).
 
 ## 8. Carded, not done
 

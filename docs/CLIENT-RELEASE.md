@@ -22,7 +22,7 @@ embed renders as and the provider the client reads through, neither of which the
 | `/snapchain-api/*` | the Snapchain node, relayed | nginx → `https://haatz.quilibrium.com` |
 | `/api/fiddy/media`, `/api/fiddy/media/<sha256>.<ext>` | our media host | nginx → `:3219` (`fiddy-auth`) |
 | `/api/farcaster/status`, `/api/farcaster/poidh/bounties` | the preview's read API | nginx → `:3218` (`fiddy-preview.service`) |
-| `/client`, `/client/`, `/FSSC/`, `/start` | unchanged | elsewhere, untouched |
+| `/client`, `/client/`, `/FSSC/`, `/start` | unchanged | elsewhere, untouched — **not** part of this release. `/client/` is deployed by `scripts/deploy-microsite.sh` into `/var/www/fiddy-client/`, gated by `scripts/check-microsite-assets.mjs` (docs/CLIENT-MICROSITE-HOSTING.md); it also hosts the "Deploy a Node" mini app whose `fc:miniapp` names `/client/assets/*` |
 | `/.well-known/farcaster.json` | the signed app-list manifest — Fiddy's listing identity (name, icon, description, splash, webhook) | nginx `alias /var/www/fiddy-well-known/farcaster.json`; the release installs it from `releases/<sha>/web/.well-known/farcaster.json`, i.e. from the repo's `apps/farcaster-web/public/.well-known/farcaster.json` |
 | `/fiddy-splash.png` | the 200×200 splash the manifest and the shell's `fc:miniapp` embed both paint | `releases/<sha>/web/fiddy-splash.png` (a file in this repo, drawn by `apps/farcaster-web/scripts/render-share-card.mjs`) |
 | `/fiddy-embed.png` | the 1200×800 (3:2) embed card the manifest's `imageUrl` and the shell's `fc:miniapp` tag both name | `releases/<sha>/web/fiddy-embed.png` (a file in this repo, drawn by `apps/farcaster-web/scripts/render-share-card.mjs`) |
@@ -510,6 +510,10 @@ and each says why:
   `script-src 'self' 'unsafe-inline'` in their own locations: their HTML carries
   an inline `<script>` and no inline handler. Different page, different CSP —
   tightening it means moving that script out, which is not the client's shell.
+  Its own tree has its own gate now (`scripts/check-microsite-assets.mjs`, run
+  over the frozen tree and over the served copy by
+  `scripts/deploy-microsite.sh`, and in CI as `microsite (site/)`), which is a
+  separate card's worth of work from the CSP: card t_5890479d.
 - ~~The client still makes a few hosted calls the public origin cannot serve~~
   **Closed by `f562e17`/`6313040`** (2026-10-21): `api.farcaster.xyz/v1/**` and
   `/v2/**` and `ph.neynar.com` are no longer asked at all by a page. Two halves:
