@@ -408,7 +408,7 @@ const defaultSleep = (ms: number): Promise<void> =>
 
 /** The sentence for "this device has no key it may sign with, yet". */
 export const NO_APP_KEY =
-  'This device has no key it may sign for you with yet, so nothing was signed and nothing was sent. Open Advanced → your setup and press “Issue app key” once; after that your likes, casts and follows are signed here rather than by a server.';
+  'This device has no key it may sign for you with yet, so nothing was signed and nothing was sent. Open Advanced → Your own setup and press “Issue app key” once; after that your likes, casts and follows are signed here rather than by a server.';
 
 /** The sentence for a write whose target's author this client has never seen. */
 export const UNKNOWN_CAST_AUTHOR =

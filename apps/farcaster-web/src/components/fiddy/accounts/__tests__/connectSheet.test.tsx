@@ -17,6 +17,7 @@ const connectStatus = vi.fn();
 const startConnect = vi.fn();
 const stopConnect = vi.fn();
 const rememberConnectStatus = vi.fn();
+const isServiceUnreachable = vi.fn();
 
 // jsdom has no canvas, and the QR is drawn on one: the code itself is a
 // library's business (it is the same component the sign-in modal already uses),
@@ -31,6 +32,9 @@ vi.mock('~/snapchain/accounts/managedConnect', () => ({
   stopConnect: (...args: unknown[]) => stopConnect(...args),
   rememberConnectStatus: (...args: unknown[]) => rememberConnectStatus(...args),
   forgetConnectAttempt: vi.fn(),
+  // Whether the failure was "nothing answered here" or "the service said no".
+  // A knob here, because the two cases are different screens.
+  isServiceUnreachable: (...args: unknown[]) => isServiceUnreachable(...args),
 }));
 
 /**
@@ -55,6 +59,10 @@ beforeEach(() => {
   connectStatus.mockReset();
   startConnect.mockReset();
   stopConnect.mockReset();
+  isServiceUnreachable.mockReset();
+  // Every other case here is a service that answered; the case that is not says
+  // so itself.
+  isServiceUnreachable.mockReturnValue(false);
   connectStatus.mockResolvedValue({
     state: 'none',
     approvalUrl: null,
@@ -158,6 +166,27 @@ describe('ConnectSheet', () => {
     ).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(screen.getByText(/Nothing changed in your account/i)).toBeTruthy();
+  });
+
+  it('carries the slow path when nothing answers at this address', async () => {
+    // The self-hosted case: `fiddy client up` serves the client from the
+    // reader's own machine, so Fiddy's service is not at that address at all.
+    // "Try again" alone there is a press loop; the screen has to name the one
+    // path that works on that box (the reader's own setup) and reach it.
+    startConnect.mockRejectedValue(new Error('no service at this address'));
+    isServiceUnreachable.mockReturnValue(true);
+
+    render(<ConnectSheet />);
+    await screen.findByRole('button', { name: 'Connect' });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+
+    await screen.findByText('That did not go through');
+    expect(
+      screen.getByRole('button', { name: 'Open your own setup' }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/does not have that at this address/i),
+    ).toBeTruthy();
   });
 
   it('shows the way back when the person turns the key off, and calls the service', async () => {

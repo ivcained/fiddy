@@ -43,6 +43,9 @@ vi.mock('~/snapchain/accounts/managedConnect', () => ({
   connectStatus: (...args: unknown[]) => connectStatus(...args),
   rememberConnectStatus: (...args: unknown[]) => rememberConnectStatus(...args),
   stopConnect: (...args: unknown[]) => stopConnect(...args),
+  // This card's own cases are a service that answered; the self-hosted case is
+  // asserted in the browser probe (`scripts/verify-first-cast-path.mjs`).
+  isServiceUnreachable: () => false,
 }));
 
 import { PostingKeyCard } from './PostingKeyCard';
@@ -92,6 +95,32 @@ describe('the posting key card', () => {
         document.querySelector('[data-fiddy="posting-key-sheet"]'),
       ).not.toBeNull(),
     );
+  });
+
+  it('names the app key this device can make when no service answers here', async () => {
+    // The self-hosted case (`fiddy client up`): the phone approval needs a
+    // service that is not at this address, and the app key below is the one
+    // thing that can post. The card must say so and open that control, not
+    // leave the reader with "post in your Farcaster app instead".
+    connectStatus.mockRejectedValue(new Error('no service at this address'));
+    const onUseOwnAppKey = vi.fn();
+    const onServiceUnreachable = vi.fn();
+    render(
+      <PostingKeyCard
+        fid={3}
+        onUseOwnAppKey={onUseOwnAppKey}
+        onServiceUnreachable={onServiceUnreachable}
+      />,
+    );
+
+    const offer = await screen.findByRole('button', {
+      name: 'Show the app key setup',
+    });
+    expect(screen.getByText(/device’s own app key/i)).toBeTruthy();
+    expect(onServiceUnreachable).toHaveBeenCalled();
+
+    fireEvent.click(offer);
+    expect(onUseOwnAppKey).toHaveBeenCalledTimes(1);
   });
 
   it('says what is true when an account is connected, and can turn it off', async () => {

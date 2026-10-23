@@ -110,6 +110,21 @@ const UNAVAILABLE_SENTENCE =
   "we couldn't reach the part of Fiddy that sets this up - nothing was connected.";
 
 /**
+ * Did the service fail to ANSWER, or did it answer and refuse?
+ *
+ * The difference decides whether a screen may offer the slow path. A refusal
+ * (`CONNECT_ORIGIN`, `CONNECT_DAILY_CEILING`, a name that is already taken) is
+ * the service talking, and the person can press again; a request that never
+ * reached anything — a network failure, or an address that serves no service at
+ * all, which is every self-hosted copy of Fiddy — means the one-tap approval
+ * cannot happen HERE, and the screen has to say what can.
+ */
+export const isServiceUnreachable = (error: unknown): boolean =>
+  error instanceof ConnectUnavailableError &&
+  (error.code === 'CONNECT_UNREACHABLE' ||
+    error.code === 'CONNECT_UNAVAILABLE');
+
+/**
  * The service's answer, read defensively. An unknown state, a missing field or
  * an answer that is not an object all come back as `unknown`; the one thing this
  * never does is guess "connected".
