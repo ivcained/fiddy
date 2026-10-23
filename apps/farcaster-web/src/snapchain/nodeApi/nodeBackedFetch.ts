@@ -54,6 +54,7 @@ import {
   type WriteEvidence,
   writeIntentFor,
 } from './nodeWrites';
+import { isPublicFeedKey, windowFromFeedType } from './publicFeedWindow';
 import {
   castAuthorOf,
   type CastCountsSink,
@@ -896,6 +897,23 @@ export const createNodeBackedFetch = ({
             limit?: number;
             updateState?: boolean;
           };
+          // The browse surfaces (`/feed`, `/explore`) ask with the public feed
+          // key, because the window a signed-out visitor reads is not anyone's
+          // follow graph: it is anchored on named public accounts and needs no
+          // session at all (`reads.ts`, `readPublicFeed`). Everything else is
+          // the viewer's own feed and does need one.
+          if (isPublicFeedKey(requestBody.feedKey)) {
+            const window = windowFromFeedType(requestBody.feedType);
+            return jsonResponse({
+              result: await reader.readPublicFeed({
+                kind: window.kind,
+                topic: window.topic,
+                ...(requestBody.olderThan !== undefined
+                  ? { olderThan: requestBody.olderThan }
+                  : {}),
+              }),
+            });
+          }
           const result = await reader.readFeed({
             feedKey: requestBody.feedKey ?? 'home',
             ...(requestBody.feedType ? { feedType: requestBody.feedType } : {}),

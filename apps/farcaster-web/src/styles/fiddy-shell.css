@@ -557,6 +557,38 @@ html.fiddy-dark-shell body {
   background: color-mix(in oklab, var(--fiddy-accent), #fff 12%);
 }
 
+/* The second loud action, for a screen that really has two ways forward: the
+   same weight as the primary (full width, 50px, 800) with a brand-ringed glass
+   face instead of the fill, so it is unmistakable without competing with the
+   one action the screen is about. Used by the front door's "Look around first",
+   which opens the public browse window with no account at all. */
+.fiddy-secondary-btn {
+  width: 100%;
+  height: 50px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--fiddy-glass), #fff 4%);
+  border: 1.5px solid color-mix(in oklab, var(--fiddy-accent), transparent 45%);
+  color: var(--fiddy-ink);
+  font-weight: 800;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.fiddy-secondary-btn:hover {
+  border-color: var(--fiddy-accent);
+  background: color-mix(in oklab, var(--fiddy-glass), #fff 9%);
+}
+
+.fiddy-secondary-btn:disabled {
+  opacity: 0.5;
+}
+
 /* The action that has just become the point of the screen: the waiting quiet
    before it, then a ring, so it is unmistakably where to go — and it is only
    worn after something the visitor did, never on arrival. */
