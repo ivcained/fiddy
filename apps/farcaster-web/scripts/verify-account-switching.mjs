@@ -16,11 +16,14 @@
 // Two accounts are put on the device through the app's OWN storage modules
 // (`~/snapchain/accounts/localAccounts`, `~/snapchain/appKeyStorage`), imported
 // over the dev server — not by hand-writing IndexedDB, because the point is what
-// the app reads back, not whether this script can spell a localforage key. Then
-// the switch itself is done the way a person does it: the rail's entry, the
-// sheet, the "Sign in as …" button. Nothing here touches the chain, and no
-// account is created: account creation is measured by
-// `src/snapchain/accounts/__tests__` against a mocked chain and node.
+// the app reads back, not whether this script can spell a localforage key. The
+// book is emptied before they are seeded, because the sign-in this probe
+// performs through the app's own SIWF code now writes a row of its own for the
+// account it proved (`~/lib/farcasterAccount`), and this probe's subject is the
+// two accounts it means, not that one. Then the switch itself is done the way a
+// person does it: the rail's entry, the sheet, the "Sign in as …" button. Nothing
+// here touches the chain, and no account is created: account creation is
+// measured by `src/snapchain/accounts/__tests__` against a mocked chain and node.
 //
 // WHAT IT ASSERTS (per account, before and after the switch)
 //   1. the session: the FID the client's own auth token carries
@@ -248,7 +251,19 @@ const signIn = async (page) => {
   });
 };
 
-/** Put two accounts and their keys on the device, through the app's own store. */
+/**
+ * Put two accounts and their keys on the device, through the app's own store.
+ *
+ * The book is EMPTIED first, and that is a real step rather than tidying: the
+ * sign-in this probe performs to reach the rail goes through the app's own
+ * Sign-In-With-Farcaster code, which writes a row of its own for the account it
+ * proved (`~/lib/farcasterAccount`, keyed by the number — `farcaster:3` here).
+ * That row is the account the probe then seeds as A. This probe's subject is
+ * switching between two accounts this device holds, so it starts from the two it
+ * means and leaves the sign-in's own row out of the sheet it is measuring — the
+ * headline count below is "both accounts", and an extra row would make that a
+ * false statement about a client that is behaving correctly.
+ */
 const seedAccounts = async (page) =>
   page.evaluate(
     async ({ a, b, keyA, keyB }) => {
@@ -256,6 +271,8 @@ const seedAccounts = async (page) =>
         '/src/snapchain/accounts/localAccounts.ts'
       );
       const keys = await import('/src/snapchain/appKeyStorage.ts');
+
+      await accounts.clearLocalAccounts();
 
       await accounts.saveLocalAccount(a);
       await accounts.saveLocalAccount(b, { select: false });

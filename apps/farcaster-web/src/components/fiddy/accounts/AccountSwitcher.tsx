@@ -12,6 +12,16 @@
  * feed, draft or reaction can leak across accounts. What it does NOT do is move
  * anything between accounts — each account's key material is stored under its
  * own FID and is used for that FID only.
+ *
+ * THE THREE KINDS OF ROW, AND WHY EACH SAYS WHAT IT SAYS. An account made on
+ * this device has its words here and, once the network gave it a number, a
+ * posting key here — so its row can say "this device can post". A Google or X
+ * sign-up has neither, so its row says what is missing. A Farcaster sign-in (see
+ * `~/lib/farcasterAccount`) is the third kind: the account is the person's own
+ * and its key lives in their own Farcaster app, so the row names where the
+ * sign-in came from as well as whether this device can post for it — and
+ * forgetting it takes the row and nothing else, because nothing of theirs is
+ * stored here to lose.
  */
 
 import { KeyRound } from 'lucide-react';
@@ -21,6 +31,11 @@ import { FiddySheet } from '~/components/fiddy/FiddySheet';
 import { DefaultModalContainer } from '~/components/modals/DefaultModalContainer';
 import { Modal } from '~/components/modals/Modal';
 import { useAuth } from '~/contexts/AuthProvider';
+import {
+  farcasterSessionNote,
+  FORGET_FARCASTER_SESSION_PROMPT,
+  isFarcasterSession,
+} from '~/lib/farcasterAccount';
 import { postSignInLocation } from '~/lib/postSignInLanding';
 import {
   describeLocalAccount,
@@ -161,54 +176,68 @@ export const AccountSwitcherSheet = memo<AccountSwitcherSheetProps>(
                   </p>
                 ) : (
                   <ul className="fiddy-accounts" data-fiddy="account-list">
-                    {accounts.map((account) => (
-                      <li
-                        key={account.id}
-                        className={account.id === currentId ? 'current' : ''}
-                        data-fiddy-account={account.id}
-                      >
-                        <span className="fiddy-account-name">
-                          {describeLocalAccount(account)}
-                        </span>
-                        <span className="fiddy-account-note">
-                          {withKeys[account.id] ? (
-                            <>
-                              <KeyRound aria-hidden="true" size={12} /> this
-                              device can post
-                            </>
+                    {accounts.map((account) => {
+                      const canPost = Boolean(withKeys[account.id]);
+                      const session = isFarcasterSession(account);
+
+                      return (
+                        <li
+                          key={account.id}
+                          className={account.id === currentId ? 'current' : ''}
+                          data-fiddy-account={account.id}
+                        >
+                          <span className="fiddy-account-name">
+                            {describeLocalAccount(account)}
+                          </span>
+                          <span className="fiddy-account-note">
+                            {session ? (
+                              // A sign-in with the person's own Farcaster app:
+                              // where it came from is said on the row, because
+                              // nothing about this device explains it otherwise —
+                              // and whether this device can post for it follows,
+                              // in the same words every other row uses.
+                              farcasterSessionNote({ canPost })
+                            ) : canPost ? (
+                              <>
+                                <KeyRound aria-hidden="true" size={12} /> this
+                                device can post
+                              </>
+                            ) : (
+                              'no posting key on this device yet'
+                            )}
+                          </span>
+                          {account.id === currentId ? (
+                            <b data-fiddy="account-current">
+                              signing in as this one
+                            </b>
                           ) : (
-                            'no posting key on this device yet'
+                            <button
+                              type="button"
+                              className="fiddy-quiet-btn"
+                              disabled={busyId === account.id}
+                              onClick={() => void switchTo(account)}
+                            >
+                              {busyId === account.id
+                                ? 'Switching…'
+                                : `Sign in as ${describeLocalAccount(account)}`}
+                            </button>
                           )}
-                        </span>
-                        {account.id === currentId ? (
-                          <b data-fiddy="account-current">
-                            signing in as this one
-                          </b>
-                        ) : (
-                          <button
-                            type="button"
-                            className="fiddy-quiet-btn"
-                            disabled={busyId === account.id}
-                            onClick={() => void switchTo(account)}
-                          >
-                            {busyId === account.id
-                              ? 'Switching…'
-                              : `Sign in as ${describeLocalAccount(account)}`}
-                          </button>
-                        )}
-                        {account.id === currentId ? null : (
-                          <button
-                            type="button"
-                            className="fiddy-quiet-btn"
-                            onClick={() => void forget(account)}
-                          >
-                            {removing === account.id
-                              ? 'Really forget it? The words you saved are the only copy'
-                              : 'Forget on this device'}
-                          </button>
-                        )}
-                      </li>
-                    ))}
+                          {account.id === currentId ? null : (
+                            <button
+                              type="button"
+                              className="fiddy-quiet-btn"
+                              onClick={() => void forget(account)}
+                            >
+                              {removing === account.id
+                                ? session
+                                  ? FORGET_FARCASTER_SESSION_PROMPT
+                                  : 'Really forget it? The words you saved are the only copy'
+                                : 'Forget on this device'}
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
 

@@ -15,6 +15,7 @@ import { LoginQRCodeWithInstructions } from '~/components/login/LoginQRCodeWithI
 import { getOnboardingStateKey } from '~/constants/storage';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useAuth } from '~/contexts/AuthProvider';
+import { buildFarcasterSessionRecord } from '~/lib/farcasterAccount';
 import { postSignInLocation } from '~/lib/postSignInLanding';
 import {
   buildLocalAuthToken,
@@ -26,6 +27,7 @@ import {
   verifySiwfCompletion,
   watchSiwfChannel,
 } from '~/lib/siwfSession';
+import { saveLocalAccount } from '~/snapchain/accounts/localAccounts';
 import { logError } from '~/utils/logUtils';
 import { setItem } from '~/utils/storageUtils';
 
@@ -201,6 +203,23 @@ const LoginWithMobileContent: FC<LoginWithMobileContentProps> = memo(
           key: await getOnboardingStateKey(authToken.secret),
           value: onboardingState,
         });
+
+        // And the account book gets the row this session IS, selected, because
+        // that is now the true one: the client is signing in as this Farcaster
+        // account and no other. WITHOUT THIS the switcher kept listing the
+        // account this device had made — still marked current — while the
+        // session and the screen were the Farcaster one, so the two facts a
+        // person could see disagreed. MEASURED 2026-10-22, both widths; see
+        // `~/lib/farcasterAccount` for the shape and why it holds no address.
+        const record = buildFarcasterSessionRecord({
+          fid: completion.fid,
+          username: completion.username,
+          displayName: completion.displayName,
+        });
+
+        if (record) {
+          await saveLocalAccount(record, { select: true });
+        }
 
         await signIn({ authToken });
 

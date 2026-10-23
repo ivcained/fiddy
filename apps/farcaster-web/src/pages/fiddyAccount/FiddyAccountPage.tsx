@@ -21,6 +21,16 @@
  * wallet, which lives inside the sign-up provider rather than in this browser's
  * own key store. That wiring is its own piece of work (a separate card), so the
  * two routes offered here are the two that genuinely work today.
+ *
+ * THE THIRD SHAPE: AN ACCOUNT THAT IS ALREADY A FARCASTER ACCOUNT. A person who
+ * signs in with Farcaster from here is not on a screen that needs to say "no
+ * Farcaster account yet" — they arrived WITH one. So when the account this
+ * screen is showing is such a sign-in (`~/lib/farcasterAccount`), it says where
+ * the account came from and that this device holds no key for it, and it offers
+ * no backup step: there are no words here, and never were. The one thing it must
+ * not do is ask such an account to back anything up, or lose the ask that
+ * belongs to the social account still held beside it — see
+ * `~/components/fiddy/seedBackup`.
  */
 
 import { KeyRound, MessageCircle, ShieldCheck } from 'lucide-react';
@@ -35,6 +45,7 @@ import { LoginModal } from '~/components/modals/LoginModal';
 import { Page } from '~/components/page/Page';
 import { defaultRoute, routes } from '~/constants/routes';
 import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
+import { isFarcasterSession } from '~/lib/farcasterAccount';
 import { SOCIAL_PROVIDERS } from '~/lib/socialSignUp';
 import { useLocalAccounts } from '~/snapchain/accounts/session';
 
@@ -106,7 +117,16 @@ const FiddyAccountPage: FC = memo(() => {
   }
 
   const identityLabel =
-    current.email ?? (current.username ? `@${current.username}` : undefined);
+    current.email ??
+    (current.username ? `@${current.username}` : undefined) ??
+    (current.fid !== undefined ? `fid ${current.fid}` : undefined);
+
+  // A Farcaster sign-in on this screen: the person already IS the account, so
+  // the two things this screen exists to say ("this is the account this device
+  // holds" / "here is the Farcaster account it has not got yet") are both wrong
+  // for it. What it says instead is where the account came from, that this
+  // device holds no key for it, and the way on.
+  const session = isFarcasterSession(current);
 
   return (
     <Page className="fiddy-surface" meta={{ title: 'Fiddy — your account' }}>
@@ -116,19 +136,41 @@ const FiddyAccountPage: FC = memo(() => {
           egg="small"
           title={identityLabel ?? 'Your account is here.'}
           sub={
-            provider
-              ? `You signed up with ${provider.name}. That makes a real account on this device — a key pair held for you, with nothing to write down.`
-              : 'This account lives on this device, and the words that own it were written down when it was made.'
+            session
+              ? 'You signed in with your own Farcaster app. The key that owns this account stays there, so there is nothing on this device to write down.'
+              : provider
+                ? `You signed up with ${provider.name}. That makes a real account on this device — a key pair held for you, with nothing to write down.`
+                : 'This account lives on this device, and the words that own it were written down when it was made.'
           }
-          primary={{
-            label: 'I already have a Farcaster account — sign in with it',
-            onClick: () => setSigningIn(true),
-          }}
-          quiet={{
-            label: 'Make a Farcaster account here instead',
-            onClick: () => setCreating(true),
-          }}
-          note="Fiddy posts through Farcaster, so that is the one step left. Either way the account you just made stays on this device and shows up in your account list."
+          primary={
+            session
+              ? {
+                  label: 'Open Fiddy',
+                  onClick: () => {
+                    window.location.assign(defaultRoute.path);
+                  },
+                }
+              : {
+                  label: 'I already have a Farcaster account — sign in with it',
+                  onClick: () => setSigningIn(true),
+                }
+          }
+          quiet={
+            session
+              ? {
+                  label: 'Make an account on this device instead',
+                  onClick: () => setCreating(true),
+                }
+              : {
+                  label: 'Make a Farcaster account here instead',
+                  onClick: () => setCreating(true),
+                }
+          }
+          note={
+            session
+              ? 'Your Farcaster account stays yours: this device holds no posting key for it yet, and Fiddy asks before it posts anything.'
+              : 'Fiddy posts through Farcaster, so that is the one step left. Either way the account you just made stays on this device and shows up in your account list.'
+          }
         >
           <ul className="fiddy-summary">
             <li>
@@ -136,19 +178,26 @@ const FiddyAccountPage: FC = memo(() => {
               <span>
                 <b>{identityLabel ?? 'Held for you'}</b>
                 <small>
-                  {provider
-                    ? `your ${provider.name} sign-up`
-                    : 'the account this device made'}
+                  {session
+                    ? 'signed in with your own Farcaster app'
+                    : provider
+                      ? `your ${provider.name} sign-up`
+                      : 'the account this device made'}
                 </small>
               </span>
             </li>
             <li>
               <MessageCircle aria-hidden="true" />
               <span>
-                <b>No Farcaster account yet</b>
+                <b>
+                  {session
+                    ? `Farcaster account ${identityLabel ?? `fid ${current.fid}`}`
+                    : 'No Farcaster account yet'}
+                </b>
                 <small>
-                  posting, the feed and messages need one — that is the step
-                  above
+                  {session
+                    ? 'posting happens from your own Farcaster app until a key is granted to this device'
+                    : 'posting, the feed and messages need one — that is the step above'}
                 </small>
               </span>
             </li>
@@ -167,7 +216,21 @@ const FiddyAccountPage: FC = memo(() => {
             </li>
           </ul>
 
-          {current.walletCustody === 'privy' ? (
+          {session ? (
+            // Nothing to back up, and nothing to offer: this device never held
+            // the words that own this account, and the account's own key is in
+            // the person's Farcaster app. An ask here would be a nag with
+            // nothing behind it — so the screen says what is true and leaves the
+            // social account's own ask (stored under its own id, `~/lib/seedBackup`)
+            // exactly as it was for the account it is about.
+            <p
+              className="fiddy-sheet-note"
+              data-fiddy="account-nothing-to-back-up"
+            >
+              Nothing to write down here: this device never held the words that
+              own this Farcaster account.
+            </p>
+          ) : current.walletCustody === 'privy' ? (
             <SeedBackupNotice
               account={current}
               heldWordsSlot={

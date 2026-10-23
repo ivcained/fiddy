@@ -657,3 +657,118 @@ and the driver itself from the repo —
 `900b0921fc6e5e4a7fd4cbd198e7542ce1716c2a49bdc993e3a15002ce19fa39`, with its parity note
 beside it. Run it and it prints the whole run, including the revision and the served
 entry chunk's sha it measured.
+
+---
+
+## 8. A Farcaster sign-in joins the book (2026-10-23, `t_7fce3c1a`)
+
+Card `t_7fce3c1a`, branched from `origin/main` `a422778` and rebased onto `1223cca`
+before the PR as `t_7fce3c1a-siwf-account`. Every number in this section was measured
+on that branch in a real Chrome, against two dev servers, at 390 and 1440.
+
+### 8.1 What was wrong
+
+§1.2 is a book of the accounts this device holds. A completed
+Sign-In-With-Farcaster handshake was not one of them. `saveLocalAccount` had exactly
+two callers — the Google/X sign-up (`~/components/login/SocialSignUpPrivy`) and an
+account made here (`~/components/fiddy/accounts/CreateAccountSheet`) — and the SIWF
+path only called `signIn({ authToken })`.
+
+MEASURED 2026-10-22, `/welcome/account`, both widths: the handshake completes, the
+proof is kept (`sessionStorage['fiddy.siwf.proof']`, fid 3 / @dwr), the session is
+stored, the app leaves for the client — and the switcher lists ONE account, the
+social one, still marked current, while the session is the Farcaster one. Two facts a
+person could see, disagreeing with each other, and nothing on screen naming the
+account that had just signed in.
+
+### 8.2 The four decisions the card asked for
+
+**1. What a SIWF account IS in the book — a third, session-shaped row**
+(`~/lib/farcasterAccount`, mirroring `~/lib/socialAccount` for the privy case):
+
+| field | value | why |
+| --- | --- | --- |
+| `id` | `farcaster:3` | the number the handshake proved. Not an address, because there is no address here to key it by; not the handle, which the person can change. One number is one account, the same rule as one custody address is one account |
+| `fid`, `username`, `displayName` | what the handshake said | the row's name on screen, from the relay, never invented |
+| `phrase` | **absent** | this device wrote nothing down and holds nothing |
+| `custodyAddress` | **absent** | it is now an optional field in the book's own interface. The address that signed the handshake is the person's (custody or auth address, we cannot tell which without an RPC this client does not carry), and reading an address as "a wallet Fiddy holds for you" must not be something a sign-in can accidentally make true — `~/lib/fiddyAccountWallet` answers "no wallet" off its absence |
+| `signedInAt` | **absent** | that field means "a posting key for this device was last installed", and a sign-in installs nothing. A row that set it would arm the wrong sentence in the switcher |
+| `walletCustody` | `'farcaster-app'` | the marker the rest of the app reads (`WalletCustody` is now `'privy' \| 'farcaster-app'`), and what tells the seed-backup path never to ask this account for words |
+
+**2. It may be current, and after a sign-in it must be.** The client is signing in as
+that account; the book's selected row has to be the thing the client actually is.
+`~/components/login/LoginWithMobile` writes the row with `{ select: true }` after the
+onboarding state and before `signIn`, so the reload that follows cannot miss it. It is
+current and *selectable* — `signInAsLocalAccount` builds its session from the number
+and handle, so the switcher's "Sign in as @dwr" works for it (asserted by a unit test;
+a browser switch *to* a session row is not separately measured here, the browser run
+switches between two accounts made on the device) — while what it may NOT
+do is claim this device can post: the row says "no posting key on this device yet"
+until a posting key exists for that FID (`loadAppKey(fid)`, the same store the write
+path signs from). Selecting it is not a promise to publish.
+
+**3. The backup reminder: never asked for a session row, and the social account's own
+ask is untouched.** A Farcaster sign-in has nothing to write down and never had
+(`/welcome/account` now renders a plain sentence instead of `<SeedBackupNotice>` for
+it, and `SeedBackupNotice`'s reveal block handles a row with no address rather than
+printing an empty one). A reminder with nothing behind it is a nag, and recording an
+"asked just now" for an account nobody can act on would be noise exactly when the
+stored gap mattered. The Google/X account's own state stays under its own key
+(`fiddy:seed-backup:<wallet>`), read by the app's own rule whenever that account is on
+screen — `asksOnScreenThisPageLoad` is untouched, and the remount behaviour §D measures
+is unchanged.
+
+**4. The switcher's copy, in the app's own voice.** A session row says where the
+sign-in came from *and* whether this device can post, in the words every other row
+already uses:
+
+    signed in with your own Farcaster app, no posting key on this device yet
+    signed in with your own Farcaster app, and this device can post
+
+and its "Forget on this device" confirm says what it actually costs ("Your Farcaster
+account stays yours - this only removes it from this device") rather than borrowing the
+warning that belongs to an account whose words are here. Forgetting a session row also
+no longer calls `clearAppKey(fid)`: such a row never installed a key here, so a posting
+key this device was granted for that same number is not its to delete.
+
+### 8.3 What is measured, and where
+
+`apps/farcaster-web/scripts/verify-social-signup.mjs` — **67/67 checks, exit 0**, both
+widths (390 and 1440), two dev servers, the app's own code throughout (only the Privy
+SDK and the SIWF relay are stubbed). Stage E now reads:
+
+    PASS E2 390px: the switcher lists both accounts — the Farcaster session joined it — 0x8f3cf7ad23cd3cadbd9735aff958023239c6a063 | farcaster:3 (book: 0x8f3cf7ad23cd3cadbd9735aff958023239c6a063 | farcaster:3)
+    PASS E4 390px: exactly one account is the current one, and it is the Farcaster one — current=farcaster:3 (stored farcaster:3)
+    PASS E5 390px: and its row names the account, says where the sign-in came from, and what this device cannot do yet — row="@dwrsigned in with your own Farcaster app, no posting key on this device yetsigning in as this one"
+
+(1440px reads identically. The book is read through the app's own
+`~/snapchain/accounts/localAccounts` over the dev server, not by spelling a localforage
+key by hand, and the row text is what the switcher's own markup printed.)
+
+`apps/farcaster-web/scripts/verify-account-switching.mjs` — **18/18 checks, exit 0**.
+It went red on this branch for a real reason, and the reason is a fact about the client
+rather than about the probe: the sign-in that probe performs to reach the rail now
+leaves a row of its own (`farcaster:3`), so its seeding step saw three accounts where
+it means two — and it seeds the same account (fid 3, @dwr) as account A. The seeding
+step now empties the book first and says why in the probe; every assertion it makes
+about the two accounts is unchanged and passes.
+
+Unit tests, no network: `src/lib/__tests__/farcasterAccount.test.ts` (10) and
+`src/snapchain/accounts/__tests__/localAccounts.test.ts` (19, three of them new: a
+session row survives the round trip through storage, forgetting one leaves the FID's
+posting key alone, and it can be signed in as).
+
+Baseline, said out loud: `npx vitest run` for this app is 1817 passed / 104 failed, and
+those 104 are 6 wallet-related files failing at `localStorage.clear()` in this Node
+build. Verified pre-existing, not caused here: `src/utils/__tests__/walletActivity.test.ts`
+fails 7/7 on the same worktree with this branch's changes stashed. `tsc -p tsconfig.json
+--noEmit` reports 15 errors on this tree, all in the routing/lazy/constants files, none
+in a file this card touched, and the same set before it.
+
+### 8.4 Deliberately not done here
+
+A session row still grants no privileged access: the SIWF session is local-only
+(§`~/lib/siwfSession`), posting still needs a posting key granted for that FID, and
+nothing in this change mints one. The relay's `custody` field, when it arrives, is not
+stored — an address this client cannot verify with a signature is not evidence, and the
+row's subject is the number the handshake proved.
