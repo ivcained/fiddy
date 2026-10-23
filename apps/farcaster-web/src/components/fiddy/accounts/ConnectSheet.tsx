@@ -53,6 +53,7 @@ import {
   type ConnectStatus,
   connectStatus,
   forgetConnectAttempt,
+  isServiceUnreachable,
   rememberConnectStatus,
   startConnect,
   stopConnect,
@@ -78,7 +79,13 @@ type View =
   | { name: 'refused'; reason: ConnectRefusal; username: string | null }
   /** A connection this tab did not ask for, on a device nobody is signed in on. */
   | { name: 'elsewhere'; username: string | null }
-  | { name: 'problem'; message: string };
+  /**
+   * The request did not go through. `unreachable` says which kind of failure it
+   * was: nothing answered at this address (so the one-tap approval cannot happen
+   * HERE, and the screen has to offer what can) or the service answered and
+   * refused (so pressing again is the whole answer).
+   */
+  | { name: 'problem'; message: string; unreachable: boolean };
 
 export interface ConnectSheetProps {
   /** Called when the sheet is done — the page closes it, a modal dismisses it. */
@@ -230,7 +237,11 @@ export const ConnectSheet = memo<ConnectSheetProps>(
         if (!mounted.current) {
           return;
         }
-        setView({ name: 'problem', message: (error as Error).message });
+        setView({
+          name: 'problem',
+          message: (error as Error).message,
+          unreachable: isServiceUnreachable(error),
+        });
       } finally {
         if (mounted.current) {
           setWorking(false);
@@ -339,7 +350,11 @@ export const ConnectSheet = memo<ConnectSheetProps>(
         }
       } catch (error) {
         if (mounted.current) {
-          setView({ name: 'problem', message: (error as Error).message });
+          setView({
+            name: 'problem',
+            message: (error as Error).message,
+            unreachable: isServiceUnreachable(error),
+          });
         }
       } finally {
         if (mounted.current) {
@@ -379,7 +394,11 @@ export const ConnectSheet = memo<ConnectSheetProps>(
           window.location.replace(routes.homeFeed.path);
         } catch (error) {
           if (mounted.current) {
-            setView({ name: 'problem', message: (error as Error).message });
+            setView({
+              name: 'problem',
+              message: (error as Error).message,
+              unreachable: isServiceUnreachable(error),
+            });
           }
         } finally {
           if (mounted.current) {
@@ -565,6 +584,17 @@ export const ConnectSheet = memo<ConnectSheetProps>(
     }
 
     if (view.name === 'problem') {
+      /**
+       * When nothing answered at this address, the one-tap approval cannot
+       * happen HERE — which is every copy of Fiddy a person runs themselves
+       * (`fiddy client up`: the client is served by their own machine, and
+       * Fiddy's service is not at that address). Offering only "Try again"
+       * there is a dead end with a press loop in it, and the sentence the
+       * composer then shows ("press Issue app key") names a control the person
+       * has no way to reach from a full-screen sheet. So the failure screen
+       * carries the slow path itself: it closes what it was holding and walks
+       * them to their own setup, where the app key lives.
+       */
       return (
         <FiddySheet
           name="connect-problem"
@@ -576,8 +606,28 @@ export const ConnectSheet = memo<ConnectSheetProps>(
             onClick: () => void begin(),
             disabled: working,
           }}
+          secondary={
+            view.unreachable
+              ? {
+                  label: 'Open your own setup',
+                  testId: 'connect-own-setup',
+                  onClick: () => {
+                    onClose?.();
+                    // A full load rather than a router push: the sheet is a
+                    // full-screen overlay, and it is also mounted by tests that
+                    // have no router at all. `continueAs` above leaves the same
+                    // way for the same reason.
+                    window.location.replace(routes.settingsNode.path);
+                  },
+                }
+              : null
+          }
           quiet={{ label: 'Close', onClick: () => onClose?.() }}
-          note="Nothing changed in your account. You can keep reading Farcaster here, and post in your Farcaster app as usual."
+          note={
+            view.unreachable
+              ? 'Nothing changed in your account. The phone approval needs the part of Fiddy that sets it up, and this copy of Fiddy does not have that at this address. Your own setup can sign for you instead. You can also post in your Farcaster app as usual.'
+              : 'Nothing changed in your account. You can keep reading Farcaster here, and post in your Farcaster app as usual.'
+          }
         />
       );
     }

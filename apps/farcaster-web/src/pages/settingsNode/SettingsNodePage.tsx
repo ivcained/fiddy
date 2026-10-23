@@ -44,7 +44,7 @@ import {
   type NodeSigner,
   revokeAppKey,
 } from 'farcaster-node-client';
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { mnemonicToAccount } from 'viem/accounts';
 
 import { BorderedMainContent } from '~/components/BorderedMainContent';
@@ -128,6 +128,23 @@ const SettingsNodePage = memo(() => {
    * that is where it is revoked from.
    */
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  /**
+   * The one-tap approval has no service to talk to at this address when a person
+   * serves the client from their own machine (`fiddy client up`) — and on that
+   * box the app key below is the only thing that can post for them. So the
+   * screen opens that disclosure once, in that case, rather than hiding the one
+   * control that works. Once: after that the toggle is the reader's own, and
+   * nothing re-opens it under their hand.
+   */
+  const openedAppKeyForUnreachable = useRef(false);
+  const handleUseOwnAppKey = useCallback(() => setAdvancedOpen(true), []);
+  const handlePostingKeyUnreachable = useCallback(() => {
+    if (openedAppKeyForUnreachable.current) {
+      return;
+    }
+    openedAppKeyForUnreachable.current = true;
+    setAdvancedOpen(true);
+  }, []);
   const [signerState, setSignerState] = useState<{
     hasKey: boolean;
     gaslessSignerCount: number;
@@ -697,7 +714,11 @@ const SettingsNodePage = memo(() => {
             {/* Posting key: the primary way to let Fiddy post for you — one
                 tap in the reader's own Farcaster app, no fee and no passphrase.
                 Everything below it is the slower, developer-shaped path. */}
-            <PostingKeyCard fid={fid ?? undefined} />
+            <PostingKeyCard
+              fid={fid ?? undefined}
+              onUseOwnAppKey={handleUseOwnAppKey}
+              onServiceUnreachable={handlePostingKeyUnreachable}
+            />
 
             {/* App key: this device's own key, which is minted by signing the
                 approval with the account's own recovery phrase. That is why it

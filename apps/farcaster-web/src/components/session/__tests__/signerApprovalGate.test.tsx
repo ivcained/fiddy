@@ -48,6 +48,7 @@ vi.mock('~/snapchain/accounts/managedConnect', () => ({
   startConnect: (...args: unknown[]) => startConnect(...args),
   stopConnect: (...args: unknown[]) => stopConnect(...args),
   rememberConnectStatus: (...args: unknown[]) => rememberConnectStatus(...args),
+  isServiceUnreachable: () => false,
 }));
 
 import { SignerApprovalGate } from '~/components/session/SignerApprovalGate';
