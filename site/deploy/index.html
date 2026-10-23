@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Deploy your node — Fiddy</title>
-<meta name="description" content="One click to your own Farcaster read node on Google Cloud.">
+<meta name="description" content="One click to your own Farcaster node — reads and writes — on Google Cloud.">
+<meta property="og:title" content="Deploy your own Farcaster node — reads and writes">
+<meta property="og:description" content="One click to your own node on Google Cloud — or let Fiddy run it for you.">
 <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://fiddy.fun/client/assets/deploy-card.png","button":{"title":"Deploy my node","action":{"type":"launch_miniapp","name":"Deploy a Node","url":"https://fiddy.fun/client/deploy/","splashImageUrl":"https://fiddy.fun/client/assets/fiddy-splash.png","splashBackgroundColor":"#161715"}}}'>
-<meta property="og:title" content="Deploy your own Farcaster node — Fiddy">
-<meta property="og:description" content="One click to your own read node on Google Cloud — or let Fiddy run it for you.">
 <meta property="og:image" content="https://fiddy.fun/client/assets/deploy-card.png">
 <style>
 :root {
@@ -64,10 +64,9 @@ a { color: var(--lime); text-decoration: none; }
 <body>
 <div class="wrap">
   <div class="wordmark"><span class="dot"></span>fiddy · node deploy</div>
-  <h1>Your own Farcaster read node.<br>One click.</h1>
-  <p class="dim" style="margin-top:12px">Google Cloud, in your project, on your billing (~$350/mo while it runs — our own bill).
-  New to GCP? <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 free credit</a> makes it free to start —
-  set a reminder to delete the VM before the credit ends.
+  <h1>Your own Farcaster node.<br>Reads and writes. One click.</h1>
+  <p class="dim" style="margin-top:12px">Every Snapchain node now <strong>reads AND writes</strong> — your casts, follows and reactions
+  go through your own node and gossip to validators. "Read node" is just the historical name.
   Nothing custodial — the script runs where you can read it.</p>
 
   <div class="card">
@@ -114,7 +113,9 @@ git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/ovh-depl
     <div class="provider">
       <div class="phead"><strong>Google Cloud</strong><span class="price">~$350/mo · we tested this one · $300 free credit for new accounts</span></div>
       <p style="margin:10px 0 4px"><a class="btn" href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener">Open in Cloud Shell ↗</a></p>
-      <p class="dim prow" style="margin-top:8px">True one click: Cloud Shell opens pre-authenticated, the walkthrough runs itself. Set a reminder to delete the VM before the credit ends.</p>
+      <p class="dim prow" style="margin-top:8px">True one click, from right here: Cloud Shell opens pre-authenticated, the walkthrough runs itself.
+      ~$350/mo while it runs (our own bill) — <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 free credit</a>
+      makes it free to start. Set a reminder to delete the VM before the credit ends.</p>
     </div>
 
     <div class="provider">
