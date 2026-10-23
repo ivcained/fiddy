@@ -1,8 +1,8 @@
 {
- "measuredAt": "2026-10-22T08:52:00.000Z",
- "entryFile": "index-DoD_f06U.js",
- "entryBytes": 8032505,
- "totalBytes": 22876558,
- "chunks": 672,
- "note": "Recorded deliberately (card t_999e48fa) from the tree this change sits on, BEFORE its lazy-load work: origin/main (c4cf85d, the released line) + the parent card's three commits (first-cast probe, readAuthor, feed cache), built with HTTPS=false VITE_SNAPCHAIN_HTTP_URL=/snapchain-api. Around it: the parent's release 8b21867 measured 8,028,444 bytes, the release deployed when this card ran (377d7e0) measured 8,027,130, and this card's base tree built to 8,032,505. The guard's ceiling is +100 KB on the entry chunk; this card's change cuts it by 3.47 MB (faker's locale corpus and livekit-client leave the entry)."
+ "measuredAt": "2026-10-22T12:41:45.000Z",
+ "entryFile": "index-D4AkOXAs.js",
+ "entryBytes": 4562664,
+ "totalBytes": 11283078,
+ "chunks": 336,
+ "note": "The LAST RELEASED entry chunk, measured from the ORIGIN rather than from a build (card t_a5579dbc). The shell the origin serves (curl --resolve fiddy.fun:443:187.127.148.194 https://fiddy.fun/) names /assets/index-D4AkOXAs.js, and its 4,562,664 bytes are byte-identical at the edge and at the origin (sha256 100beaed118b22967455112f2a9b8a6ef45d978eea7def43ffdb3369d8738869), from the release /release.json names (2b620c3bec3119ac58ad8ae8cd8b5b9ce65ce98a). A build of that revision with the release env (VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com VITE_FIDDY_MEDIA_URL=https://fiddy.fun VITE_TOGETHER_API_URL='') reproduces the chunk byte-for-byte, which is why totalBytes/chunks below are that build's numbers; a dev build with a different VITE_SNAPCHAIN_HTTP_URL differs by a few dozen bytes, which is noise against a 100 KB ceiling. What this replaces was 8,032,505 bytes — the tree BEFORE t_999e48fa's cold-path work — so the guard's ceiling was tolerating a +3.47 MB regression, the exact size of the faker locale corpus and the livekit client the guard was written to catch (the marker checks caught them; this baseline never would have). The ceiling is deliberately unchanged: re-record THIS file when the released chunk moves, never widen the ceiling."
 }
