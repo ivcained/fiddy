@@ -663,8 +663,9 @@ entry chunk's sha it measured.
 ## 8. A Farcaster sign-in joins the book (2026-10-23, `t_7fce3c1a`)
 
 Card `t_7fce3c1a`, branched from `origin/main` `a422778` and rebased onto `1223cca`
-before the PR as `t_7fce3c1a-siwf-account`. Every number in this section was measured
-on that branch in a real Chrome, against two dev servers, at 390 and 1440.
+before the PR as `t_7fce3c1a-siwf-account` (PR ivcained/fiddy#49). Every number in this
+section was measured on that branch in a real Chrome, against two dev servers, at 390
+and 1440.
 
 ### 8.1 What was wrong
 
