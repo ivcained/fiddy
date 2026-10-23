@@ -767,10 +767,10 @@ Baseline, said out loud: `npx vitest run` for this app is 1817 passed / 104 fail
 those 104 are 6 wallet-related files failing at `localStorage.clear()` in this Node
 build. Verified pre-existing, not caused here: `src/utils/__tests__/walletActivity.test.ts`
 fails 7/7 on the same worktree with this branch's changes stashed. `tsc -p tsconfig.json
---noEmit` in this worktree reports 15 errors, all in the routing/lazy/constants files and
-none in a file this card touched; the same set is there with this branch stashed. (CI's
-own `typecheck (farcaster-web)` job passes on this head, so the local count is a fact
-about this worktree's install rather than about the branch.)
+--noEmit` in this worktree reports 15 errors, every one of them in the routing / lazy /
+constants files, and this branch's diff (`git show --stat` on `1e6c6c3`) touches no such
+file. CI's own `typecheck (farcaster-web)` job passes on this head, so the local count is
+a fact about this worktree's install rather than about the branch.
 
 ### 8.4 Deliberately not done here
 
