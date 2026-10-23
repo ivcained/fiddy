@@ -47,12 +47,18 @@
 //   3. the URL round-trips from a different client: 200, the content type the
 //      bytes really are, an immutable cache header, and served bytes whose
 //      sha256 is the name in the URL
-//   4. the composer rendered the photo, with no upload-failure copy
-//   5. the payload the composer handed to the adapter (the write that carries
+//   4. a picture with a see-through pixel keeps it: the opaque photo above comes
+//      back a JPEG (the control - PNG is chosen only when something IS
+//      see-through), while a sticker with a transparent border is stored as a
+//      PNG, and the bytes the URL serves are still see-through at the border
+//      and opaque in the middle, read back through a browser canvas rather than
+//      guessed from the content type
+//   5. the composer rendered the photo, with no upload-failure copy
+//   6. the payload the composer handed to the adapter (the write that carries
 //      the uploaded URL — the composer's own `POST /v2/draft-caststorms`, which
 //      is this device's state and is answered 200 from the local store) carries
 //      that URL as an embed
-//   6. nothing was posted to Farcaster from this probe (posting stays behind
+//   7. nothing was posted to Farcaster from this probe (posting stays behind
 //      the existing app-key flow). The submit itself is not this probe's
 //      subject: `scripts/verify-cast-submit.mjs` measures the whole compose →
 //      Cast path, including the refusal it ends at.
@@ -156,6 +162,44 @@ const writeTestPhoto = (file) => {
   ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 2; // truecolour
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', zlib.deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+  fs.writeFileSync(file, png);
+  return { file, bytes: png.length };
+};
+
+/** A real PNG with an alpha channel: the case that must not become a JPEG.
+ *
+ *  A sticker, not a photo — an 8px border that is fully see-through around an
+ *  opaque chartreuse middle, so "did anything fill the transparency with white"
+ *  is answered by the bytes themselves rather than by a content type. */
+const writeTransparentSticker = (file) => {
+  const width = 512;
+  const height = 384;
+  const border = 8;
+  const raw = Buffer.alloc((width * 4 + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * (width * 4 + 1);
+    raw[rowStart] = 0; // filter: none
+    for (let x = 0; x < width; x += 1) {
+      const at = rowStart + 1 + x * 4;
+      const seeThrough =
+        x < border || y < border || x >= width - border || y >= height - border;
+      raw[at] = 212;
+      raw[at + 1] = 255;
+      raw[at + 2] = 63;
+      raw[at + 3] = seeThrough ? 0 : 255;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // truecolour with alpha
   const png = Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     pngChunk('IHDR', ihdr),
@@ -563,7 +607,121 @@ const run = async () => {
     `cache-control=${fetched.headers()['cache-control']} nosniff=${fetched.headers()['x-content-type-options']}`,
   );
 
-  // ── 5. the composer embedded it ────────────────────────────────────────────
+  // ── 5. the see-through picture keeps its transparency ──────────────────────
+  //
+  // WHAT WENT WRONG: the re-encode drew every photo onto a canvas it had filled
+  // white first, and always encoded a JPEG — so a PNG or WebP with anything
+  // transparent in it (a sticker, a logo, a cut-out) came back an opaque JPEG
+  // with a white box baked behind it. The photo above is the control: nothing in
+  // it is see-through, so JPEG is the right answer for it and always was.
+  //
+  // The same composer picks a second file here, because the claim is about this
+  // pipeline and not about a module: the bytes have to survive the pick, the
+  // re-encode, the POST and the host's storage. The alpha is read back through a
+  // canvas in the page, which is the only way to answer "is it actually still
+  // see-through" rather than "does the host call it a PNG".
+  const sticker = writeTransparentSticker(
+    path.join(OUT, 'fiddy-see-through-sticker.png'),
+  );
+  const stickerUpload = page
+    .waitForResponse(
+      (response) =>
+        response.url().includes('/api/fiddy/media') &&
+        response.request().method() === 'POST',
+      { timeout: 45000 },
+    )
+    .catch(() => null);
+  let stickerStored = null;
+  try {
+    // The same dance the first pick used (Media button, then the dialog it
+    // opens), with the input as the fallback that pick already established.
+    const mediaButton = page.locator(`${MODAL_ROOT} button[title="Media"]`).first();
+    let pickedSticker = false;
+    if ((await mediaButton.count()) > 0) {
+      await mediaButton.waitFor({ state: 'visible', timeout: 30000 });
+      const chooser = page
+        .waitForEvent('filechooser', { timeout: 20000 })
+        .catch(() => null);
+      await mediaButton.click();
+      const dialog = await chooser;
+      if (dialog) {
+        await dialog.setFiles(sticker.file);
+        pickedSticker = true;
+      }
+    }
+    if (!pickedSticker) {
+      await fileInput.setInputFiles(sticker.file);
+    }
+    stickerStored = await stickerUpload;
+  } catch (error) {
+    check(
+      'the composer accepts a picked see-through picture',
+      false,
+      `picking the sticker threw: ${String(error).slice(0, 200)}`,
+    );
+  }
+  check(
+    'the composer accepts a picked see-through picture',
+    Boolean(stickerStored),
+    stickerStored
+      ? `${stickerStored.status()} ${stickerStored.request().url()}`
+      : 'no second POST to the media host within 45s of picking the sticker',
+  );
+
+  const stickerBody = stickerStored
+    ? await stickerStored.json().catch(() => ({}))
+    : {};
+  const stickerUrl = typeof stickerBody.url === 'string' ? stickerBody.url : '';
+  check(
+    'a photo with nothing see-through in it is still a JPEG',
+    uploadedBody.contentType === 'image/jpeg',
+    `the opaque photo above came back contentType=${uploadedBody.contentType} — PNG is chosen only when something IS see-through`,
+  );
+  check(
+    'the see-through picture is stored as a PNG, not an opaque JPEG',
+    stickerBody.contentType === 'image/png',
+    `contentType=${stickerBody.contentType} ext=${stickerBody.ext} bytes=${stickerBody.bytes} url=${stickerUrl || 'none'}`,
+  );
+
+  const stickerFetched = stickerUrl ? await ctx.request.get(stickerUrl) : null;
+  const stickerBytes = stickerFetched ? await stickerFetched.body() : Buffer.alloc(0);
+  let stickerAlpha = null;
+  if (stickerBytes.length > 0) {
+    try {
+      stickerAlpha = await page.evaluate(async (dataUrl) => {
+        const image = new Image();
+        image.src = dataUrl;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        context.drawImage(image, 0, 0);
+        const at = (x, y) => Array.from(context.getImageData(x, y, 1, 1).data);
+        return {
+          width: image.naturalWidth,
+          height: image.naturalHeight,
+          border: at(2, 2),
+          centre: at(
+            Math.floor(image.naturalWidth / 2),
+            Math.floor(image.naturalHeight / 2),
+          ),
+        };
+      }, `data:image/png;base64,${stickerBytes.toString('base64')}`);
+    } catch (error) {
+      stickerAlpha = { threw: String(error).slice(0, 200) };
+    }
+  }
+  check(
+    'the stored bytes are still see-through at the border and opaque in the middle',
+    Boolean(stickerAlpha?.border && stickerAlpha.border[3] === 0) &&
+      Boolean(stickerAlpha?.centre && stickerAlpha.centre[3] === 255),
+    stickerAlpha
+      ? `corner rgba=${JSON.stringify(stickerAlpha.border)} centre rgba=${JSON.stringify(stickerAlpha.centre)} (${stickerAlpha.width}x${stickerAlpha.height}, ${stickerBytes.length} bytes served)`
+      : `nothing was served at ${stickerUrl || 'no URL'} — transparency cannot be claimed`,
+  );
+
+  // ── 6. the composer embedded it ────────────────────────────────────────────
   const composer = await page.evaluate((root) => {
     const container = document.querySelector(root);
     const text = container ? container.innerText.replace(/\s+/g, ' ') : '';
@@ -599,7 +757,7 @@ const run = async () => {
     composer.text.slice(0, 200),
   );
 
-  // ── 6. the cast payload references it ──────────────────────────────────────
+  // ── 7. the cast payload references it ──────────────────────────────────────
   const editor = page.locator(`${MODAL_ROOT} [contenteditable="true"]`).first();
   await editor.click();
   await page.keyboard.type('a photo from our own media host');

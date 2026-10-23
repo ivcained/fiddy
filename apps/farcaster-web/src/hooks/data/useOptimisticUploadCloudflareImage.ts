@@ -205,13 +205,27 @@ const useOptimisticUploadCloudflareImage = () => {
       // composer's own optimistic media embeds paint it), so nothing looks
       // slower than it is: only the canonical URL waits.
       if (isOwnMediaUploadUrl(imageUploadUrl)) {
-        const finalFileToUpload =
-          file.type.indexOf('gif') === -1
-            ? await compressImage({ file })
-            : file;
-
+        // NO `compressImage` HERE, and that is the point of this branch.
+        //
+        // `compressImage` writes a JPEG — it draws the picture onto a fresh
+        // canvas and encodes `image/jpeg` — so a transparent PNG or WebP picked
+        // here reached our host with an opaque box baked behind every
+        // see-through pixel (MEASURED 2026-10-23 by scripts/verify-media-upload.mjs:
+        // a sticker with a transparent border came back
+        // `corner rgba=[0,2,0,255]`, a black box, on the dark feed). It also left
+        // the embed bounded by nothing: the re-encode in `uploadMedia` after it
+        // (see ~/snapchain/nodeApi/photoPrivacy) writes its own bytes anyway, so
+        // the ≤1MB target this loop aims at was never the size that shipped.
+        //
+        // The re-encode IS the size bound now, and it does the whole job: the
+        // long edge is capped at 2048px, every metadata block the camera wrote is
+        // gone, and the format is chosen from the pixels — PNG while anything in
+        // the picture is see-through, JPEG otherwise (upstream quilcast
+        // 92d1aeead4af, MIT). A see-through picture is bounded here by the host's
+        // own 25MB photo cap instead of a quality loop, because the alternative —
+        // quantising a logo into an opaque JPEG — is the defect itself.
         const uploaded = await uploadMedia({
-          file: finalFileToUpload,
+          file,
           uploadUrl: imageUploadUrl,
         });
 

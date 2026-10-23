@@ -1,9 +1,11 @@
 /**
  * What leaves the device inside a photo or a video.
  *
- * The photo tests prove the two halves that matter: that the picture really is
+ * The photo tests prove the three halves that matter: that the picture really is
  * decoded and re-encoded at a bounded size (so the metadata blocks are not in the
- * output at all), and that a browser which cannot do it still sends the file
+ * output at all), that a picture with anything see-through in it is written out
+ * as a PNG rather than an opaque JPEG with a white box baked behind its
+ * transparent pixels, and that a browser which cannot do it still sends the file
  * rather than failing the post.
  *
  * The video test builds a real container by hand — `ftyp`, a `moov` holding a
@@ -16,6 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   MAX_PHOTO_EDGE,
+  type PhotoEncoding,
   type ScrubEnvironment,
   scrubForUpload,
   scrubPhoto,
@@ -28,7 +31,11 @@ const bitmap = (width: number, height: number) => {
   return { width, height, close, _close: close };
 };
 
-const encoded = () => new Blob([new Uint8Array(64)], { type: 'image/jpeg' });
+const encoded = (type: PhotoEncoding = 'image/jpeg') =>
+  new Blob([new Uint8Array(64)], { type });
+
+/** A picture nothing can see through, which is what most photos are. */
+const opaque = async () => false;
 
 describe('photos', () => {
   it('decodes, scales to the long edge, and sends the re-encoded bytes', async () => {
@@ -36,6 +43,7 @@ describe('photos', () => {
     const encode = vi.fn(async () => encoded());
     const environment: ScrubEnvironment = {
       decode: vi.fn(async () => decoded),
+      scanAlpha: opaque,
       encode,
     };
 
@@ -45,8 +53,78 @@ describe('photos', () => {
     expect(result.changed).toBe(true);
     expect(result.file.type).toBe('image/jpeg');
     // 4000×3000 scaled to a 2048 long edge
-    expect(encode).toHaveBeenCalledWith(decoded, MAX_PHOTO_EDGE, 1536);
+    expect(encode).toHaveBeenCalledWith(
+      decoded,
+      MAX_PHOTO_EDGE,
+      1536,
+      'image/jpeg',
+    );
     expect(decoded._close).toHaveBeenCalled();
+  });
+
+  it('keeps a see-through picture see-through, by writing a PNG', async () => {
+    const decode = vi.fn(async () => bitmap(1000, 1000));
+    const encode = vi.fn(
+      async (_bitmap, _width, _height, type: PhotoEncoding) => encoded(type),
+    );
+
+    const file = new Blob([new Uint8Array(64)], { type: 'image/png' });
+    const result = await scrubPhoto({
+      file,
+      environment: { decode, scanAlpha: async () => true, encode },
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.file.type).toBe('image/png');
+    expect(encode).toHaveBeenCalledWith(
+      expect.anything(),
+      1000,
+      1000,
+      'image/png',
+    );
+  });
+
+  it('does not scan a JPEG, which has no alpha channel to find', async () => {
+    const scanAlpha = vi.fn(opaque);
+    const encode = vi.fn(async () => encoded());
+
+    await scrubPhoto({
+      file: new Blob([new Uint8Array(64)], { type: 'image/jpeg' }),
+      environment: {
+        decode: async () => bitmap(900, 900),
+        scanAlpha,
+        encode,
+      },
+    });
+
+    expect(scanAlpha).not.toHaveBeenCalled();
+    expect(encode).toHaveBeenCalledWith(
+      expect.anything(),
+      900,
+      900,
+      'image/jpeg',
+    );
+  });
+
+  it('treats a WebP like a PNG: scanned, and PNG out when it is see-through', async () => {
+    const encode = vi.fn(async () => encoded('image/png'));
+
+    const result = await scrubPhoto({
+      file: new Blob([new Uint8Array(64)], { type: 'image/webp' }),
+      environment: {
+        decode: async () => bitmap(300, 200),
+        scanAlpha: async () => true,
+        encode,
+      },
+    });
+
+    expect(result.file.type).toBe('image/png');
+    expect(encode).toHaveBeenCalledWith(
+      expect.anything(),
+      300,
+      200,
+      'image/png',
+    );
   });
 
   it('leaves a small photo at its own size', async () => {
@@ -55,10 +133,33 @@ describe('photos', () => {
 
     await scrubPhoto({
       file: new Blob([new Uint8Array(8)], { type: 'image/png' }),
-      environment: { decode, encode },
+      environment: { decode, scanAlpha: opaque, encode },
     });
 
-    expect(encode).toHaveBeenCalledWith(expect.anything(), 800, 600);
+    expect(encode).toHaveBeenCalledWith(
+      expect.anything(),
+      800,
+      600,
+      'image/jpeg',
+    );
+  });
+
+  it('sends a picture as it came when this browser cannot scan or encode it', async () => {
+    const file = new Blob([new Uint8Array(16)], { type: 'image/png' });
+
+    const result = await scrubPhoto({
+      file,
+      // No `scanAlpha`: a browser that cannot scan would have to guess whether
+      // to bake a white box, so it re-encodes nothing at all.
+      environment: {
+        decode: async () => bitmap(100, 100),
+        encode: async () => encoded(),
+      },
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.file).toBe(file);
+    expect(result.reason).toMatch(/cannot re-encode/);
   });
 
   it('sends the original when this browser cannot decode it', async () => {
@@ -70,6 +171,7 @@ describe('photos', () => {
         decode: async () => {
           throw new Error('unsupported');
         },
+        scanAlpha: opaque,
         encode: async () => encoded(),
       },
     });
@@ -86,6 +188,7 @@ describe('photos', () => {
       file,
       environment: {
         decode: async () => bitmap(100, 100),
+        scanAlpha: opaque,
         encode: async () => null,
       },
     });
@@ -201,7 +304,7 @@ describe('whatever the file is', () => {
 
     const photo = await scrubForUpload({
       file: new Blob([new Uint8Array(16)], { type: 'image/png' }),
-      environment: { decode, encode },
+      environment: { decode, scanAlpha: opaque, encode },
     });
 
     expect(photo.changed).toBe(true);
