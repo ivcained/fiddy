@@ -37,7 +37,7 @@ import { deleteItem, getItem, setItem } from '~/utils/storageUtils';
  */
 export const DEFAULT_AGENT_SERVICE_URL =
   (import.meta.env.VITE_AGENT_SERVICE_URL as string | undefined)?.trim() ||
-  'https://mate.legitclub.com';
+  'https://fiddy.fun';
 
 const SESSION_KEY = 'fiddy.agent.session';
 const REQUEST_TIMEOUT_MS = 150_000;
