@@ -17,6 +17,15 @@ This is command (0) of the three-command path:
 **CloudShell icon** (the `>_` in the top bar). Pick a region with capacity —
 `us-east-1` is the default and what this script assumes.
 
+> **New AWS account?** CloudShell refuses to start while AWS verifies the
+> account — "account verification is in progress… up to two days". Nothing
+> you click fixes it. Skip CloudShell: install the
+> [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+> on your own machine, run `aws configure` once (Access Key from
+> IAM → Users → Security credentials), and run the same command from step 2
+> in your local terminal. Works identically — CloudShell is only a
+> pre-authenticated convenience.
+
 ## 2. Run the deploy
 
 ```bash

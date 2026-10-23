@@ -88,6 +88,10 @@ bin/fiddy node up --local</span></pre>
       <p style="margin:10px 0 4px"><a class="btn" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener">Open AWS CloudShell ↗</a></p>
       <p class="dim prow">CloudShell opens pre-authenticated in your account. One line inside:</p>
       <pre class="pcmd"><span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span></pre>
+      <p class="dim prow" style="font-size:13px"><strong>New AWS account?</strong> CloudShell stays locked during account
+      verification (can take up to 2 days) — no retry helps. Same command works from your own terminal meanwhile:
+      install the <a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" target="_blank" rel="noopener">AWS CLI</a>,
+      run <code style="font-family:var(--mono)">aws configure</code> once, then paste the same line.</p>
       <p class="dim prow" style="font-size:13px"><strong>Why AWS is the default:</strong> Hetzner caps new accounts at 1024 GB of volume
       storage — a resize past that is refused with <code style="font-family:var(--mono)">resource_limit_exceeded</code>,
       which is not enough for an unmodified node restore. A brand-new Hetzner account cannot follow this tutorial
