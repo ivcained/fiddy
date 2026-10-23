@@ -59,6 +59,22 @@ const Router: React.FC = () => {
               />
             </Route>
             <Route element={isSignedIn ? <AuthedLayout /> : <UnauthedLayout />}>
+              {/* The public browse surface, at the two root paths a visitor
+                  types: `/feed` and `/explore`. Deliberately outside every
+                  sign-in gate in both directions: a visitor with no account
+                  reads it, and a signed-in reader can open the same page
+                  without leaving the shell. Both names are reserved
+                  (`reservedRouteNames.ts`), so these routes are what a bare
+                  `/feed` resolves to instead of the profile of whoever is
+                  called @feed. */}
+              <Route
+                path={routes.publicFeed.path}
+                element={<routes.publicFeed.Component />}
+              />
+              <Route
+                path={routes.publicExplore.path}
+                element={<routes.publicExplore.Component />}
+              />
               {/* Authed Routes */}
               <Route element={<AuthedRoutes />}>
                 <Route

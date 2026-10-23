@@ -43,6 +43,7 @@ import {
   ApiVerification,
 } from 'farcaster-client-data';
 import {
+  fetchCastsByFid,
   fetchFollowing,
   isMissingOnNode,
   isTerminalPageToken,
@@ -75,6 +76,19 @@ import {
   NodeCount,
   userMinimalFrom,
 } from './fromNode';
+import {
+  AUTHORS_PER_ANCHOR,
+  CASTS_PER_AUTHOR,
+  CASTS_PER_AUTHOR_PAGED,
+  channelKeyFromParentUrl,
+  MAX_WINDOW_AUTHORS,
+  mergeWindowMessages,
+  PUBLIC_WINDOW_ANCHORS,
+  PUBLIC_WINDOW_LIMIT,
+  type PublicFeedKind,
+  rankWindowByEngagement,
+  TRENDING_CANDIDATES,
+} from './publicFeedWindow';
 
 /** Raised when the node genuinely cannot answer a request the app made. */
 export class NodeCannotAnswerError extends Error {
@@ -367,6 +381,16 @@ export class NodeBackedReads {
     'Like' | 'Recast',
     Map<string, boolean>
   >();
+  /**
+   * handle → FID for the browse window's anchors, resolved through the node's
+   * own name resolution (`userNameProofByName`).
+   *
+   * A handle is a name the protocol resolves to whoever holds it today, and a
+   * name does not change hands mid-session, so one lookup per anchor per reader
+   * is enough — and a lookup that failed is not remembered as a fact
+   * (`undefined` never reaches this map).
+   */
+  private readonly anchorFidCache = new Map<string, number>();
 
   constructor({
     node,
@@ -1625,6 +1649,185 @@ export class NodeBackedReads {
       items: casts.map((cast) => apiCastFeedItemFromNode({ cast })),
       latestMainCastTimestamp: casts[0]?.timestamp ?? Date.now(),
     };
+  }
+
+  // ------------------------------------------------------- the public window
+
+  /**
+   * `POST /v2/feed-items` for a visitor with no account: the browse window.
+   *
+   * This is the ONE read in this class that does not call `requireFid`, on
+   * purpose. A node assembles the follow-graph feed from *someone's* link
+   * messages, and the someone does not have to be the person looking: the
+   * window is anchored on a handful of named public accounts
+   * (`publicFeedWindow.ts` says which, and why), so a visitor with no session
+   * reads the same two node endpoints the signed-in home feed is built from.
+   *
+   * `kind`:
+   *   `recent`   the window, newest first
+   *   `trending` the window ranked by the likes and recasts the node really
+   *              holds for those casts (see `rankWindowByEngagement`)
+   *
+   * `topic` narrows to one channel key. `olderThan` asks for the slice older
+   * than a timestamp, which is what the surface's "show more" passes.
+   *
+   * With no anchor resolvable this answers an EMPTY window rather than an
+   * invented one: a page that cannot read is a page with nothing in it, and the
+   * surface has an empty state for exactly that.
+   */
+  async readPublicFeed({
+    kind = 'recent',
+    topic = null,
+    olderThan,
+    limit = PUBLIC_WINDOW_LIMIT,
+  }: {
+    kind?: PublicFeedKind;
+    topic?: string | null;
+    olderThan?: number;
+    limit?: number;
+  }): Promise<ApiFeedItemsResult> {
+    const authors = await this.publicWindowAuthors();
+    if (authors.length === 0) {
+      return { items: [], latestMainCastTimestamp: Date.now() };
+    }
+
+    // Paging asks each author for a deeper slice and then drops everything at
+    // or above the timestamp the previous page ended at. A node pages an
+    // account's casts by token, not by timestamp, so a deeper slice is the only
+    // honest way to walk back through the window.
+    const perAuthor =
+      olderThan === undefined ? CASTS_PER_AUTHOR : CASTS_PER_AUTHOR_PAGED;
+
+    const perAuthorPages = await mapWithConcurrency(
+      authors,
+      RESOLVE_CONCURRENCY,
+      async (fid) => {
+        try {
+          return await fetchCastsByFid({
+            node: this.node,
+            fid,
+            limit: perAuthor,
+            pageSize: perAuthor,
+          });
+        } catch {
+          // One account that will not answer must not empty the window.
+          return [] as NodeMessage[];
+        }
+      },
+    );
+
+    const merged = mergeWindowMessages({
+      messages: perAuthorPages.flat(),
+      ...(olderThan !== undefined ? { olderThan } : {}),
+    });
+
+    // The topic filter runs before any cast is built: a window narrowed to one
+    // channel should not pay for the counts and embeds of casts it will not
+    // show.
+    const inTopic = merged.filter(
+      (message) =>
+        topic === null ||
+        channelKeyFromParentUrl(message.castAdd?.parentUrl) === topic,
+    );
+
+    // Ranking has to see more than the page it will return, and every candidate
+    // costs two count reads; `TRENDING_CANDIDATES` is where that is bounded.
+    const wanted = kind === 'trending' ? TRENDING_CANDIDATES : limit;
+    const candidates = inTopic.slice(0, wanted);
+    if (candidates.length === 0) {
+      return { items: [], latestMainCastTimestamp: Date.now() };
+    }
+
+    const casts = await this.buildCasts(candidates, {
+      withCounts: true,
+      // No viewer: this window is read for whoever is looking, and a signed-out
+      // visitor has no reaction log to fold in.
+      withViewer: false,
+    });
+    const ranked = kind === 'trending' ? rankWindowByEngagement(casts) : casts;
+    const page = ranked.slice(0, limit);
+
+    return {
+      items: page.map((cast) => apiCastFeedItemFromNode({ cast })),
+      // The newest cast of the WINDOW, not of the page: the feed layer pages by
+      // this timestamp, and a ranked page's first cast is the most engaged one,
+      // which can be far from the newest.
+      latestMainCastTimestamp:
+        candidates[0]?.timestampMs ?? page[0]?.timestamp ?? Date.now(),
+    };
+  }
+
+  /**
+   * The accounts a public window is read from: the newest follows of the named
+   * anchors, deduplicated and capped.
+   *
+   * One anchor that cannot be resolved or read contributes nothing and the rest
+   * of the window still answers — a browse surface must not go blank because a
+   * single name lookup failed.
+   */
+  private async publicWindowAuthors(): Promise<number[]> {
+    const followedLists = await mapWithConcurrency(
+      // Spread: the anchor list is `readonly` on purpose (it is a definition,
+      // not a working array) and the concurrency helper takes a mutable one.
+      [...PUBLIC_WINDOW_ANCHORS],
+      PUBLIC_WINDOW_ANCHORS.length,
+      async (name) => {
+        const fid = await this.anchorFid(name);
+        if (fid === undefined) {
+          return [] as number[];
+        }
+        try {
+          // Deeper than the number kept: the node's own link-type filter is
+          // applied to the page it returns, but a page can still carry other
+          // link types, and the follow links are what an author list means.
+          const following = await fetchFollowing({
+            node: this.node,
+            fid,
+            limit: AUTHORS_PER_ANCHOR * 3,
+            pageSize: AUTHORS_PER_ANCHOR * 3,
+            linkType: 'follow',
+          });
+          return following.slice(0, AUTHORS_PER_ANCHOR);
+        } catch {
+          return [] as number[];
+        }
+      },
+    );
+
+    const seen = new Set<number>();
+    const authors: number[] = [];
+    for (const list of followedLists) {
+      for (const fid of list) {
+        if (authors.length >= MAX_WINDOW_AUTHORS) {
+          return authors;
+        }
+        if (!seen.has(fid)) {
+          seen.add(fid);
+          authors.push(fid);
+        }
+      }
+    }
+    return authors;
+  }
+
+  /** An anchor's FID, resolved through the node's own name resolution. */
+  private async anchorFid(name: string): Promise<number | undefined> {
+    const cached = this.anchorFidCache.get(name);
+    if (cached !== undefined) {
+      return cached;
+    }
+    try {
+      const proof = (await this.node.userNameProofByName(name)) as
+        | { fid?: number }
+        | undefined;
+      if (!proof || typeof proof.fid !== 'number') {
+        return undefined;
+      }
+      this.anchorFidCache.set(name, proof.fid);
+      return proof.fid;
+    } catch {
+      return undefined;
+    }
   }
 
   // -------------------------------------------------------------- thread reads
