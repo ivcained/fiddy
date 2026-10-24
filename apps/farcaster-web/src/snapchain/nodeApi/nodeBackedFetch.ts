@@ -604,6 +604,14 @@ export const createNodeBackedFetch = ({
         // reader with no index reaches this.
         return hostedRefusal(route);
 
+      case 'market':
+        // A token's market is not a node's read at all: it comes from a public
+        // market index (`~/snapchain/providers/marketIndex`), and the provider
+        // seam answers it before any provider sees it. A node adapter reached
+        // with no seam above it refuses in the routing table's own words rather
+        // than claiming a reader is missing.
+        return hostedRefusal(route);
+
       case 'write': {
         // The write half of this seam: this device signs it and the node
         // carries it, then the node's own state is read back before the answer

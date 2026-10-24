@@ -142,6 +142,7 @@ export type ServeableRouteKind =
   | 'media'
   | 'catalog'
   | 'index'
+  | 'market'
   | 'hosted';
 
 /**
@@ -238,6 +239,14 @@ export const providerCanServe = ({
           ? 'A node keeps no index: this read is assembled by an indexer, so it cannot come from your node.'
           : `${provider.label} keeps no index for this read.`,
     };
+  }
+
+  // A token's market is no server in this catalog's read at all: it comes from a
+  // public market index that needs no key of anyone's, and the seam answers it
+  // before any provider sees it (`marketIndex.ts`). No provider's capability
+  // decides it, and this branch says so rather than implying one of them does.
+  if (kind === 'market') {
+    return { can: true };
   }
 
   if (provider.kind === 'neynar' && !NEYNAR_READ_PATHS.includes(path)) {

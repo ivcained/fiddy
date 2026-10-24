@@ -86,6 +86,7 @@ import {
   NEYNAR_BASE_URL,
   NEYNAR_NODE_BASE_URL,
 } from './catalog';
+import { answerTokenLinks } from './marketIndex';
 import {
   answerFromNeynar,
   fetchCastAuthorFromNeynar,
@@ -137,6 +138,14 @@ export interface ProviderBackedFetchOptions {
    * storage; injectable so a test can use a storage of its own.
    */
   drafts?: LocalDraftStore;
+  /**
+   * Where the public market index is asked for a ticker's market.
+   *
+   * Injectable so a test can stand in for it without a network, and so a build
+   * can point at another index without the routing table changing. It needs no
+   * key of anyone's, which is exactly why the route below is answered here.
+   */
+  marketIndexBaseUrl?: string;
   /**
    * Asked when a write arrives with no key to sign it, so the reader can approve
    * a posting key where they are instead of being sent to Advanced. Handed to
@@ -272,6 +281,7 @@ export const createProviderBackedFetch = ({
   requestLog: requestLogOption,
   getProviderOrder,
   drafts: draftsOption,
+  marketIndexBaseUrl,
   askForPostingKey,
   onWriteEvidence,
   onCountsRead,
@@ -638,6 +648,39 @@ export const createProviderBackedFetch = ({
     // today's feed: the bytes always go to our own host.
     if (route.kind === 'media') {
       const response = mediaUploadAnswer();
+      recordSelfAnswered(
+        requestLog,
+        parsed,
+        route,
+        response,
+        bodyPreviewOf(parsed),
+      );
+      return response;
+    }
+
+    // A token's market is neither a provider's read nor this device's own state:
+    // it belongs to a public market index that needs no key of anyone's, so it
+    // is answered before any provider sees it — the same way the media pipeline
+    // and this device's drafts are, and for the same reason.
+    //
+    // MEASURED (2026-10-24, this build's own Neynar key): no Farcaster server
+    // can answer this one at all — Neynar's fungible reads take contract
+    // addresses, never a ticker (`/v2/farcaster/fungibles/?fungibles=degen` →
+    // `400`) — while Dexscreener, which this client already reads a `$cashtag`'s
+    // price from, answers by symbol and by address with
+    // `access-control-allow-origin: *`. So the answer is the same whichever
+    // server is live, the reader's key is never involved, and the four surfaces
+    // that ask (`$TICKER` page, `/~/ca/<address>`, the composer's `$` typeahead,
+    // the profile's token picker) stop being shown a sentence about a reader
+    // nobody wrote. See `marketIndex.ts` for what it will and will not claim.
+    if (route.kind === 'market') {
+      const response = await answerTokenLinks({
+        searchParams: parsed.url.searchParams,
+        fetchImpl: boundFetch,
+        ...(marketIndexBaseUrl === undefined
+          ? {}
+          : { baseUrl: marketIndexBaseUrl }),
+      });
       recordSelfAnswered(
         requestLog,
         parsed,
