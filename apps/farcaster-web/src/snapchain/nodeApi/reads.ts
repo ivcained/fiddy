@@ -29,6 +29,7 @@
 import {
   ApiBlockedUser,
   ApiCast,
+  ApiCastClient,
   ApiCastReaction,
   ApiFeedItemsResult,
   ApiGetUnseen200Response,
@@ -43,10 +44,16 @@ import {
   ApiVerification,
 } from 'farcaster-client-data';
 import {
+  CastClientResolver,
+  type ClientFilterPolicy,
+  type ClientIdentity,
+  createAppClientNameLookup,
   fetchCastsByFid,
   fetchFollowing,
+  filterCastsByClient,
   isMissingOnNode,
   isTerminalPageToken,
+  type KnownClientsSource,
   mapWithConcurrency,
   type NodeCastAddBody,
   type NodeMessage,
@@ -67,6 +74,7 @@ import {
   type EmbedKindResolver,
 } from './embedKinds';
 import {
+  apiCastClientFromIdentity,
   apiCastFeedItemFromNode,
   apiCastFromNode,
   apiUserFromNode,
@@ -253,6 +261,19 @@ export interface NodeBackedReadsOptions {
    * to answer `undefined` rather than reaching for one.
    */
   resolveCastAuthor?: (hash: string) => Promise<number | undefined>;
+  /**
+   * The app FID of this client (Fiddy's own app key). A cast signed by a key it
+   * requested reads "via Fiddy" rather than as an anonymous app FID.
+   */
+  thisAppFid?: number;
+  /** The reader's own names for other apps, keyed by app FID (or a live getter). */
+  knownClients?: KnownClientsSource;
+  /**
+   * The reader's include/exclude policy, read at page time so a change takes
+   * effect on the next page. Absent means "show everything" — which is what a
+   * signed-out read gets, since the policy is stored per account.
+   */
+  clientFilter?: () => ClientFilterPolicy | undefined;
 }
 
 interface CacheEntry<T> {
@@ -345,6 +366,15 @@ export class NodeBackedReads {
   private readonly countCap: number;
   private readonly embedKinds: EmbedKindResolver;
   private readonly embedCards: EmbedCardResolver;
+  /**
+   * Which app made each cast, resolved from the node's signer records and each
+   * app account's own profile (`farcaster-node-client`'s `clientAttribution`).
+   * One instance per reader: its caches are what make a page of 25 casts cost
+   * one read per distinct signing key rather than one per cast.
+   */
+  private readonly clients: CastClientResolver;
+  /** The reader's include/exclude policy for FEED pages, or undefined. */
+  private readonly clientFilter?: () => ClientFilterPolicy | undefined;
 
   /** The author index for a hash this reader has never served. */
   private readonly resolveCastAuthor: (
@@ -401,6 +431,9 @@ export class NodeBackedReads {
     embedKinds = createEmbedKindResolver(),
     embedCards,
     resolveCastAuthor,
+    thisAppFid,
+    knownClients,
+    clientFilter,
   }: NodeBackedReadsOptions) {
     this.node = node;
     this.nodeBaseUrl = nodeBaseUrl.replace(/\/$/, '');
@@ -416,6 +449,15 @@ export class NodeBackedReads {
     this.resolveCastAuthor =
       resolveCastAuthor ??
       ((hash: string) => fetchCastAuthorFromOrigin({ hash, fetchImpl }));
+    this.clients = new CastClientResolver({
+      node,
+      ...(thisAppFid === undefined ? {} : { thisAppFid }),
+      ...(knownClients ? { knownClients } : {}),
+      // Names are the app accounts' own profiles, read from the node and cached
+      // hard — an app's name changes on the order of never.
+      names: createAppClientNameLookup({ node }),
+    });
+    this.clientFilter = clientFilter;
   }
 
   /**
@@ -952,6 +994,44 @@ export class NodeBackedReads {
 
   // ---------------------------------------------------------------- cast reads
 
+  /**
+   * Which app made each message, keyed by lowercased signer hex.
+   *
+   * One batched pass per page: the resolver caches per signing key, so a page of
+   * 25 casts from 20 keys costs 20 signer reads, and the app names cost one read
+   * per distinct app however many casts that app signed.
+   */
+  private async resolvePageClients(
+    messages: NodeMessage[],
+  ): Promise<Map<string, ClientIdentity>> {
+    return this.clients.resolveAll(
+      messages.map((message) => ({
+        fid: message.fid,
+        signer: message.signer,
+      })),
+    );
+  }
+
+  /**
+   * The reader's client filter, applied to a FEED page's messages before any
+   * cast is built for them: a cast that will not be shown should not pay for its
+   * counts or its embeds.
+   *
+   * Feeds only. A conversation and a profile stay whole — hiding one side of a
+   * reply thread because of the app it was posted from would make the thread
+   * unreadable rather than quieter.
+   */
+  private filterFeedMessages(
+    messages: NodeMessage[],
+    clients: Map<string, ClientIdentity>,
+  ): NodeMessage[] {
+    const policy = this.clientFilter?.();
+    if (!policy || policy.mode === 'all' || policy.clientIds.length === 0) {
+      return messages;
+    }
+    return filterCastsByClient({ messages, clients, policy });
+  }
+
   private rememberCasts(messages: NodeMessage[]): void {
     for (const message of messages) {
       if (message.castAdd) {
@@ -1283,6 +1363,7 @@ export class NodeBackedReads {
     withCounts = true,
     embedsAsked = false,
     mentionUsers,
+    client,
   }: {
     message: NodeMessage;
     likedHashes?: Set<string>;
@@ -1305,6 +1386,12 @@ export class NodeBackedReads {
      * mentions instead, so no path renders bare placeholders.
      */
     mentionUsers?: Map<number, ApiUser>;
+    /**
+     * Which app made this cast. A page resolves these in one batched pass
+     * (`buildCasts`); a cast built on its own resolves its own, because a label
+     * that arrives a page later is a label nobody sees.
+     */
+    client?: ApiCastClient;
   }): Promise<ApiCast | undefined> {
     const body = message.castAdd;
     if (!body) {
@@ -1324,28 +1411,44 @@ export class NodeBackedReads {
         ? Promise.resolve(mentionUsers)
         : this.resolveMentionUsers(body.mentions);
 
-    const [author, reactions, recasts, mentioned] = await Promise.all([
-      this.readAuthor(message.fid),
-      // No count read at all when the caller does not want one: `undefined` is
-      // how "not read" travels to `apiCastFromNode`, which then leaves the
-      // fields off the cast entirely. `exactCount(0)` used to be written here,
-      // and a page built that way claimed every cast had no likes.
-      withCounts
-        ? this.countReactions({
-            targetFid: message.fid,
-            targetHash: message.hash,
-            reactionType: 'Like',
-          })
-        : Promise.resolve(undefined),
-      withCounts
-        ? this.countReactions({
-            targetFid: message.fid,
-            targetHash: message.hash,
-            reactionType: 'Recast',
-          })
-        : Promise.resolve(undefined),
-      mentionUsersPromise,
-    ]);
+    const [author, reactions, recasts, mentioned, resolvedClient] =
+      await Promise.all([
+        this.readAuthor(message.fid),
+        // No count read at all when the caller does not want one: `undefined` is
+        // how "not read" travels to `apiCastFromNode`, which then leaves the
+        // fields off the cast entirely. `exactCount(0)` used to be written here,
+        // and a page built that way claimed every cast had no likes.
+        withCounts
+          ? this.countReactions({
+              targetFid: message.fid,
+              targetHash: message.hash,
+              reactionType: 'Like',
+            })
+          : Promise.resolve(undefined),
+        withCounts
+          ? this.countReactions({
+              targetFid: message.fid,
+              targetHash: message.hash,
+              reactionType: 'Recast',
+            })
+          : Promise.resolve(undefined),
+        mentionUsersPromise,
+        // Which app made this cast. A page hands its batched answer in; a cast
+        // built on its own (a thread root by hash, the reply a notification names,
+        // the cast a write just stored) resolves its own from the same cache, so a
+        // label never arrives a page later than the cast does.
+        client !== undefined
+          ? Promise.resolve(client)
+          : this.resolvePageClients([message]).then((clients) => {
+              const identity = clients.get(message.signer.toLowerCase());
+              return identity
+                ? apiCastClientFromIdentity({
+                    identity,
+                    authorFid: message.fid,
+                  })
+                : undefined;
+            }),
+      ]);
 
     // Quoted casts are resolved for real (they address their parent), so a
     // quote renders as a quote rather than an empty box.
@@ -1391,6 +1494,7 @@ export class NodeBackedReads {
       embedKind: this.embedKindLookup,
       cardOf: this.cardLookup,
       mentionUsers: mentioned,
+      ...(resolvedClient ? { client: resolvedClient } : {}),
       ...(viewerContext && Object.keys(viewerContext).length > 0
         ? { viewerContext }
         : {}),
@@ -1423,36 +1527,50 @@ export class NodeBackedReads {
     // logs only STARTED at 12.6s and each took 5.3s — and the first cast painted
     // at 17.4s. Nothing below depends on the others, so they run at once and the
     // wait is the slowest of the three, not their sum.
-    const [mentionUsers, [likedHashes, recastHashes]] = await Promise.all([
-      this.resolveMentionUsers(NodeBackedReads.mentionedFidsOf(messages)),
-      withViewer
-        ? Promise.all([
-            this.viewerReactionHashes('Like'),
-            this.viewerReactionHashes('Recast'),
-          ])
-        : Promise.resolve([undefined, undefined] as [
-            Set<string> | undefined,
-            Set<string> | undefined,
-          ]),
-      // The page's embed URLs are asked about together, before any cast is built:
-      // a photo is drawn as a photo on the first paint rather than after a
-      // reload, and a link's own title, picture and mini-app card are in hand
-      // before the card is drawn (`preparedEmbeds`).
-      this.classifyEmbeds(messages),
-    ]);
+    const [mentionUsers, [likedHashes, recastHashes], , pageClients] =
+      await Promise.all([
+        this.resolveMentionUsers(NodeBackedReads.mentionedFidsOf(messages)),
+        withViewer
+          ? Promise.all([
+              this.viewerReactionHashes('Like'),
+              this.viewerReactionHashes('Recast'),
+            ])
+          : Promise.resolve([undefined, undefined] as [
+              Set<string> | undefined,
+              Set<string> | undefined,
+            ]),
+        // The page's embed URLs are asked about together, before any cast is
+        // built: a photo is drawn as a photo on the first paint rather than
+        // after a reload, and a link's own title, picture and mini-app card are
+        // in hand before the card is drawn (`preparedEmbeds`).
+        this.classifyEmbeds(messages),
+        // ...and so is which app made each cast: one signer read per distinct
+        // signing key for the whole page, so the label is on the first paint.
+        this.resolvePageClients(messages),
+      ]);
 
     const casts = await mapWithConcurrency(
       messages,
       RESOLVE_CONCURRENCY,
-      (message) =>
-        this.buildCast({
+      (message) => {
+        const identity = pageClients.get(message.signer.toLowerCase());
+        return this.buildCast({
           message,
           likedHashes,
           recastHashes,
           withCounts,
           embedsAsked: true,
           mentionUsers,
-        }),
+          ...(identity
+            ? {
+                client: apiCastClientFromIdentity({
+                  identity,
+                  authorFid: message.fid,
+                }),
+              }
+            : {}),
+        });
+      },
     );
 
     return casts.filter((cast): cast is ApiCast => cast !== undefined);
@@ -1615,7 +1733,7 @@ export class NodeBackedReads {
       );
     }
 
-    const messages =
+    const readMessages =
       isHome || isFollowing
         ? await this.followingFeedMessages({
             fid,
@@ -1624,6 +1742,15 @@ export class NodeBackedReads {
             includeSelf: isHome,
           })
         : await this.channelFeedMessages({ key: feedKey, olderThan, limit });
+
+    // The reader's client filter runs here, on the page's messages, before any
+    // cast is built for them: a cast that will be hidden should not pay for its
+    // counts, its embeds or its mentions. This is the ONE place a feed is
+    // narrowed — a conversation and a profile stay whole on purpose.
+    const messages = this.filterFeedMessages(
+      readMessages,
+      await this.resolvePageClients(readMessages),
+    );
 
     const casts = await this.buildCasts(messages, {
       withCounts: onCounts === undefined,

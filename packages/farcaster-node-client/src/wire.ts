@@ -439,6 +439,21 @@ export const decodeInfo = (value: unknown): NodeInfo => {
 
 export const decodeSigner = (value: unknown): NodeSigner => {
   const json = asJson(value);
+  // The signed-key-request metadata lives in a different place in every shape
+  // the node has used for a signer record: on the message body, inside the
+  // on-chain event's signer event body, or at the top level for a gasless key.
+  // All three are read, because which one a cast's client can be resolved from
+  // depends on which one carries it.
+  const onChainSignerBody = asJson(asJson(json.onChainEvent).signerEventBody);
+  const messageBody = asJson(json.signerMessageBody);
+  const metadata =
+    asOptionalString(json.metadata) ??
+    asOptionalString(onChainSignerBody.metadata) ??
+    asOptionalString(messageBody.metadata);
+  const metadataType =
+    asOptionalNumber(json.metadataType) ??
+    asOptionalNumber(onChainSignerBody.metadataType) ??
+    asOptionalNumber(messageBody.metadataType);
   return {
     source: asString(json.source),
     key: asString(json.key),
@@ -453,6 +468,8 @@ export const decodeSigner = (value: unknown): NodeSigner => {
       : undefined,
     requestFid: asOptionalNumber(json.requestFid),
     nonce: asOptionalNumber(json.nonce),
+    ...(metadata ? { metadata } : {}),
+    ...(metadataType === undefined ? {} : { metadataType }),
     onChainEvent: json.onChainEvent
       ? (asJson(json.onChainEvent) as NodeSigner['onChainEvent'])
       : undefined,

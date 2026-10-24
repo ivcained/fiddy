@@ -19,6 +19,7 @@
  */
 
 export * from './appKey';
+export * from './clientAttribution';
 export * from './clientFilter';
 export * from './errors';
 export * from './feed';

@@ -42,6 +42,12 @@
 
 import { type FetchLike, SnapchainNodeClient } from 'farcaster-node-client';
 
+import {
+  clientFilterPolicyInUse,
+  knownClientsInUse,
+} from '~/snapchain/clientFilterPreferences';
+import { THIS_CLIENT_APP_FID } from '~/snapchain/thisClientApp';
+
 import { type EmbedCardResolver } from './embedCards';
 import { type EmbedKindResolver } from './embedKinds';
 import { classifyHostedRequest, type HostedRouteMatch } from './hostedRoutes';
@@ -519,6 +525,15 @@ export const createNodeBackedFetch = ({
       nodeBaseUrl,
       fetchImpl: readFetch,
       getSignedInFid,
+      // Which app made each cast, and which apps this reader wants to see: both
+      // are read fresh on every request from the stores that own them
+      // (`clientFilterPreferences`, kept in step with storage by the app shell),
+      // so a filter changed on the settings screen applies to the very next
+      // page without this adapter being rebuilt. A reader with no preferences
+      // loaded filters nothing.
+      thisAppFid: THIS_CLIENT_APP_FID,
+      knownClients: knownClientsInUse,
+      clientFilter: clientFilterPolicyInUse,
       ...(countCap ? { countCap } : {}),
       ...(embedKinds ? { embedKinds } : {}),
       ...(embedCards ? { embedCards } : {}),

@@ -137,6 +137,24 @@ export const toKnownClients = (
 };
 
 /**
+ * The `knownClients` map back into the storage shape.
+ *
+ * The store keeps the resolver's numeric-keyed map (that is what a read asks
+ * for) while storage keys labels by string FID (JSON has no numeric keys), and
+ * the settings screen edits the storage shape — so the two are translated in
+ * one place rather than at each call site.
+ */
+export const toClientLabels = (known: Record<number, string>): ClientLabels => {
+  const labels: ClientLabels = {};
+  for (const [fid, label] of Object.entries(known)) {
+    if (label.trim().length > 0) {
+      labels[String(fid)] = label.trim();
+    }
+  }
+  return labels;
+};
+
+/**
  * Which server this reader reads and writes through.
  *
  * `public` is a server somebody else runs and keeps open to read from;
