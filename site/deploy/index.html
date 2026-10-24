@@ -176,17 +176,17 @@ bin/fiddy node up</span></pre>
 
   <div class="card" id="managedCard">
     <h2><span class="n">✦</span>Zero clicks — we run it for you</h2>
-    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, $480/mo.</strong>
+    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, <span id="priceLabel">$320</span>/mo.</strong>
     Pay from your Farcaster wallet and your machine is created on our cloud immediately — no waiting for us
     to wake up. You get an HTTPS endpoint for your node and a terminal into it; the terminal holds no keys,
     and your node holds none either: casts are always signed on your device.</p>
-    <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $480 USDC &amp; deploy</button>
+    <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $320 USDC &amp; deploy</button>
     <span id="payStatus" style="margin-left:12px;font-size:13.5px" class="dim"></span></p>
     <div id="subView" hidden style="margin-top:14px;font:14px/1.7 var(--mono)"></div>
     <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
     On the open web the button tells you how to pay instead. The machine appears in minutes; the node answers once it has
     caught up with chain history (~470 GB — hours, not minutes). <strong style="color:var(--ink)">Money honesty:</strong>
-    the machine costs us about $285/mo at list; the difference is the babysitting. Cancel anytime — a lapsed
+    the machine costs us about $285/mo at list; the balance is the babysitting. Cancel anytime — a lapsed
     subscription gets 7 days' grace before the machine goes back.</p>
   </div>
 
@@ -286,7 +286,21 @@ async function poll(ip) {
 //      terminal link. There is no path here that spends money quietly.
 const PAY_TO = '0xde4dcfca310b6a7ade321b6981363e2d7e0323d9';
 const USDC_BASE = 'eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const AMOUNT = '480000000'; // $480.00 USDC
+// The price is the server's, not this file's: the status answer carries it and
+// setPrice() writes it into the headline, the button and the amount. A price
+// change is then one env change, not a release.
+let PRICE_USDC = 320;
+let AMOUNT = '320000000';
+
+function setPrice(usdc) {
+  if (typeof usdc !== 'number' || !isFinite(usdc) || usdc <= 0) return;
+  PRICE_USDC = usdc;
+  AMOUNT = String(Math.round(usdc * 1e6));
+  const label = $('priceLabel');
+  if (label) label.textContent = '$' + (Number.isInteger(usdc) ? usdc : usdc.toFixed(2));
+  const pay = $('payBtn');
+  if (pay && /^Pay \$/.test(pay.textContent)) pay.textContent = 'Pay $' + usdc + ' USDC & deploy';
+}
 
 // One sentence per state, written for a person waiting on a download.
 const STATE_TEXT = {
@@ -363,6 +377,8 @@ async function showSubscription(fid) {
     const r = await fetch('/api/fiddy/managed-node/status?fid=' + encodeURIComponent(fid));
     if (!r.ok) return;
     const d = await r.json();
+    // Whatever the server says the price is, that is what this page charges.
+    if (typeof d.priceUsdc === 'number') setPrice(d.priceUsdc);
     if (!d.subscribed) return;
     renderSubscription(fid, d);
     // While the machine is being made, keep looking — and stop looking once it
@@ -403,7 +419,7 @@ function renderSubscription(fid, d) {
   }
   if (d.error && d.state === 'failed') parts.push(document.createTextNode(` · ${d.error}`));
   line(parts);
-  $('payBtn').textContent = d.daysLeft <= 5 ? 'Renew — $480 USDC' : 'Renew early';
+  $('payBtn').textContent = d.daysLeft <= 5 ? 'Renew — $' + PRICE_USDC + ' USDC' : 'Renew early';
 }
 
 function renderTerminal(node) {
