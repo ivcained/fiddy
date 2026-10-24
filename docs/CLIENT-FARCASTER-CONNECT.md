@@ -249,3 +249,36 @@ write is handed to the service that holds it instead of being signed here.
    the approval sheet asks, and the granted key carries it once the person
    approves (`docs/CLIENT-INLINE-APPROVAL.md`). A live end-to-end write still
    needs an approved signer, which is (1).
+
+## 9. A copy of Fiddy a person runs themselves (card `t_745ed5be`)
+
+This whole document describes the service fiddy.fun runs. On an instance a person
+runs themselves there is no control plane, so `/api/fiddy/connect` answered 404
+at that address and the one-tap approval did not exist there. The same four
+endpoints, with the same wire shape, are now answered by the **instance's own
+server** (`apps/farcaster-web/server/instance/connect.mjs`, mounted by its vite
+plugin in `dev` and `preview`), and every screen, poll and identity rule above is
+the one that runs on it:
+
+- **Who asks** is the instance's own Farcaster account
+  (`FIDDY_INSTANCE_APP_FID` + `FIDDY_INSTANCE_APP_KEY`, its custody key, on that
+  machine). It is the name the approval screen shows, the same way `@fiddy-one`
+  is on fiddy.fun, and it is configuration rather than the person's key.
+- **Where the granted key lives** differs by necessity: with no control plane to
+  hold it, the instance hands the private half to the person's browser once the
+  approval lands, and the client signs its own writes through the node it is
+  already pointed at (`~/snapchain/nodeApi/nodeWrites` prefers a key this device
+  holds). The identity rules are unchanged: an answer is adopted only when
+  Farcaster's API and **that instance's own node** agree about which account it is,
+  never for the instance's own account, and never for somebody else's request.
+- **Signing in** on such an instance is the relay SIWF plus one added check: the
+  instance's own node names the FID the signing address owns
+  (`~/lib/siwfSession`, `confirmFidOnNode`), which is what makes the identity
+  proven rather than merely relayed.
+- **The recovery phrase** is not the price of any of this. It stays on the
+  Advanced screen, for test accounts and developers, exactly as it does on
+  fiddy.fun.
+
+The design record for that half is `docs/CLIENT-SELF-HOSTED-CONNECT.md`; the
+probe that pins it end to end (QR, round trip, key, a cast read back off the node)
+is `apps/farcaster-web/scripts/verify-instance-connect.mjs`.

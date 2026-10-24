@@ -66,6 +66,10 @@ export default [
         setInterval: 'readonly',
         setTimeout: 'readonly',
         URL: 'readonly',
+        // A probe that reads a request's token back out of the link it drew
+        // parses the URL it was handed; URLSearchParams is the parser it needs,
+        // and no module carries one.
+        URLSearchParams: 'readonly',
         window: 'readonly',
         // Node's own, not the page's: a probe bounds its reads of release.json and
         // the served chunks with AbortSignal.timeout(ms). Node exports no module
@@ -234,6 +238,9 @@ export default [
       'src/__tests__/unfurlService.test.ts',
       // …and the same for the shared looks it now stores (card t_d85d8520).
       'src/__tests__/lookService.test.ts',
+      // …and the same for the connect service a copy of Fiddy answers for
+      // itself (card t_745ed5be).
+      'src/__tests__/instanceConnect.test.ts',
     ],
     rules: {
       'no-restricted-imports': 'off',
