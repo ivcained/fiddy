@@ -82,7 +82,7 @@ if [ -n "$POLICY_ARN" ] && [ "$POLICY_ARN" != "None" ]; then
   aws iam create-policy-version --policy-arn "$POLICY_ARN" --policy-document "file://$POLICY_DOC" --set-as-default >/dev/null
   echo "  policy updated to this document"
 else
-  POLICY_ARN="$(aws iam create-policy --policy-name "$POLICY_NAME" --policy-document "file://$POLICY_DOC" --query Arn --output text)"
+  POLICY_ARN="$(aws iam create-policy --policy-name "$POLICY_NAME" --policy-document "file://$POLICY_DOC" --query 'Policy.Arn' --output text)"
   echo "  created: $POLICY_ARN"
 fi
 aws iam attach-user-policy --user-name "$USER_NAME" --policy-arn "$POLICY_ARN"

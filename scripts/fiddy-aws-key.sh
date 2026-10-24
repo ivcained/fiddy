@@ -23,12 +23,13 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 missing on this host" >&2;
 [ -f "$ENV" ] || { echo "$ENV does not exist — install the deploy-agent first" >&2; exit 1; }
 
 umask 077
-# Read the JSON on stdin and emit only the three lines we want to append.
-VALUES="$(python3 - <<'PY'
-import json, sys
-raw = sys.stdin.read()
+# Read the JSON from stdin once, then hand it to python via the environment:
+# a heredoc would occupy stdin, so python could never see the JSON itself.
+RAW="$(cat)"
+VALUES="$(RAW="$RAW" python3 - <<'PY'
+import json, os, sys
 try:
-    key = json.loads(raw)["AccessKey"]
+    key = json.loads(os.environ["RAW"])["AccessKey"]
 except Exception:
     sys.exit("stdin is not the JSON from `aws iam create-access-key`")
 ak, sk = key.get("AccessKeyId", ""), key.get("SecretAccessKey", "")
