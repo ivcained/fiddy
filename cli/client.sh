@@ -89,6 +89,33 @@ client_up() {
   done
 
   config_load
+
+  # Seamless deps: a fresh box has neither node nor pnpm — install them
+  # instead of pointing at docs (the fatline test report: "NodeJS didn't
+  # come built in… had to install node js" by hand).
+  if ! command -v node >/dev/null 2>&1; then
+    log "Node.js missing — installing it for you…"
+    if [ "$(uname -s)" = "Linux" ] && command -v apt-get >/dev/null 2>&1; then
+      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >/tmp/fiddy-node-install.log 2>&1 \
+        && sudo apt-get install -y nodejs >>/tmp/fiddy-node-install.log 2>&1 \
+        || die "Node install failed — see /tmp/fiddy-node-install.log"
+    elif command -v brew >/dev/null 2>&1; then
+      brew install node@22 || die "brew install node@22 failed"
+    else
+      die "install Node.js 22 first: https://nodejs.org"
+    fi
+    ok "node $(node --version) installed"
+  fi
+  if ! command -v pnpm >/dev/null 2>&1; then
+    log "pnpm missing — enabling via corepack…"
+    if command -v corepack >/dev/null 2>&1; then
+      corepack enable >/dev/null 2>&1 || sudo corepack enable
+      corepack prepare pnpm@10.8.1 --activate >/dev/null 2>&1 || true
+    fi
+    command -v pnpm >/dev/null 2>&1 || npm install -g pnpm@10.8.1 || sudo npm install -g pnpm@10.8.1 \
+      || die "install pnpm: npm install -g pnpm"
+    ok "pnpm $(pnpm --version) ready"
+  fi
   require pnpm "install: https://pnpm.io/installation"
 
   local web_env="$FIDDY_REPO/apps/farcaster-web/.env.local"
