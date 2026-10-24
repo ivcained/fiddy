@@ -103,7 +103,17 @@ if [ -f "$STATE_DIR/fid-${FID}.env" ]; then
   PORT="$(sed -n 's/^PORT=//p' "$STATE_DIR/fid-${FID}.env" | head -1)"
 fi
 if [ -z "$PORT" ]; then
-  taken=" $(sed -n 's/^PORT=//p' "$STATE_DIR"/*.env 2>/dev/null | tr '\n' ' ')"
+  # Ports in use by every other fid on this host. Read them file by file: an
+  # unmatched glob reaches the reader as its own literal name, and with
+  # `set -o pipefail` that is exit 2 — measured on a fresh host with an empty
+  # STATE_DIR, where the FIRST terminal install on the box died right here
+  # ("✗ install-node-terminal.sh exited 2") after ttyd and the key were already
+  # in place.
+  taken=""
+  for state in "$STATE_DIR"/*.env; do
+    [ -f "$state" ] || continue
+    taken="$taken $(sed -n 's/^PORT=//p' "$state" | head -1)"
+  done
   PORT="$PORT_BASE"
   while printf '%s' "$taken" | grep -q " $PORT "; do PORT=$((PORT + 1)); done
 fi
