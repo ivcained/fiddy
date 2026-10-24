@@ -20,6 +20,7 @@ provision_main() {
       --ovh)  mode=ovh ;;
       --hetzner)  mode=hetzner ;;
       --ssh)  mode=ssh; shift; FIDDY_SSH_TARGET_ARG="${1:-}" ;;
+      --teardown) mode=teardown ;;
       --force) FIDDY_ALLOW_UNDERSIZED=1 ;;
       -h|--help)
         cat <<EOF
@@ -31,7 +32,7 @@ fiddy provision — furnish the compute your node will run on.
                     project set (gcloud config set project ...).
                     Options: FIDDY_GCP_ZONE (default us-central1-a)
                              FIDDY_GCP_TYPE (default e2-standard-4)
-  --ovh             OVHcloud Public Cloud: b3-16 + 2 TB Classic volume (~$190/mo).
+  --ovh             OVHcloud Public Cloud: b3-16 + 2 TB Classic volume (~\$190/mo).
                     Needs: OVH_APPLICATION_KEY / _SECRET / CONSUMER_KEY and
                     OVH_PUBLIC_CLOUD_PROJECT env vars (api.ovh.com/createToken).
                     NOTE: not yet battle-tested — fails loudly with API errors.
@@ -46,6 +47,11 @@ fiddy provision — furnish the compute your node will run on.
                     Rough list price: instance + volume (printed before it runs).
   --ssh user@host   Skip creation — use a server you already have.
                     Needs: SSH key auth already working, sudo on the remote.
+  --teardown        Give back the AWS compute --aws created (terminate the
+                    instance, delete its volume, key pair and security group)
+                    and print a verdict read back from AWS. Irreversible.
+                    Same script the deploy-agent runs, so a lapsed managed
+                    subscription and this command take one path.
   --force           Skip the requirements preflight (see below).
 
 A Snapchain mainnet read node needs 4 vCPU, 16 GB RAM and 1.5 TB of free
@@ -67,6 +73,7 @@ EOF
     ovh) provision_ovh ;;
     hetzner) provision_hetzner ;;
     ssh) provision_ssh "${FIDDY_SSH_TARGET_ARG:?missing user@host after --ssh}" ;;
+    teardown) provision_teardown ;;
     *)
       step "fiddy provision"
       echo "Pick your compute (free first, then default):"
@@ -256,11 +263,25 @@ UD
     --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
   [ -n "$ip" ] && [ "$ip" != "None" ] || die "instance has no public IP"
 
+  # Everything a teardown needs, recorded while it is cheap to ask: the volume
+  # it owns, its security group, its key pair and its public IP. A teardown can
+  # then run from the config alone (fiddy provision --teardown) instead of
+  # making a human copy an instance id out of the console.
+  local vol_id=""
+  vol_id="$(aws ec2 describe-volumes --region "$region" \
+    --filters "Name=attachment.instance-id,Values=$iid" \
+    --query 'Volumes[0].VolumeId' --output text 2>/dev/null || true)"
+  [ "$vol_id" = "None" ] && vol_id=""
+
   config_set FIDDY_TARGET "ubuntu@$ip"
   config_set FIDDY_PROVIDER "aws"
   config_set FIDDY_SSH_KEY "$key_path"
   config_set FIDDY_AWS_REGION "$region"
   config_set FIDDY_AWS_INSTANCE_ID "$iid"
+  config_set FIDDY_AWS_VOLUME_ID "$vol_id"
+  config_set FIDDY_AWS_SG_ID "$sg_id"
+  config_set FIDDY_AWS_KEY_NAME "$name"
+  config_set FIDDY_AWS_IP "$ip"
   config_set FIDDY_AWS_VOLUME_GB "$volume_gb"
 
   log "waiting for cloud-init (Docker install)…"
@@ -276,4 +297,33 @@ UD
     sleep 10
   done
   die "instance is running but Docker never appeared — ssh -i $key_path ubuntu@$ip and check /var/log/cloud-init-output.log"
+}
+
+provision_teardown() {
+  # The other half of --aws: hand the compute back and prove the billing
+  # stopped. Everything it needs is already in ~/.fiddy/config (--aws records
+  # the instance, volume, security group and key pair). The AWS work lives in
+  # scripts/aws-teardown.sh so `fiddy provision --teardown`, the deploy-agent's
+  # teardown job and a human running the script by hand are one code path —
+  # a lapsed subscription must not use a different teardown than a person.
+  config_load
+  local iid="${FIDDY_AWS_INSTANCE_ID:-}"
+  local region="${FIDDY_AWS_REGION:-us-east-1}"
+  if [ -z "$iid" ]; then
+    die "no AWS instance recorded in $FIDDY_CONFIG — for a specific one: bash $FIDDY_REPO/scripts/aws-teardown.sh <instance-id>"
+  fi
+  step "Tearing down AWS compute ($iid in $region)"
+  bash "$FIDDY_REPO/scripts/aws-teardown.sh" "$iid" --region "$region" \
+    || die "teardown did not finish cleanly — re-run it or check the AWS console"
+
+  # The saved target pointed at that IP. Clearing it matters: an IP gets
+  # recycled, and a stale target would let a later `fiddy node up` install onto
+  # a stranger's machine.
+  config_set FIDDY_TARGET ""
+  config_set FIDDY_AWS_INSTANCE_ID ""
+  config_set FIDDY_AWS_VOLUME_ID ""
+  config_set FIDDY_AWS_SG_ID ""
+  config_set FIDDY_AWS_KEY_NAME ""
+  config_set FIDDY_AWS_IP ""
+  ok "local config cleared — nothing here points at the torn-down compute"
 }
