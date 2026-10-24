@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Fake `bin/fiddy` for the deploy-agent tests.
+# Behaves like the two steps the agent runs, with failure/slowness switches:
+#   FAKE_FAIL_ON=provision|node   exit 7 on that step
+#   FAKE_SLEEP=seconds            simulate work
+set -euo pipefail
+
+echo "▸ fiddy $*"
+[ "${FAKE_FAIL_ON:-}" = "$1" ] && { echo "boom: $1 failed" >&2; exit 7; }
+
+mkdir -p "${FIDDY_HOME:?FIDDY_HOME is required}"
+if [ "$1" = "provision" ]; then
+  printf 'FIDDY_TARGET=%q\n' "${3:-}" > "$FIDDY_HOME/config"
+  printf 'FIDDY_NODE_HTTP=%s\n' "http://203.0.113.10:3381" >> "$FIDDY_HOME/config"
+fi
+
+[ "${FAKE_SLEEP:-0}" = "0" ] || sleep "$FAKE_SLEEP"
+echo "✓ $1 done"
