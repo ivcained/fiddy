@@ -519,15 +519,21 @@ export class NodeBackedWrites {
       );
     }
 
-    // A granted posting key first: a person who connected their account holds no
-    // key here, and never needs to.
-    const managed = this.options.managedPoster;
-    if (managed !== undefined && (await managed.available(fid))) {
-      return this.viaManaged({ intent, fid, managed });
-    }
-
+    // A key THIS DEVICE holds is used first: it is signed here, so the write
+    // does not depend on any service being reachable — and a copy of Fiddy a
+    // person runs themselves hands its key to the browser for exactly this
+    // (`server/instance/connect.mjs`, adopted in `ConnectSheet`), so the same
+    // press on the same account must not go back out over the wire to be signed
+    // by a process on the same box.
     const appKeyHex = await this.appKeyFor(fid);
     if (appKeyHex === null || appKeyHex.length === 0) {
+      // Then a granted posting key: a person who connected their account on
+      // fiddy.fun holds no key here, and never needs to.
+      const managed = this.options.managedPoster;
+      if (managed !== undefined && (await managed.available(fid))) {
+        return this.viaManaged({ intent, fid, managed });
+      }
+
       return this.withoutAKey({ intent, fid, method, path, body, allowAsk });
     }
     const signerPrivateKey = hexToBytes(appKeyHex);

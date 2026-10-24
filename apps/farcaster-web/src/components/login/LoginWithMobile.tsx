@@ -19,6 +19,7 @@ import { postSignInLocation } from '~/lib/postSignInLanding';
 import {
   buildLocalAuthToken,
   buildLocalOnboardingState,
+  confirmFidOnNode,
   createSiwfChannel,
   saveSiwfProof,
   SiwfRelayError,
@@ -26,6 +27,7 @@ import {
   verifySiwfCompletion,
   watchSiwfChannel,
 } from '~/lib/siwfSession';
+import { resolveEffectiveNodeBaseUrl } from '~/snapchain/nodeChoice';
 import { logError } from '~/utils/logUtils';
 import { setItem } from '~/utils/storageUtils';
 
@@ -88,6 +90,12 @@ type SignedInAs = {
   username?: string;
   displayName?: string;
   verified: boolean;
+  /**
+   * Who named this FID: the reader's own server, or nobody. `confirmed` is the
+   * only one of the three that may be shown as a proven identity — the other two
+   * are the device-only session this screen produced before the check existed.
+   */
+  confirmed: 'confirmed' | 'none' | 'unavailable';
 };
 
 const LoginWithMobileContent: FC<LoginWithMobileContentProps> = memo(
@@ -162,12 +170,37 @@ const LoginWithMobileContent: FC<LoginWithMobileContentProps> = memo(
           domain: host,
         });
 
-        if (!verification.verified) {
+        if (!verification.verified || !verification.address) {
           // A signature that doesn't prove what it claims is worse than no
           // session at all — refuse it and say so plainly.
           throw new SiwfRelayError(
             verification.reason ?? 'unverified signature',
           );
+        }
+
+        // Who this account IS, asked of the reader's own server rather than of
+        // the relay that carried the signature (`~/lib/siwfSession`,
+        // `confirmFidOnNode`). A copy of Fiddy a person runs themselves answers
+        // this from their own node; fiddy.fun asks the node it reads from.
+        const confirmation = await confirmFidOnNode({
+          address: verification.address,
+          nodeUrl: resolveEffectiveNodeBaseUrl(),
+          expectedFid: completion.fid,
+        });
+
+        if (!isMountedRef.current) {
+          return;
+        }
+
+        if (confirmation.state === 'mismatch') {
+          // The server that decides this names a different account for the very
+          // address that signed. That is not a session to enter: it is a
+          // contradiction, and it is reported as one.
+          setFailure({
+            message: 'That sign-in does not match this account',
+            hint: `The server this copy of Fiddy reads from names account ${confirmation.fid} for that signature, not ${completion.fid}. Nothing was signed in.`,
+          });
+          return;
         }
 
         // Local-only session. SIWF cannot mint a farcaster.xyz API token, so
@@ -209,6 +242,7 @@ const LoginWithMobileContent: FC<LoginWithMobileContentProps> = memo(
           username: completion.username,
           displayName: completion.displayName,
           verified: verification.verified,
+          confirmed: confirmation.state,
         });
 
         trackEvent(AnalyticsEvent.LoggedInToWebUsingCompanion, {});
@@ -288,6 +322,16 @@ const LoginWithMobileContent: FC<LoginWithMobileContentProps> = memo(
                 : (signedInAs.displayName ?? `fid ${signedInAs.fid}`)}
             </div>
             <div className="text-sm text-muted">fid {signedInAs.fid}</div>
+            {/* Who named this account. The honest half of the flow: the relay
+                carried the signature, and the reader's own server is what says
+                which account it is — or says nothing, which is also reported. */}
+            <div className="text-center text-sm text-muted">
+              {signedInAs.confirmed === 'confirmed'
+                ? 'Confirmed by your own setup'
+                : signedInAs.confirmed === 'none'
+                  ? 'Your own setup does not know this account yet'
+                  : 'Your own setup could not confirm this account'}
+            </div>
             <div className="text-sm text-muted">Loading the client…</div>
           </div>
         );

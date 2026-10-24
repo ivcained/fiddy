@@ -58,6 +58,7 @@ import {
   startConnect,
   stopConnect,
 } from '~/snapchain/accounts/managedConnect';
+import { saveAppKey } from '~/snapchain/appKeyStorage';
 import { setItem } from '~/utils/storageUtils';
 
 /** How often the waiting screen asks the service for news. */
@@ -154,6 +155,42 @@ const statusToView = (
 };
 
 /**
+ * The posting key a copy of Fiddy mints for itself is handed to THIS browser
+ * (`server/instance/connect.mjs`), so it is stored where every other key this
+ * device uses is stored — and from then on the client signs its own writes
+ * through the node it is already pointed at. Only for the account the
+ * connection belongs to, and only after the identity rules below have passed:
+ * an answer naming a key for somebody else's connection is dropped by
+ * `readStatus` before it can reach here.
+ */
+const keepHandedOverKey = async (
+  status: ConnectStatus,
+  fid: number,
+): Promise<void> => {
+  // Read as a KEY, not merely as "not null": this is the one place a service's
+  // answer can put bytes in this device's key store, and an answer that carries
+  // anything but a 32-byte key (`~/snapchain/accounts/managedConnect` reads the
+  // field strictly for the same reason) must never reach it.
+  if (
+    typeof status.postingKey !== 'string' ||
+    !/^0x[0-9a-fA-F]{64}$/.test(status.postingKey)
+  ) {
+    return;
+  }
+  // AWAITED, not fired and forgotten: on this path the connection exists to
+  // finish a write the person is waiting on, and `onApproved` sends that write
+  // back through the writer *immediately* after this returns. A key still in
+  // flight there would make the retry refuse itself with "no key" — the exact
+  // dead end this whole flow exists to remove.
+  try {
+    await saveAppKey(fid, status.postingKey);
+  } catch {
+    // Storage refusing the key does not fail the connection: the person can
+    // still add one from Advanced, and nothing here claims otherwise.
+  }
+};
+
+/**
  * Who is asking, as far as this browser can prove it: the FID it is signed in
  * as, with the SIWF proof of that sign-in when this tab still holds one. Without
  * a proof the request is nobody's until somebody approves it in their own
@@ -206,12 +243,18 @@ export const ConnectSheet = memo<ConnectSheetProps>(
      * account they want to keep).
      */
     const apply = useCallback(
-      (status: ConnectStatus): void => {
+      async (status: ConnectStatus): Promise<void> => {
         rememberConnectStatus(status);
         if (!mounted.current) {
           return;
         }
         const next = statusToView(status, signedInFid);
+        if (next.name === 'connected') {
+          await keepHandedOverKey(status, next.fid);
+        }
+        if (!mounted.current) {
+          return;
+        }
         if (next.name === 'connected' && onApproved !== undefined) {
           onApproved(next.fid, next.username);
           return;
@@ -232,7 +275,7 @@ export const ConnectSheet = memo<ConnectSheetProps>(
         const { status } = await startConnect({
           binding: bindingFor(signedInFid),
         });
-        apply(status);
+        await apply(status);
       } catch (error) {
         if (!mounted.current) {
           return;
@@ -273,7 +316,7 @@ export const ConnectSheet = memo<ConnectSheetProps>(
             await begin();
             return;
           }
-          apply(status);
+          await apply(status);
         } catch {
           // Stay on the first screen; pressing the button asks again and
           // reports. With nothing to press (autoStart), the same call is tried
@@ -310,6 +353,9 @@ export const ConnectSheet = memo<ConnectSheetProps>(
           }
           const next = statusToView(status, signedInFid);
           if (next.name !== 'waiting') {
+            if (next.name === 'connected') {
+              await keepHandedOverKey(status, next.fid);
+            }
             if (next.name === 'connected' && onApproved !== undefined) {
               onApproved(next.fid, next.username);
               return;

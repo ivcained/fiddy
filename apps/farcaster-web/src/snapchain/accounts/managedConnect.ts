@@ -70,6 +70,13 @@ export interface ConnectStatus {
    * for is somebody else's, however it got into the cookie jar.
    */
   startedHere: boolean;
+  /**
+   * A posting key this device is being handed, for a copy of Fiddy that minted
+   * it itself (`server/instance/connect.mjs`): the client stores it and signs
+   * its own writes with it, which is the same path Advanced uses. Null on
+   * fiddy.fun, where the key never leaves the service.
+   */
+  postingKey: string | null;
 }
 
 export const NO_CONNECTION: ConnectStatus = {
@@ -80,6 +87,7 @@ export const NO_CONNECTION: ConnectStatus = {
   forFid: null,
   refused: null,
   startedHere: false,
+  postingKey: null,
 };
 
 /**
@@ -161,6 +169,15 @@ const readStatus = (payload: unknown): ConnectStatus => {
       typeof raw.forFid === 'number' && raw.forFid > 0 ? raw.forFid : null,
     refused:
       refused === 'app_account' || refused === 'other_account' ? refused : null,
+    // A key arrives only when the state that carries it is `connected` — read
+    // strictly, so an answer that fiddles with the fields cannot hand this
+    // browser a key for a connection that is not the person's.
+    postingKey:
+      state === 'connected' &&
+      typeof raw.postingKey === 'string' &&
+      /^0x[0-9a-fA-F]{64}$/.test(raw.postingKey)
+        ? raw.postingKey
+        : null,
     // Filled in by the caller-side reader below: the answer alone never proves
     // this tab asked.
     startedHere: false,

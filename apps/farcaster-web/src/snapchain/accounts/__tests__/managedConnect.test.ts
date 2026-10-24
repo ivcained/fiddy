@@ -61,9 +61,44 @@ describe('managedConnect', () => {
       username: 'someone',
       forFid: null,
       refused: null,
+      // fiddy.fun never hands the key to the browser; only an instance does.
+      postingKey: null,
       // No request was made from this tab, so this answer is not its own.
       startedHere: false,
     });
+  });
+
+  it('adopts a posting key only from a connected answer, and only a real one', async () => {
+    const key = `0x${'ab'.repeat(32)}`;
+    const fetchImpl = fakeFetch(async (url, init) => {
+      void url;
+      void init;
+      return json({
+        ok: true,
+        state: 'connected',
+        fid: 4242,
+        username: 'someone',
+        postingKey: key,
+      });
+    });
+    await expect(
+      connectStatus({ fetchImpl: fetchImpl as unknown as typeof fetch }),
+    ).resolves.toMatchObject({ state: 'connected', postingKey: key });
+
+    // A key offered with anything but a completed connection, or in a shape this
+    // client cannot sign with, is not a key: it reads as null so no screen and no
+    // writer can mistake it for one.
+    for (const payload of [
+      { state: 'waiting', postingKey: key },
+      { state: 'connected', postingKey: 'not-a-key' },
+      { state: 'connected', postingKey: `0x${'ab'.repeat(31)}` },
+      { state: 'connected', postingKey: 42 },
+    ]) {
+      const answer = fakeFetch(async () => json({ ok: true, ...payload }));
+      await expect(
+        connectStatus({ fetchImpl: answer as unknown as typeof fetch }),
+      ).resolves.toMatchObject({ postingKey: null });
+    }
   });
 
   it('reads an answer it does not recognise as unknown, never as connected', async () => {
@@ -149,6 +184,7 @@ describe('managedConnect', () => {
       username: 'someone',
       forFid: null,
       refused: null,
+      postingKey: null,
       startedHere: true,
     });
     await expect(canWriteThroughConnect(4242)).resolves.toBe(true);

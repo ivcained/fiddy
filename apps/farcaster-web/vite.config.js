@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from 'vite';
+import { instanceConnectPlugin } from './server/instance/plugin.mjs';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
@@ -100,6 +101,13 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      // The instance's own connect service — same origin, same wire shape as
+      // fiddy.fun's, so the one-tap approval works on a copy of Fiddy a person
+      // runs themselves. Inert without FIDDY_INSTANCE_APP_FID/KEY; see
+      // server/instance/connect.mjs.
+      instanceConnectPlugin({
+        env: { ...process.env, ...environment },
+      }),
       react(),
       tailwindcss(),
       nodePolyfills({

@@ -201,6 +201,18 @@ client_up() {
     # can actually read.
     echo "VITE_FIDDY_NETWORK=$network"
   } > "$web_env"
+  # The instance's own Farcaster account is read from the environment this
+  # script was started with, and is deliberately NOT copied into .env.local: it
+  # is a custody key, and a file in a checkout is one `git add -A` from being
+  # somebody's problem. Exporting the two values before `fiddy client up` is
+  # enough — the dev server is this script's own child.
+  if [ -n "${FIDDY_INSTANCE_APP_FID:-}" ]; then
+    ok "this copy of Fiddy asks with its own account (FID ${FIDDY_INSTANCE_APP_FID}) — approvals happen on your phone"
+  else
+    ok "posting-key approvals happen on your phone: Fiddy's own signer asks for this copy"
+    log "to ask with an account of your own instead, export FIDDY_INSTANCE_APP_FID and"
+    log "FIDDY_INSTANCE_APP_KEY before this command — docs/CLIENT-SELF-HOSTED-CONNECT.md"
+  fi
   ok "wrote $web_env (network: $network, node: $node_url)"
 
   if [ "$(client_node_layer_state)" = wired ]; then

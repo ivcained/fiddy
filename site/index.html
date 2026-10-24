@@ -306,11 +306,19 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   Nothing to install first: the CLI brings Docker, Node 22 and pnpm itself when they're missing.</p>
   <pre><span class="k">fiddy client up --tunnel</span></pre>
 
-  <p class="dim" style="margin-top:20px"><strong>Signing in = giving the client its own key.</strong> Import the seed phrase of an
-  account that already has storage. The client derives your custody address, and uses it <em>once</em> — to sign a
-  gasless <code class="inline">KEY_ADD</code> message that registers a fresh ed25519 app key for the client. No Optimism
-  transaction, no ETH, confirmed in seconds. From then on the custody key sits idle and the app key signs your casts,
-  follows, and reactions — scoped, capped, and revocable from the UI with a <code class="inline">KEY_REMOVE</code>.</p>
+  <p class="dim" style="margin-top:20px"><strong>Signing in = a QR code and your phone.</strong> Press
+  <em>Sign in</em>, or just write a cast: the client shows a code, you scan it with the Farcaster app and approve
+  there, and <strong>your own node</strong> confirms which account signed. The client ends up with its own ed25519 app key,
+  registered by a gasless <code class="inline">KEY_ADD</code> message. No Optimism transaction, no ETH, confirmed in
+  seconds. Your custody key and your recovery phrase are never asked for, and the app key signs your casts, follows and
+  reactions: scoped, capped, and revocable from the UI with a <code class="inline">KEY_REMOVE</code>.</p>
+
+  <p class="dim">It works as it is: Fiddy's own signer asks for the key, and the approval is the same. To have
+  <em>your</em> instance ask instead, export <code class="inline">FIDDY_INSTANCE_APP_FID</code> and
+  <code class="inline">FIDDY_INSTANCE_APP_KEY</code> (a spare account of yours) before
+  <code class="inline">fiddy client up</code>. Either way it costs you nothing, and either way you can still add a key
+  by hand from <strong>Advanced</strong>, where the recovery-phrase path lives for test accounts and developers. Details:
+  <a href="https://github.com/ivcained/fiddy/blob/main/docs/CLIENT-SELF-HOSTED-CONNECT.md">docs/CLIENT-SELF-HOSTED-CONNECT.md</a>.</p>
 
   <div class="pane note warn" id="safety">
     <div class="t">Seed phrases: powerful, handle like rm -rf</div>

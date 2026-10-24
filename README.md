@@ -75,11 +75,18 @@ The client names the network it is reading — a node does not announce one, so
 whoever pointed the client at a node records it — and lets a reader switch
 between the networks it can actually read, in **Advanced → your node**.
 
-**Posting is gasless.** The client issues itself an app key with a `KEY_ADD`
-message signed by your custody address — no ETH, no Optimism transaction,
-live in about a second. Import a seed phrase from a **test account** that
-already has storage: the seed never leaves your browser, and it only ever
-authorizes the app key. Read
+**Posting is gasless, and asking is a QR code.** On a copy you run yourself,
+*Sign in* (or your first cast) shows a code: scan it with the Farcaster app,
+approve there, and **your own node** confirms which account signed. The client
+ends up with its own ed25519 app key, registered by a gasless `KEY_ADD` message:
+no ETH, no Optimism transaction, live in about a second. The account that *asks*
+on the instance's behalf is Fiddy's own signer, so this works with nothing
+configured; export `FIDDY_INSTANCE_APP_FID` and `FIDDY_INSTANCE_APP_KEY` (a spare
+account of yours) to have your instance ask with its own instead.
+Test accounts and developers can still import a recovery phrase from the
+**Advanced** screen: the seed never leaves your browser, and it only ever
+authorizes the app key. See
+[docs/CLIENT-SELF-HOSTED-CONNECT.md](docs/CLIENT-SELF-HOSTED-CONNECT.md), and read
 [the seed-phrase safety section](https://fiddy.fun/client#safety) before
 importing anything.
 
@@ -92,7 +99,7 @@ importing anything.
   ([docs/CLIENT-NODE-GAP.md](docs/CLIENT-NODE-GAP.md)).
 - **External wallets, non-custodial** — WalletConnect (EVM + Solana),
   EIP-6963 discovery, optional unified MetaMask Connect. No seed phrase is
-  created, requested, or stored by the client beyond the local import above.
+  created, requested, or stored by the client beyond the Advanced import above.
 - **The Fiddy Agent (optional)** — one click hatches your own Hermes agent on
   Agent37 cloud that lives in the client and can connect to every channel
   you approve.
