@@ -33,7 +33,9 @@ import {
   nextFailoverState,
 } from './failover';
 import {
+  combineFreshness,
   DEFAULT_HEALTH_CONFIG,
+  type Freshness,
   type FreshnessRecord,
   type HealthConfig,
   judgeFreshness,
@@ -41,6 +43,7 @@ import {
   probeProvider,
   type ProbeSample,
   type ProviderHealth,
+  type ShardSample,
 } from './health';
 import {
   loadProviderOrder,
@@ -97,6 +100,11 @@ let snapshot: ProviderRuntimeSnapshot = {
 export const READ_ERRORS_BEFORE_DOWN = 3;
 
 const listeners = new Set<() => void>();
+/**
+ * What each watermark has been doing, keyed by provider — and, for a node that
+ * reports shards, keyed per shard (`<providerId>#shard-<shardId>`). The shards
+ * move independently, so they are judged independently (see `freshnessFor`).
+ */
 const freshnessByProvider = new Map<string, FreshnessRecord>();
 
 let options: ProviderRuntimeOptions = {};
@@ -151,6 +159,57 @@ const probe = async (provider: NodeProvider): Promise<ProbeSample> => {
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     config: options.healthConfig ?? DEFAULT_HEALTH_CONFIG,
   });
+};
+
+/**
+ * Freshness for one probe, judged shard by shard.
+ *
+ * A Snapchain node reports several shards whose heights move independently: a
+ * maximum taken across them carries an advancing shard's progress forward while
+ * a stopped one sits still, and the reader would be told the node is fresh. So
+ * each shard keeps its own history and the worst shard decides
+ * (`combineFreshness`). A server with no shards to report — Neynar — is judged
+ * on its single watermark, exactly as before.
+ */
+const freshnessFor = ({
+  providerId,
+  sample,
+  now,
+  config,
+}: {
+  providerId: string;
+  sample: ProbeSample;
+  now: number;
+  config: HealthConfig;
+}): Freshness => {
+  const shards = sample.shards.filter(
+    (shard): shard is ShardSample & { maxHeight: number } =>
+      shard.maxHeight !== null,
+  );
+
+  if (shards.length === 0) {
+    const judgement = judgeFreshness(
+      freshnessByProvider.get(providerId),
+      sample.watermark,
+      now,
+      config,
+    );
+    freshnessByProvider.set(providerId, judgement.record);
+    return judgement.freshness;
+  }
+
+  const judgements = shards.map((shard) => {
+    const key = `${providerId}#shard-${shard.shardId ?? 'unnumbered'}`;
+    const judgement = judgeFreshness(
+      freshnessByProvider.get(key),
+      shard.maxHeight,
+      now,
+      config,
+    );
+    freshnessByProvider.set(key, judgement.record);
+    return judgement.freshness;
+  });
+  return combineFreshness(judgements);
 };
 
 /**
@@ -295,17 +354,15 @@ export const checkProvidersNow = async (): Promise<void> => {
       order.map(async (provider) => {
         const sample = await probe(provider);
         const now = Date.now();
-        const judgement = judgeFreshness(
-          freshnessByProvider.get(provider.id),
-          sample.watermark,
-          now,
-          healthConfig,
-        );
-        freshnessByProvider.set(provider.id, judgement.record);
         return judgeProbe({
           providerId: provider.id,
           sample,
-          freshness: judgement.freshness,
+          freshness: freshnessFor({
+            providerId: provider.id,
+            sample,
+            now,
+            config: healthConfig,
+          }),
           config: healthConfig,
           now,
         });

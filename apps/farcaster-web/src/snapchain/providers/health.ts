@@ -8,9 +8,13 @@
  *   speed      how long the answer took (a request that never answers is a
  *              failure with a deadline, not a hang — this is a browser)
  *   freshness  is this server still following the network?
- *              - a Snapchain node reports it directly: `blockDelay` is how many
- *                blocks behind the tip it is, and `isSyncing` says it is
- *                catching up. Both are measured, not guessed.
+ *              - a Snapchain node reports it itself, and reports it per shard:
+ *                `blockDelay` is the AGE OF THAT SHARD'S NEWEST BLOCK, IN
+ *                SECONDS (measured — see `ShardSample`), and `isSyncing` says
+ *                the node is catching up. Both are the node's own fields, never
+ *                a guess, and both are read shard by shard: a node that answers
+ *                while one of its shards is hours behind is not following the
+ *                network, and that shard is one the feed reads.
  *              - Neynar and `api.farcaster.xyz` publish no such field, so for
  *                Neynar we watch the newest timestamp on a busy channel: a
  *                watermark that stops moving is a stale index.
@@ -37,6 +41,38 @@ export type ProviderStatus =
 
 export type Freshness = 'fresh' | 'stale' | 'unknown';
 
+/**
+ * One shard of a Snapchain node, exactly as that node reported it.
+ *
+ * `tipAgeSeconds` is the node's own `blockDelay`. MEASURED at the source
+ * (`farcasterxyz/snapchain`, read 2026-10-24):
+ *
+ *   src/network/server.rs         block_delay: current_time.saturating_sub(max_block_time)
+ *                                 (max_block_time = that shard's max_block_timestamp())
+ *   src/storage/store/engine.rs   gauge("block_delay_seconds", now - block.timestamp)
+ *
+ * so it is the AGE OF THAT SHARD'S NEWEST BLOCK IN SECONDS — a duration, not a
+ * count of blocks. Two measured shapes, both on the public node on 2026-10-24:
+ *
+ *   frozen    shard 1 held height `49,477,354` and its `blockDelay` climbed in
+ *             step with the wall clock (`31,706` → `31,937` s): it was applying
+ *             nothing, so its newest block got older at 1 s per second.
+ *   behind    shard 1 applied ~200 blocks in 21 s and its `blockDelay` stayed
+ *             around `26,400` s, falling slowly: it was applying blocks that are
+ *             hours old, so the shard is that far behind in event time.
+ *
+ * Either way the number says how far behind this shard's data is, which is what
+ * a reader of its casts needs to know.
+ */
+export interface ShardSample {
+  /** The shard this is, as the node numbers it, or null when it does not say. */
+  shardId: number | null;
+  /** Highest block this shard reports, or null when it reports none. */
+  maxHeight: number | null;
+  /** Age of this shard's newest block in seconds, or null when it says nothing. */
+  tipAgeSeconds: number | null;
+}
+
 export interface ProbeSample {
   ok: boolean;
   latencyMs: number | null;
@@ -47,8 +83,14 @@ export interface ProbeSample {
   watermark: number | null;
   /** This server says it is still catching up. */
   catchingUp: boolean;
-  /** How far behind the tip the server says it is, when it says anything. */
-  blocksBehind: number | null;
+  /**
+   * Every shard the node reports, exactly as it reported it — empty for a
+   * server with no shards at all (Neynar, `api.farcaster.xyz`).
+   *
+   * Freshness is judged from these, one shard at a time: a single number taken
+   * across shards is what let an advancing shard vouch for a stopped one.
+   */
+  shards: ShardSample[];
 }
 
 export interface ProviderHealth {
@@ -67,8 +109,11 @@ export interface HealthConfig {
   slowMs: number;
   /** A request that has not answered by then is a failure. */
   timeoutMs: number;
-  /** A server says it is more than this many blocks behind → stale. */
-  maxBlocksBehind: number;
+  /**
+   * A shard whose newest block is older than this is behind → stale. A
+   * duration, because a duration is what the node reports.
+   */
+  maxTipAgeMs: number;
   /** A watermark that has not moved for this long → stale. */
   staleAfterMs: number;
 }
@@ -83,9 +128,12 @@ export const DEFAULT_HEALTH_CONFIG: HealthConfig = {
   // one that "stopped answering" — the wrong story, and the wrong reason for the
   // switch, for a server that is answering and merely late.
   timeoutMs: 6_000,
-  // blogDelay is in blocks behind the chain tip; a node a handful of blocks
-  // behind is normal, a node minutes behind is not following.
-  maxBlocksBehind: 20,
+  // MEASURED (2026-10-20 and 2026-10-24, 15:42 and 16:07 UTC): a shard that IS
+  // following the chain has a newest block 0–6 seconds old — blocks land about
+  // once a second — so two minutes is twenty times the worst healthy reading.
+  // The same public node's other shards measured 10,627–31,937 s, both while
+  // frozen and while applying blocks that were hours old.
+  maxTipAgeMs: 120_000,
   // Two minutes of a frozen watermark while we are watching is a stalled index.
   staleAfterMs: 120_000,
 };
@@ -151,6 +199,108 @@ export const judgeFreshness = (
   return { freshness, record: { ...previous, watermark: previous.watermark } };
 };
 
+/** A span of seconds in the words a reader reads: 35,793 → "9h 56m". */
+const describeSpan = (seconds: number): string => {
+  const whole = Math.max(0, Math.round(seconds));
+  if (whole < 60) {
+    return `${whole}s`;
+  }
+  const minutes = Math.floor(whole / 60);
+  const restSeconds = whole % 60;
+  if (minutes < 60) {
+    return restSeconds === 0 ? `${minutes}m` : `${minutes}m ${restSeconds}s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours < 24) {
+    return restMinutes === 0 ? `${hours}h` : `${hours}h ${restMinutes}m`;
+  }
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours === 0 ? `${days}d` : `${days}d ${restHours}h`;
+};
+
+/**
+ * The shards that are behind, from the node's own numbers.
+ *
+ * The input is each shard's `blockDelay` — the age of that shard's newest block
+ * — so the question is "has this shard said, itself, that it is this far
+ * behind?" A shard with no reported age stays out of it: an age this client was
+ * not given is an age it does not invent.
+ */
+export const shardsBehind = (
+  shards: ShardSample[],
+  config: HealthConfig = DEFAULT_HEALTH_CONFIG,
+): ShardSample[] =>
+  shards
+    .filter(
+      (shard) =>
+        shard.tipAgeSeconds !== null &&
+        shard.tipAgeSeconds * 1000 > config.maxTipAgeMs,
+    )
+    // In shard order, so the sentence reads "shards 1 and 2 are 5h 48m and 1h
+    // 22m old" no matter what order the node listed its shards in.
+    .sort(
+      (a, b) =>
+        (a.shardId ?? Number.MAX_SAFE_INTEGER) -
+        (b.shardId ?? Number.MAX_SAFE_INTEGER),
+    );
+
+/**
+ * The freshness of a server judged shard by shard: the worst shard decides.
+ *
+ * One stopped shard is the whole server's problem — one of the feed's reads is
+ * that shard's read — so an advancing shard can never vouch for a frozen one.
+ * `unknown` (a shard nothing has watched yet) does not make a server stale: it
+ * only means there is not enough here to claim freshness either.
+ */
+export const combineFreshness = (judgements: Freshness[]): Freshness => {
+  if (judgements.includes('stale')) {
+    return 'stale';
+  }
+  if (judgements.length === 0 || judgements.includes('unknown')) {
+    return 'unknown';
+  }
+  return 'fresh';
+};
+
+/**
+ * The sentence for shards that are behind, naming each shard and its own age.
+ *
+ * It says what the field says — how old that shard's newest block is — and not
+ * "it has stopped applying blocks": MEASURED 2026-10-24 16:07 UTC, the public
+ * node's shard 1 applied ~200 blocks in 21 s while that age stayed near
+ * `26,400` s, so a stop is not the only thing this number can mean.
+ */
+const behindSentence = (behind: ShardSample[]): string => {
+  const list = (parts: string[]): string =>
+    parts.length > 1
+      ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+      : (parts[0] ?? '');
+  const ages = (shards: ShardSample[]): string =>
+    list(shards.map((shard) => describeSpan(shard.tipAgeSeconds ?? 0)));
+
+  if (behind.length === 1) {
+    const shard = behind[0]!;
+    const age = describeSpan(shard.tipAgeSeconds ?? 0);
+    return shard.shardId === null
+      ? `It answered, but its newest block is ${age} old.`
+      : `It answered, but shard ${shard.shardId}'s newest block is ${age} old.`;
+  }
+
+  const named = behind.filter((shard) => shard.shardId !== null);
+  if (named.length !== behind.length) {
+    // Some shards came back without an id: name the age, never a shard number
+    // this node did not give.
+    return `It answered, but ${behind.length} of its shards have newest blocks up to ${describeSpan(
+      Math.max(...behind.map((shard) => shard.tipAgeSeconds ?? 0)),
+    )} old.`;
+  }
+  return `It answered, but the newest blocks on shards ${list(
+    named.map((shard) => String(shard.shardId)),
+  )} are ${ages(named)} old.`;
+};
+
 /** The sentence a human reads for each status. */
 export const statusDetail = (
   status: ProviderStatus,
@@ -199,12 +349,12 @@ export const judgeProbe = ({
   now: number;
 }): ProviderHealth => {
   let status: ProviderStatus;
+  // Judged per shard, from the node's own numbers: a maximum taken across the
+  // shards is what let an advancing one cover for a stopped one.
+  const behind = shardsBehind(sample.shards, config);
   if (!sample.ok) {
     status = 'down';
-  } else if (
-    sample.catchingUp ||
-    (sample.blocksBehind ?? 0) > config.maxBlocksBehind
-  ) {
+  } else if (sample.catchingUp || behind.length > 0) {
     status = 'stale';
   } else if (freshness === 'stale') {
     status = 'stale';
@@ -218,7 +368,13 @@ export const judgeProbe = ({
     status === 'stale' && sample.ok
       ? sample.catchingUp
         ? 'It answered, but it says it is still catching up with the network.'
-        : `It answered, but it is ${sample.blocksBehind} blocks behind the network.`
+        : behind.length > 0
+          ? behindSentence(behind)
+          : // Nothing in the node's own per-shard fields says it is behind (its
+            // heights stopped moving across reads instead). Inventing a number
+            // here is exactly what this client does not do, so the reason stays
+            // null and `statusDetail` says it without one.
+            null
       : sample.reason;
 
   return {
@@ -243,7 +399,7 @@ const failedSample = (
   reason,
   watermark: null,
   catchingUp: false,
-  blocksBehind: null,
+  shards: [],
 });
 
 /**
@@ -304,63 +460,75 @@ const readJson = async (response: Response): Promise<unknown | null> => {
   }
 };
 
-/** Largest `maxHeight` a Snapchain `/v1/info` body reports, or null. */
-const snapchainWatermark = (body: unknown): number | null => {
+/**
+ * Every shard a Snapchain `/v1/info` body reports, as that node reported it.
+ *
+ * `blockDelay` is read as what it is — the age of that shard's newest block, in
+ * seconds (`src/network/server.rs`: `current_time.saturating_sub(max_block_time)`)
+ * — and kept per shard, because the shards move independently: on 2026-10-24 this
+ * public node's shard 0 had a newest block 2–6 s old while shards 1 and 2 sat
+ * hours behind.
+ */
+export const snapchainShards = (body: unknown): ShardSample[] => {
   if (!body || typeof body !== 'object') {
-    return null;
+    return [];
   }
   const record = body as Record<string, unknown>;
-  const heights: number[] = [];
-  const shards = record.shardInfos;
-  if (Array.isArray(shards)) {
-    for (const shard of shards) {
-      const height = (shard as { maxHeight?: unknown })?.maxHeight;
-      if (typeof height === 'number' && Number.isFinite(height)) {
-        heights.push(height);
+  const numberOrNull = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+  const shards: ShardSample[] = [];
+  const reported = record.shardInfos;
+  if (Array.isArray(reported)) {
+    for (const entry of reported) {
+      const shard = (entry ?? {}) as Record<string, unknown>;
+      const maxHeight = numberOrNull(shard.maxHeight);
+      const tipAgeSeconds = numberOrNull(shard.blockDelay);
+      if (maxHeight === null && tipAgeSeconds === null) {
+        continue;
       }
+      shards.push({
+        shardId: numberOrNull(shard.shardId),
+        maxHeight,
+        tipAgeSeconds,
+      });
     }
   }
-  if (
-    typeof record.maxHeight === 'number' &&
-    Number.isFinite(record.maxHeight)
-  ) {
-    heights.push(record.maxHeight);
+
+  if (shards.length === 0) {
+    // An older body puts the same two numbers at the top level.
+    const maxHeight = numberOrNull(record.maxHeight);
+    const tipAgeSeconds = numberOrNull(record.blockDelay);
+    if (maxHeight !== null || tipAgeSeconds !== null) {
+      shards.push({ shardId: null, maxHeight, tipAgeSeconds });
+    }
   }
-  return heights.length > 0 ? Math.max(...heights) : null;
+  return shards;
 };
 
-/** How many blocks behind the tip the node says it is. */
-const snapchainBlocksBehind = (body: unknown): number | null => {
-  if (!body || typeof body !== 'object') {
-    return null;
-  }
-  const record = body as Record<string, unknown>;
-  const delays: number[] = [];
-  const shards = record.shardInfos;
-  if (Array.isArray(shards)) {
-    for (const shard of shards) {
-      const delay = (shard as { blockDelay?: unknown })?.blockDelay;
-      if (typeof delay === 'number' && Number.isFinite(delay)) {
-        delays.push(delay);
-      }
-    }
-  }
-  if (
-    typeof record.blockDelay === 'number' &&
-    Number.isFinite(record.blockDelay)
-  ) {
-    delays.push(record.blockDelay);
-  }
-  return delays.length > 0 ? Math.max(...delays) : null;
+/**
+ * Largest `maxHeight` a Snapchain `/v1/info` body reports, or null.
+ *
+ * A display number, one per server. It is NOT the freshness signal any more:
+ * the maximum over shards is exactly what let an advancing shard hide a stopped
+ * one, so freshness is judged per shard (`stalledShards`, `combineFreshness`)
+ * from the body's own fields.
+ */
+const snapchainWatermark = (body: unknown): number | null => {
+  const heights = snapchainShards(body)
+    .map((shard) => shard.maxHeight)
+    .filter((height): height is number => height !== null);
+  return heights.length > 0 ? Math.max(...heights) : null;
 };
 
 /**
  * Probe a Snapchain node: `GET /v1/info`.
  *
- * The node reports its own version, whether it is syncing and per-shard
- * heights, which is the strongest freshness signal any of the three kinds of
- * provider offers — so a snapchain provider is judged on what the node says
- * about itself, not on a guess.
+ * The node reports its own version, whether it is syncing, and per shard both
+ * its height and how long ago that shard applied a block (`blockDelay`, in
+ * seconds — see `ShardSample`). That is the strongest freshness signal any of
+ * the three kinds of provider offers, and it is read per shard, so a snapchain
+ * provider is judged on what the node says about itself, never on a guess.
  */
 export const probeSnapchain = async ({
   provider,
@@ -430,7 +598,7 @@ export const probeSnapchain = async ({
     reason: null,
     watermark: snapchainWatermark(body),
     catchingUp: record.isSyncing === true,
-    blocksBehind: snapchainBlocksBehind(body),
+    shards: snapchainShards(body),
   };
 };
 
@@ -528,7 +696,7 @@ export const probeNeynar = async ({
     reason: null,
     watermark: newestNeynarTimestamp(body),
     catchingUp: false,
-    blocksBehind: null,
+    shards: [],
   };
 };
 
@@ -604,7 +772,7 @@ export const probeFarcasterPublic = async ({
     reason: null,
     watermark: null,
     catchingUp: false,
-    blocksBehind: null,
+    shards: [],
   };
 };
 
