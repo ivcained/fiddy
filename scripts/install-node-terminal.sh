@@ -5,12 +5,15 @@
 #   bash scripts/install-node-terminal.sh \
 #     --fid 191554 --token <32-64 hex chars> \
 #     --ssh ubuntu@<node-ip> --key /path/to/instance.pem \
-#     [--node-port 3381] [--host fiddy.fun] [--json]
+#     [--network snapchain] [--node-port 3381] [--host fiddy.fun] [--json]
 #
 # What it does, in order:
 #   1. installs ttyd (apt, else the upstream static binary) — once per host;
 #   2. stores the node's SSH key at /etc/fiddy/nodes/fid-<fid>.pem (mode 600);
 #      the key lives here and nowhere else; the miniapp never sees it;
+#   2b. writes a NODE-LOCAL fiddy config (~/.fiddy/config for the SSH user) so
+#      `fiddy node status` works on the box itself, plus a motd naming the ops
+#      commands that work there (docker ps, docker logs snapchain-snapchain-1);
 #   3. starts ttyd as a systemd unit, bound to 127.0.0.1, whose command is an
 #      SSH login to the node. So the terminal is an SSH session to the node —
 #      it holds no keys, and the node holds none by design;
@@ -32,6 +35,7 @@ FID=""
 TOKEN=""
 SSH_TARGET=""
 KEY=""
+NETWORK="snapchain"
 NODE_PORT="${SNAP_HTTP_PORT:-3381}"
 SITE_HOST="fiddy.fun"
 SITE_CONF="/etc/nginx/sites-available/${SITE_HOST}"
@@ -51,6 +55,7 @@ while [ $# -gt 0 ]; do
     --token) TOKEN="$2"; shift 2 ;;
     --ssh) SSH_TARGET="$2"; shift 2 ;;
     --key) KEY="$2"; shift 2 ;;
+    --network) NETWORK="$2"; shift 2 ;;
     --node-port) NODE_PORT="$2"; shift 2 ;;
     --host) SITE_HOST="$2"; SITE_CONF="/etc/nginx/sites-available/$2"; shift 2 ;;
     --json) shift ;;   # the verdict JSON is always printed; kept for the agent's argv
@@ -94,6 +99,53 @@ TTYD_BASE_PATH="$($TTYD_BIN --help 2>&1 | grep -c -- '--base-path' || true)"
 install -d -m 700 "$NODE_DIR"
 install -m 600 "$KEY" "$NODE_DIR/fid-${FID}.pem"
 ok "key stored: $NODE_DIR/fid-${FID}.pem (mode 600)"
+
+case "$NETWORK" in
+  snapchain|hypersnap) ;;
+  *) die "--network must be snapchain or hypersnap" ;;
+esac
+
+# --- 2b. the node's own ops copy: `fiddy node status` works ON the box ------
+# The orchestrator's job home holds the real target config; the node itself
+# only gets the CLI from cloud-init. Without this, `fiddy node status` in the
+# node's own web terminal answers "! no node target configured" (measured
+# 2026-10-24) — while the node's API is right there on 127.0.0.1. So write a
+# node-local config for the SSH user the terminal logs in as, and a motd that
+# names the honest ops commands for a box where the node is local Docker, not
+# a remote target. Best effort: a box we cannot configure is still a working
+# terminal, it just says so in the verdict.
+NODE_LOCAL_CONFIG=false
+NODE_USER="${SSH_TARGET%%@*}"
+NODE_GRPC_PORT="${SNAP_GRPC_PORT:-3383}"
+NODE_CONFIG="FIDDY_TARGET=${NODE_USER}@127.0.0.1
+FIDDY_PROVIDER=managed-node
+FIDDY_NODE_HTTP=http://127.0.0.1:${NODE_PORT}
+FIDDY_NODE_GRPC=127.0.0.1:${NODE_GRPC_PORT}
+FIDDY_NODE_NETWORK=${NETWORK}
+"
+if printf '%s\n' "$NODE_CONFIG" | ssh -i "$NODE_DIR/fid-${FID}.pem" -o BatchMode=yes \
+     -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "$SSH_TARGET" \
+     'mkdir -p ~/.fiddy && cat > ~/.fiddy/config && chmod 600 ~/.fiddy/config && grep -q "^FIDDY_NODE_HTTP=" ~/.fiddy/config && echo node-config-ok' 2>/dev/null | grep -q node-config-ok; then
+  NODE_LOCAL_CONFIG=true
+  ok "node-local config written: 'fiddy node status' works on the box"
+else
+  warn "could not write the node-local config — fiddy node status will not work on the box"
+fi
+
+# The landing text for a terminal that just opened: what this box is, and which
+# commands answer questions here. Needs passwordless sudo (cloud images have it).
+NODE_MOTD="$(cat <<'MOTD'
+This is your Fiddy node.
+  sync status:      fiddy node status
+  the node itself:  docker ps ; docker logs snapchain-snapchain-1
+  install dir:      ~/snapchain
+MOTD
+)"
+printf '%s\n' "$NODE_MOTD" | ssh -i "$NODE_DIR/fid-${FID}.pem" -o BatchMode=yes \
+  -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "$SSH_TARGET" \
+  'sudo -n mkdir -p /etc/motd.d 2>/dev/null && sudo -n tee /etc/motd.d/99-fiddy >/dev/null && echo motd-ok' 2>/dev/null | grep -q motd-ok \
+  && ok "terminal banner: /etc/motd.d/99-fiddy on the node" \
+  || warn "no motd banner on the node (sudo unavailable) — not fatal"
 
 # --- 3. port, reused if this fid already had one --------------------------
 install -d -m 700 "$STATE_DIR"
@@ -257,7 +309,7 @@ printf 'state=%s local=%s term=%s node=%s no_token=%s ssh=%s\n' \
 FID="$FID" PORT="$PORT" SITE_HOST="$SITE_HOST" TOKEN="$TOKEN" \
 UNIT_STATE="$UNIT_STATE" LOCAL_CODE="$LOCAL_CODE" TERM_CODE="$TERM_CODE" \
 NODE_CODE="$NODE_CODE" NO_TOKEN_CODE="$NO_TOKEN_CODE" SSH_OK="$SSH_OK" \
-SSH_FIRST="$SSH_FIRST" WRONG_TOKEN_OK="$WRONG_TOKEN_OK" python3 - <<'PY'
+SSH_FIRST="$SSH_FIRST" WRONG_TOKEN_OK="$WRONG_TOKEN_OK" NODE_LOCAL="$NODE_LOCAL_CONFIG" python3 - <<'PY'
 import datetime, json, os
 e = os.environ
 print("FIDDY_TERMINAL_JSON " + json.dumps({
@@ -274,6 +326,7 @@ print("FIDDY_TERMINAL_JSON " + json.dumps({
   "wrongTokenRefused": e["WRONG_TOKEN_OK"] == "true",
   "sshReachable": e["SSH_OK"] == "true",
   "sshFirstLine": e["SSH_FIRST"],
+  "nodeLocalConfig": e["NODE_LOCAL"] == "true",
   "checkedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }))
 PY

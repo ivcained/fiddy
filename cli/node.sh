@@ -57,7 +57,10 @@ fiddy node — manage your read node.
                  community, for explorers. Hypersnap cannot be installed
                  unattended yet and this command says so instead of pretending
                  (see: fiddy node up --network hypersnap).
-  status         Print sync status from /v1/info.
+  status         Print sync status from /v1/info. While the snapshot bootstrap
+                 runs (the API refuses HTTP), print the container's status and
+                 download progress instead — from the node itself, or over SSH
+                 from the machine that provisioned it.
   verify [fid]   Run the acceptance checks against the node's HTTP API:
                  health, reads served by this node, signer list. Default FID
                  is 3 (dwr.eth); pass any FID you can check.
@@ -347,8 +350,38 @@ node_status() {
   step "Node status ($base)"
   node_network_line
   local body
-  body="$(curl -fsS --max-time 10 "$base/v1/info")" || die "node not answering — try: fiddy node logs"
+  if ! body="$(curl -fsS --max-time 10 "$base/v1/info" 2>/dev/null)"; then
+    node_status_silent "$base" "$host" \
+      || die "node not answering at $base — try: fiddy node logs"
+    return 0
+  fi
   printf '%s\n' "$body" | if command -v jq >/dev/null 2>&1; then jq '.'; else cat; fi
+}
+
+# The API's honest silence: a fresh read node refuses HTTP until the snapshot
+# bootstrap finishes (hours). "Is it up yet?" still deserves an answer — the
+# container knows. Look locally first (this is how it runs ON the node, where
+# the node is local Docker), then over SSH (how it runs on the machine that
+# provisioned the node). Exit 0 when something was reported.
+node_status_silent() { # base host
+  local base="$1" host="$2" status="" progress="" is_local=0
+  warn "the node's HTTP API is not answering at $base yet"
+  warn "this is expected while the snapshot bootstrap runs (up to ~2h, ~470 GB)"
+  case "$host" in localhost|127.0.0.1|::1) is_local=1 ;; esac
+  if [ "$is_local" = 1 ] && command -v docker >/dev/null 2>&1 && docker ps >/dev/null 2>&1; then
+    status="$(docker ps --filter name=snapchain-snapchain-1 --format '{{.Status}}' 2>/dev/null || true)"
+    progress="$(docker logs snapchain-snapchain-1 2>&1 | grep -oE 'chunk_[0-9]+\.bin' | tail -1 || true)"
+  else
+    status="$(ssh_run 'docker ps --filter name=snapchain-snapchain-1 --format "{{.Status}}"' 2>/dev/null || true)"
+    progress="$(ssh_run 'docker logs snapchain-snapchain-1 2>&1 | grep -oE "chunk_[0-9]+\.bin" | tail -1' 2>/dev/null || true)"
+  fi
+  if [ -n "$status" ]; then log "container: $status"; fi
+  if [ -n "$progress" ]; then log "snapshot download at: $progress of 5690"; fi
+  if [ -z "$status" ]; then
+    warn "no snapchain container is visible from here — check: fiddy node logs"
+    return 1
+  fi
+  return 0
 }
 
 node_verify() { # the bounty's acceptance checks, against the node's HTTP API
