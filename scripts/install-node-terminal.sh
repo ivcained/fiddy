@@ -64,7 +64,8 @@ case "$FID" in ''|*[!0-9]*) die "--fid must be a positive integer" ;; esac
 [ "$FID" -gt 0 ] || die "--fid must be a positive integer"
 printf '%s' "$TOKEN" | grep -Eq '^[0-9a-f]{32,64}$' \
   || die "--token must be 32-64 lowercase hex chars (128+ bits of randomness)"
-printf '%s' "$SSH_TARGET" | grep -Eq '^[\w.-]+@[\w.-]+$' || die "--ssh must look like user@host"
+printf '%s' "$SSH_TARGET" | grep -Eq '^[A-Za-z0-9_.-]+@[A-Za-z0-9.-]+$' \
+  || die "--ssh must look like user@host"
 [ -n "$KEY" ] && [ -f "$KEY" ] || die "--key must point at the node's private key"
 [ "$(id -u)" = "0" ] || die "run as root (systemd + nginx live here)"
 command -v nginx >/dev/null || die "nginx not found on this host"
