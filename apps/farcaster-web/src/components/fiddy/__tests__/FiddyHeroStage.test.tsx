@@ -2,12 +2,12 @@
 /**
  * The hero's promises, held to account in a browser-less test: the still paints
  * first, reduced motion never fetches anything, a model that cannot mount leaves
- * the still in place, the two variants differ in exactly one way (whether the
- * pointer belongs to the model or to the page), and the surface it draws into is
- * disposed rather than leaked.
+ * the still in place, the front door's stage is a real button that greets Fiddy
+ * while the small one beside a form is decoration, and the surface it draws into
+ * is disposed rather than leaked.
  */
 
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,9 +20,14 @@ vi.mock('~/components/fiddy/fiddyModelScene', () => ({
 }));
 
 import {
+  FIDDY_HERO_CLIP,
+  FIDDY_HERO_HEAD,
+  FIDDY_HERO_LOOK,
+  FIDDY_HERO_MODEL,
   FIDDY_HERO_PADDING,
   FIDDY_HERO_POSTER,
-  FIDDY_HERO_TURN_RADIANS_PER_SECOND,
+  FIDDY_HERO_REST_AFTER_MS,
+  FIDDY_HERO_VIEW,
   heroMotionAllowed,
 } from '~/components/fiddy/fiddyHero';
 import { FiddyHeroStage } from '~/components/fiddy/FiddyHeroStage';
@@ -44,11 +49,13 @@ const setReducedMotion = (matches: boolean) => {
 const stage = () => document.querySelector('[data-fiddy-hero]');
 const still = () => document.querySelector('.fiddy-hero-stage-still');
 const dispose = vi.fn();
+const react = vi.fn();
 
 beforeEach(() => {
   scene.mount.mockReset();
   dispose.mockReset();
-  scene.mount.mockResolvedValue({ dispose });
+  react.mockReset();
+  scene.mount.mockResolvedValue({ dispose, react });
   setReducedMotion(false);
 });
 
@@ -80,23 +87,43 @@ describe('FiddyHeroStage', () => {
     expect(stage()?.getAttribute('data-fiddy-hero')).toBe('still');
   });
 
-  it('turns the model on for the front door, and off beside a form', async () => {
-    const hero = render(<FiddyHeroStage variant="hero" />);
+  it('mounts the baby, with the clip, the head and the rest the hero needs', async () => {
+    render(<FiddyHeroStage variant="hero" />);
     await waitFor(() => expect(scene.mount).toHaveBeenCalled());
     expect(scene.mount.mock.calls[0][2]).toMatchObject({
-      turntable: FIDDY_HERO_TURN_RADIANS_PER_SECOND,
-      draggable: true,
-      view: [0.34, 0.2, 1],
+      model: FIDDY_HERO_MODEL,
+      clip: FIDDY_HERO_CLIP,
+      look: { node: FIDDY_HERO_HEAD, ...FIDDY_HERO_LOOK },
+      restAfterMs: FIDDY_HERO_REST_AFTER_MS,
+      view: FIDDY_HERO_VIEW,
       padding: FIDDY_HERO_PADDING,
     });
-    hero.unmount();
+  });
 
-    scene.mount.mockClear();
+  it('is a button on the front door, so a press greets Fiddy from a keyboard too', async () => {
+    render(<FiddyHeroStage variant="hero" />);
+    await waitFor(() =>
+      expect(stage()?.getAttribute('data-fiddy-hero')).toBe('moving'),
+    );
+    const button = stage() as HTMLButtonElement;
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('type')).toBe('button');
+    // A button carries no text, so it has to be named.
+    expect(button.getAttribute('aria-label')).toBe('Play with Fiddy');
+
+    // Enter and Space are the platform's own doing for a <button>; what this
+    // asserts is that the press reaches the scene at all.
+    fireEvent.click(button);
+    expect(react).toHaveBeenCalledTimes(1);
+  });
+
+  it('is decoration beside the name field: no button, no name, no pointer', async () => {
     render(<FiddyHeroStage variant="form" />);
     await waitFor(() => expect(scene.mount).toHaveBeenCalled());
-    // The whole difference between the two: a canvas that eats a tap meant for
-    // the name field next to it would be a bug.
-    expect(scene.mount.mock.calls[0][2]).toMatchObject({ draggable: false });
+    const box = stage() as HTMLElement;
+    expect(box.tagName).toBe('SPAN');
+    expect(box.getAttribute('aria-hidden')).toBe('true');
+    expect(box.querySelector('button')).toBeNull();
   });
 
   it('stays on the still when the model cannot mount, and says nothing', async () => {

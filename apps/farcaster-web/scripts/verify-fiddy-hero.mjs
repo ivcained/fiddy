@@ -20,21 +20,33 @@
 //   claim "no layout shift" is measured across the swap rather than eyeballed
 //   once it is over.
 //
-//   (5) THE STILL IS NOT A LIE. The canvas the model draws into is screenshotted
-//   and compared with `public/fiddy-hero-poster.png`: same figure, same size in
-//   the frame, same centre, same brightness. This is the check that fails if the
-//   poster is rendered from a recipe the live scene no longer uses.
+//   (5) THE STILL IS NOT A LIE. Once the character has settled, the canvas the
+//   model draws into is screenshotted and compared with
+//   `public/fiddy-hero-poster.png`: same figure, same size in the frame, same
+//   centre, same brightness. This is the check that fails if the poster is
+//   rendered from a recipe the live scene no longer uses.
 //
-//   (6) the pointer turns it, and the page does not turn with it.
+//   (6) IT IS THE INTERACTIVE MASCOT, NOT A PICTURE OF ONE. The pointer's
+//   position is read off the character's own head (the canvas reports the angle
+//   it turned to): centred pointer, head straight; pointer right and high, head
+//   right and up; pointer left and low, the other way — and the pixels move with
+//   it.
 //
-//   (7) under `prefers-reduced-motion: reduce` the model is never fetched at all
-//   and the still is still there; (8) on a browser with no WebGL the still is
+//   (7) A PRESS IS A GREETING: a tap, and Enter on the focused stage, both make
+//   the character hop, and the hop is measured (the figure leaves the ground)
+//   rather than taken on trust.
+//
+//   (8) under `prefers-reduced-motion: reduce` the model is never fetched at all
+//   and the still is still there; (9) on a browser with no WebGL the still is
 //   what remains, and nothing throws.
 //
-//   on `/welcome/name` (9) the little Fiddy stands beside the name field where
-//   there is room and above it where there is not, and (10) it never takes a
+//   on `/welcome/name` (10) the little Fiddy stands beside the name field where
+//   there is room and above it where there is not, and (11) it never takes a
 //   pointer that belongs to the field — typing into the field still works with
 //   the model mounted next to it.
+//
+//   (12) THE RETIRED MODEL IS GONE: `fiddy-hero.glb` (the vinyl toy) is never
+//   requested, at any width. It was 1.2 MB the hero no longer needs.
 //
 // Screenshots land in $FIDDY_HERO_SHOT_DIR (default: the system temp dir).
 
@@ -50,7 +62,9 @@ import { decodePng, visibleBox } from './lib/png.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, '..');
 const POSTER = path.join(APP, 'public', 'fiddy-hero-poster.png');
-const GLB = '/fiddy-hero.glb';
+const GLB = '/fiddy-baby.glb';
+/** The vinyl toy this hero replaced. Nothing may ask for it any more. */
+const RETIRED_GLB = '/fiddy-hero.glb';
 const POSTER_URL = '/fiddy-hero-poster.png';
 
 /** The brand ground the page paints, which is what the still sits on. */
@@ -173,6 +187,74 @@ const shot = async (page, label) => {
   return file;
 };
 
+/** What the character is doing, straight off the canvas it draws into. */
+const motionOf = (page) =>
+  page.evaluate(() => {
+    const canvas = document.querySelector(
+      '[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas',
+    );
+    return canvas?.getAttribute('data-motion') ?? null;
+  });
+
+/**
+ * The angle the character's own head has turned to, in degrees, as
+ * `yaw,pitch`.
+ *
+ * It is read off the element rather than inferred from pixels because the two
+ * questions are different: this one is "did the head follow the pointer, and
+ * which way", and a screenshot cannot tell a head that turned from a loop that
+ * happened to move an arm.
+ */
+const lookOf = (page) =>
+  page.evaluate(() => {
+    const canvas = document.querySelector(
+      '[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas',
+    );
+    return canvas?.getAttribute('data-look') ?? null;
+  });
+
+/**
+ * Wait for the character to settle. The still is ONE pose of a five-second loop,
+ * so a comparison against a frame taken mid-stride measures the loop instead of
+ * the shot.
+ */
+const waitForRest = (page, timeout = 20000) =>
+  page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas')
+        ?.getAttribute('data-motion') === 'resting',
+    undefined,
+    { timeout },
+  );
+
+const waitForMotion = (page, state, timeout = 8000) =>
+  page.waitForFunction(
+    (expected) =>
+      document
+        .querySelector('[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas')
+        ?.getAttribute('data-motion') === expected,
+    state,
+    { timeout },
+  );
+
+/**
+ * The figure's own box on the stage, in pixels, off a screenshot of the stage.
+ *
+ * The brand glow behind the hero is switched off for the measurement: it is
+ * decoration, and a halo would be read as part of the figure.
+ */
+async function figureBox(page, stage, file) {
+  await page.addStyleTag({
+    content: '.fiddy-hero-stage-hero::before { display: none !important }',
+  });
+  await stage.screenshot({ path: file, type: 'png' });
+  return visibleBox(decodePng(fs.readFileSync(file)), {
+    ground: GROUND,
+    threshold: 30,
+  });
+}
+
 /**
  * The still is not a lie: the stage as the browser paints it against
  * `public/fiddy-hero-poster.png`.
@@ -283,7 +365,7 @@ async function checkFrontDoor(browser, width) {
         .map((entry) => Math.round(entry.startTime));
     return {
       firstPaint: paint.length ? Math.round(paint[0].startTime) : null,
-      glb: at(/fiddy-hero\.glb/),
+      glb: at(/fiddy-baby\.glb/),
       // The chunk three.js lives in, whatever it is called: a bare module under
       // /node_modules/.vite in dev, an assets/ chunk in a build.
       loader: entries
@@ -314,6 +396,14 @@ async function checkFrontDoor(browser, width) {
   );
 
   // (4) nothing moved when it arrived: sampled every frame across the swap.
+  // The sampler records on its own animation frame, so give it one to see the
+  // state change before reading it back — otherwise this reads "moving=0" and
+  // looks like the swap never happened.
+  await page.waitForFunction(
+    () => (window.__heroSamples ?? []).some((sample) => sample.attr === 'moving'),
+    undefined,
+    { timeout: 5000 },
+  );
   const samples = await page.evaluate(() => window.__heroSamples);
   const stills = samples.filter((sample) => sample.attr === 'still');
   const movings = samples.filter((sample) => sample.attr === 'moving');
@@ -340,34 +430,159 @@ async function checkFrontDoor(browser, width) {
     );
   }
 
-  // (5) the still is not a lie: what the browser paints against the poster.
+  // (5) the still is not a lie: what the browser paints against the poster. The
+  // character is given time to settle first — the still is ONE pose of a loop,
+  // and comparing it against a frame taken mid-stride would measure the loop
+  // rather than the shot. (Settling is also what a reduced-motion reader sees
+  // forever, which is the frame this comparison exists to protect.)
+  await waitForRest(page);
   await compareStageToPoster(page, stage, label);
 
-  // (6) the pointer turns the model, and the page stays where it is.
-  const before = await page.screenshot({ clip: await stage.boundingBox() });
+  // (6) it is the interactive mascot, not a picture of one: the head follows the
+  // pointer. The angle read here is the character's OWN head, reported by the
+  // canvas it lives in — a pixel diff alone cannot say which way it turned.
   const box = await stage.boundingBox();
-  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.5);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5, {
-    steps: 12,
-  });
-  await page.mouse.up();
-  const after = await page.screenshot({ clip: box });
+  const view = page.viewportSize() ?? { width, height: 900 };
+  // "Straight ahead" is the MIDDLE OF THE WINDOW, not the middle of the stage —
+  // the head follows the pointer across the page, so it is the viewport the
+  // character is looking at.
+  await page.mouse.move(view.width / 2, view.height / 2);
+  await page.waitForTimeout(900);
+  const centred = await lookOf(page);
+  check(
+    `${label}: with the pointer in the middle the head sits straight ahead`,
+    centred === '0.0,0.0',
+    String(centred),
+  );
+
+  const aimedAway = await page.screenshot({ clip: box });
+  await page.mouse.move(width - 8, 60);
+  await page.waitForTimeout(1100);
+  const rightUp = await lookOf(page);
+  const aimedThere = await page.screenshot({ clip: box });
+  const [yawRight, pitchUp] = String(rightUp ?? '0,0').split(',').map(Number);
+  check(
+    `${label}: the pointer to the right and high turns the head right and up`,
+    yawRight > 8 && pitchUp > 3,
+    String(rightUp),
+  );
+  check(
+    `${label}: and the figure on screen really turned`,
+    !aimedAway.equals(aimedThere),
+    'the canvas is identical with the pointer on the left and on the right',
+  );
+
+  await page.mouse.move(8, 880);
+  await page.waitForTimeout(1100);
+  const leftDown = await lookOf(page);
+  const [yawLeft, pitchDown] = String(leftDown ?? '0,0').split(',').map(Number);
+  check(
+    `${label}: the pointer to the left and low turns it the other way`,
+    yawLeft < -8 && pitchDown < -3,
+    String(leftDown),
+  );
+  check(
+    `${label}: and never further than the rig allows (about 14°/7°)`,
+    Math.abs(yawLeft) < 16 && Math.abs(pitchDown) < 9,
+    String(leftDown),
+  );
+
   const scroll = await page.evaluate(() => ({
     x: window.scrollX,
-    y: window.scrollY,
     overflow:
       document.documentElement.scrollWidth - document.documentElement.clientWidth,
   }));
   check(
-    `${label}: dragging the model turns it`,
-    !before.equals(after),
-    'the canvas is identical before and after the drag',
-  );
-  check(
-    `${label}: dragging the model does not scroll or widen the page`,
+    `${label}: following the pointer never scrolls or widens the page`,
     scroll.x === 0 && scroll.overflow <= 0,
     JSON.stringify(scroll),
+  );
+
+  // (7) a press is a greeting. The hop is measured, not taken on trust: the
+  // figure's own box leaves the ground, and comes back.
+  await page.mouse.move(view.width / 2, view.height / 2);
+  await waitForRest(page);
+  const ground = await figureBox(
+    page,
+    stage,
+    path.join(OUT, `fiddy-hero-${label}-rest.png`),
+  );
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  let greeted = true;
+  try {
+    await waitForMotion(page, 'reacting', 2500);
+  } catch {
+    greeted = false;
+  }
+  check(
+    `${label}: a tap greets back`,
+    greeted,
+    `the canvas reports ${await motionOf(page)}`,
+  );
+  if (greeted) {
+    // The peak of a one-second hop, sampled across the whole greeting rather
+    // than read at a fixed delay: the round trip from the click to this line
+    // varies with how busy the box is (the first width of a run is the slowest),
+    // and a screenshot taken after the hop has finished measures nothing.
+    let air = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const frame = await figureBox(
+        page,
+        stage,
+        path.join(OUT, `fiddy-hero-${label}-hop-${attempt}.png`),
+      );
+      if (frame && (!air || frame.y0 + frame.y1 < air.y0 + air.y1)) {
+        air = frame;
+      }
+      await page.waitForTimeout(120);
+    }
+    // The figure's own centre, not its top edge: turning the head changes the
+    // silhouette's height, and only its middle says "it left the ground".
+    const middle = (box2) => (box2.y0 + box2.y1 + 1) / 2;
+    check(
+      `${label}: and the greeting lifts the figure off the ground`,
+      Boolean(ground && air) && middle(air) <= middle(ground) - 4,
+      `at rest y=${ground ? middle(ground) : null}, highest mid-hop ${air ? middle(air) : null}`,
+    );
+    // A greeting wakes the CLIP as well as hopping: one second of hop, five of
+    // loop, then it settles again. Polled rather than sampled once, because the
+    // exact moment this line runs is not predictable.
+    let keptRunning = null;
+    for (let attempt = 0; attempt < 10 && keptRunning !== 'playing'; attempt += 1) {
+      keptRunning = await motionOf(page);
+      if (keptRunning !== 'playing') {
+        await page.waitForTimeout(200);
+      }
+    }
+    check(
+      `${label}: and the greeting wakes the loop, which runs on after the hop`,
+      keptRunning === 'playing',
+      `the canvas reports ${keptRunning}`,
+    );
+  }
+
+  // A keyboard can greet it too: the stage on the front door is a real button.
+  await page.waitForTimeout(1200);
+  await stage.focus();
+  const keyboardBefore = await motionOf(page);
+  await page.keyboard.press('Enter');
+  let greetedByKey = true;
+  try {
+    await waitForMotion(page, 'reacting', 2500);
+  } catch {
+    greetedByKey = false;
+  }
+  check(
+    `${label}: Enter on the focused stage greets it as well`,
+    greetedByKey && keyboardBefore !== 'reacting',
+    `before=${keyboardBefore} after=${await motionOf(page)}`,
+  );
+
+  // (12) the retired vinyl toy is gone from the wire as well as from the repo.
+  check(
+    `${label}: the retired hero model is never requested`,
+    requested.filter((url) => url.endsWith(RETIRED_GLB)).length === 0,
+    requested.filter((url) => url.endsWith(RETIRED_GLB)).join(', '),
   );
 
   await shot(page, label);

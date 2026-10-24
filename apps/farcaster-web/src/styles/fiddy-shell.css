@@ -182,6 +182,16 @@ html.fiddy-dark-shell body {
 
 .fiddy-hero-stage-hero {
   --fiddy-hero-box: 168px;
+  /* The front door's stage is a real <button> so a press can greet Fiddy and a
+     keyboard can reach it. This is the reset that keeps it looking like the
+     image it is; the focus ring is the shell's own `:focus-visible` rule. */
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
 }
 
 .fiddy-hero-stage-form {
@@ -223,19 +233,12 @@ html.fiddy-dark-shell body {
   transition: opacity 180ms ease-out;
 }
 
-/* Only the big one is turnable, so only the big one takes the pointer. Vertical
-   panning stays with the page: a visitor scrolling past the hero on a phone must
-   not find their thumb dragging a toy instead. */
-.fiddy-hero-stage-hero .fiddy-hero-stage-canvas {
-  cursor: grab;
-  touch-action: pan-y;
-}
-
-.fiddy-hero-stage-hero .fiddy-hero-stage-canvas:active {
-  cursor: grabbing;
-}
-
-.fiddy-hero-stage-form .fiddy-hero-stage-canvas {
+/* The canvas never takes the pointer: the head follows the pointer anywhere on
+   the WINDOW (that is what makes it look at you), and a press belongs to the
+   button the canvas sits inside. Nothing here turns the figure by hand, so a
+   visitor scrolling past the hero on a phone keeps every thumb movement for the
+   page. */
+.fiddy-hero-stage-canvas {
   pointer-events: none;
 }
 
