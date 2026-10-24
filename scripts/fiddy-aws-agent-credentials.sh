@@ -63,6 +63,12 @@ cat > "$POLICY_DOC" <<JSON
       ],
       "Resource": "*",
       "Condition": { "StringEquals": { "aws:RequestedRegion": "$REGION" } }
+    },
+    {
+      "Sid": "WhoAmI",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
     }
   ]
 }
