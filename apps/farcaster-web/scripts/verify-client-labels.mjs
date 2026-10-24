@@ -191,39 +191,84 @@ const appNameOf = async (appFid) => {
 /**
  * Every labelled cast card on the page, with the cast it belongs to.
  *
- * The label sits on the author line, next to the link to the conversation, so
- * the card is the nearest ancestor that holds a cast-shaped link
- * (`/<handle>/<0x hash>`). Walked up rather than matched with a selector: the
- * markup between the two is a component's business, and a probe that hard-codes
- * it breaks on a layout change rather than on a behaviour change.
+ * The label sits on the author line, next to the cast's own links, so the card
+ * is the nearest ancestor that holds one of them. Walked up rather than matched
+ * with a selector: the markup between the two is a component's business, and a
+ * probe that hard-codes it breaks on a layout change rather than on a behaviour
+ * change.
+ *
+ * The link shapes the live client draws (measured 2026-08 on fiddy.fun):
+ *   author    `/<handle>?castHash=0x…`   (and `/u/<handle>` for a reserved name)
+ *   thread    `/~/conversations/0x…`     (the hash, even when the author's own
+ *                                         link is the vanity form)
  */
-const labelsOnPage = () =>
-  Array.from(document.querySelectorAll('[data-fiddy="cast-client-label"]')).map(
-    (label) => {
-      let node = label;
-      let handle = '';
-      let hash = '';
-      for (let level = 0; level < 12 && node; level += 1) {
-        node = node.parentElement;
-        if (!node) {
-          break;
-        }
-        for (const link of node.querySelectorAll('a[href]')) {
-          const href = link.getAttribute('href') ?? '';
-          const match = /^\/([^/]+)\/(0x[0-9a-fA-F]{40})$/.exec(href);
-          if (match) {
-            handle = match[1];
-            hash = match[2];
-            break;
-          }
-        }
-        if (hash) {
-          break;
+const labelsOnPage = () => {
+  const CAST_LINK = /^\/([^/?#]+)\?castHash=(0x[0-9a-fA-F]{40})$/;
+  const CAST_PATH = /^\/([^/?#]+)\/(0x[0-9a-fA-F]{40})$/;
+  const THREAD_LINK = /^\/~\/(?:conversations|casts)\/(0x[0-9a-fA-F]{40})$/;
+  const PROFILE_LINK = /^\/([^/?#]+)(?:\?|$)/;
+  const NOT_A_HANDLE = new Set([
+    'u',
+    'feed',
+    'explore',
+    'settings',
+    'welcome',
+    'start',
+    'client',
+    'api',
+    'unfurl',
+    '~',
+  ]);
+
+  const handleFrom = (href) => {
+    const match = PROFILE_LINK.exec(href);
+    if (!match) {
+      return '';
+    }
+    const name = match[1];
+    return NOT_A_HANDLE.has(name) || name.startsWith('~') ? '' : name;
+  };
+
+  const cards = Array.from(
+    document.querySelectorAll('[data-fiddy="cast-client-label"]'),
+  ).map((label) => {
+    let node = label;
+    let handle = '';
+    let hash = '';
+    for (let level = 0; level < 12 && node; level += 1) {
+      node = node.parentElement;
+      if (!node) {
+        break;
+      }
+      for (const link of node.querySelectorAll('a[href]')) {
+        const href = link.getAttribute('href') ?? '';
+        const withHash = CAST_LINK.exec(href);
+        const pathHash = CAST_PATH.exec(href);
+        const thread = THREAD_LINK.exec(href);
+        if (withHash && !hash) {
+          hash = withHash[2];
+          handle = handle || withHash[1];
+        } else if (pathHash && !hash) {
+          hash = pathHash[2];
+          handle = handle || pathHash[1];
+        } else if (thread && !hash) {
+          hash = thread[1];
+        } else if (!handle && handleFrom(href)) {
+          handle = handleFrom(href);
         }
       }
-      return { label: (label.textContent ?? '').trim(), handle, hash };
-    },
-  );
+      if (hash && handle) {
+        break;
+      }
+    }
+    return { label: (label.textContent ?? '').trim(), handle, hash };
+  });
+
+  return {
+    labels: cards,
+    castCards: document.querySelectorAll('a[href*="/~/conversations/"]').length,
+  };
+};
 
 const run = async () => {
   mkdirSync(SHOT_DIR, { recursive: true });
@@ -267,18 +312,38 @@ const run = async () => {
       );
       await page.screenshot({ path: shot, fullPage: false });
 
-      check(found > 0, 'casts carry an app label', `${found} label(s) at ${width}px`);
-
       const shown = await page.evaluate(labelsOnPage);
-      for (const entry of shown) {
+
+      // A page with no casts at all cannot answer the question this probe asks,
+      // so it is its own failing check rather than reading as "no labels yet".
+      const castCards = check(
+        shown.castCards > 0,
+        'the page really shows casts',
+        `${shown.castCards} cast card(s) at ${width}px`,
+      );
+      check(
+        found > 0,
+        'casts carry an app label',
+        `${found} label(s) of ${shown.castCards} cast(s) at ${width}px`,
+      );
+      if (!castCards) {
+        console.log(`  note screenshot ${shot}`);
+        continue;
+      }
+
+      for (const entry of shown.labels) {
         check(
           /^via\s+\S/.test(entry.label),
           'a label reads "via <app>"',
           JSON.stringify(entry.label),
         );
       }
-      collected.push(...shown.map((entry) => ({ ...entry, width, path })));
-      console.log(`  note ${found} label(s); screenshot ${shot}`);
+      collected.push(
+        ...shown.labels.map((entry) => ({ ...entry, width, path })),
+      );
+      console.log(
+        `  note labels: ${shown.labels.map((entry) => entry.label).join(', ') || '(none)'}; screenshot ${shot}`,
+      );
     }
 
     await context.close();
