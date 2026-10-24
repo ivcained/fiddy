@@ -17,6 +17,7 @@ import {
   farcasterPublicProvider,
   neynarProvider,
   ownNodeProvider,
+  publicNodeProvider,
 } from '~/snapchain/providers/catalog';
 import type { FailoverState } from '~/snapchain/providers/failover';
 import type { ProviderHealth } from '~/snapchain/providers/health';
@@ -145,6 +146,37 @@ describe('ProviderListCard', () => {
     expect(screen.getByText('needs a key')).toBeTruthy();
     expect(
       screen.getByText('Neynar needs your key before it can be used.'),
+    ).toBeTruthy();
+  });
+
+  it('shows a stale row behind the network, with the node’s own numbers', () => {
+    // The sentence the client composes for a node that answers while a shard is
+    // hours behind (MEASURED 2026-10-24 16:27 UTC, the public node). It has to
+    // reach this row verbatim: this is where a reader goes to find out why their
+    // feed looks quiet.
+    const relay = publicNodeProvider('https://haatz.quilibrium.com');
+    render(
+      <ProviderListCard
+        fid={undefined}
+        snapshot={build({
+          order: [relay, farcasterPublicProvider()],
+          activeId: relay.id,
+          health: {
+            [relay.id]: health(
+              relay.id,
+              'stale',
+              'It answered, but the newest blocks on shards 1 and 2 are 4h 39m and 13m 15s old.',
+            ),
+          },
+          explanation: '',
+        })}
+      />,
+    );
+    expect(screen.getByText('behind the network')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'It answered, but the newest blocks on shards 1 and 2 are 4h 39m and 13m 15s old.',
+      ),
     ).toBeTruthy();
   });
 

@@ -1,9 +1,33 @@
 {
+  "browser_proof": {
+    "healthy_body": {
+      "checks": "3/3",
+      "never_called_behind": true,
+      "on_screen_sentence": "Answering normally"
+    },
+    "how": "apps/farcaster-web/scripts/verify-freshness-copy.mjs (recipe in its header)",
+    "raw_output": "evidence/client-freshness-2026-10-24-browser.txt",
+    "stale_body": {
+      "checks": "4/4",
+      "node_asked": "4 /v1/info reads reached the stub",
+      "on_screen_sentence": "It answered, but the newest blocks on shards 1 and 2 are 4h 39m and 13m 15s old.",
+      "pill_title": "carries the same sentence",
+      "row": "1. Our public node reads + posts behind the network in use ... (then the sentence)"
+    },
+    "stubbed": "the SIWF relay, and the public node's /v1/info reads only (the 2026-10-24 16:27 UTC body); every other read of that host passed through"
+  },
   "client_verdict_on_the_last_pair": {
     "freshness_from_heights_across_reads": "fresh (both shards applied ~200 blocks in 21 s)",
     "sentence": "It answered, but the newest blocks on shards 1 and 2 are 4h 39m and 13m 15s old.",
     "status": "stale",
     "why_stale": "the per-shard ages (16,773 s and 795 s) are far over DEFAULT_HEALTH_CONFIG.maxTipAgeMs (120,000 ms), so those shards' data is hours behind even though the node is applying blocks"
+  },
+  "dom_proof": {
+    "asserts": "the measured sentence verbatim, and that no copy says 'blocks behind'",
+    "tests": [
+      "apps/farcaster-web/src/snapchain/providers/__tests__/pill.test.ts (the pill's hover title)",
+      "apps/farcaster-web/src/pages/settingsNode/Component/ProviderListCard.test.tsx (the node list row)"
+    ]
   },
   "field_definition": {
     "commit_gauge": "farcasterxyz/snapchain src/storage/store/engine.rs: gauge(\"block_delay_seconds\", FarcasterTime::current().to_u64() - block.timestamp)",
