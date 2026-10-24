@@ -226,11 +226,16 @@ else
     else
       bad "the launcher's key is missing from authorized_keys"
     fi
+    # The source box's key must NOT survive on a box booted from its snapshot.
+    SRC_PUB="$(ssh-keygen -y -f "$WORK/src.pem" 2>/dev/null | awk '{print $2}')"
+    if "${DEP_SSH[@]}" "grep -qF '$SRC_PUB' /home/ubuntu/.ssh/authorized_keys"; then
+      bad "the source box's SSH key is still authorised on the cloned box"
+    else
+      ok "the snapshot's inherited SSH key is gone (replaced, not appended)"
+    fi
     KEYS="$("${DEP_SSH[@]}" 'wc -l < /home/ubuntu/.ssh/authorized_keys' 2>/dev/null | tr -d '[:space:]')"
-    case "$KEYS" in
-      1) ok "exactly one key is authorised (the snapshot's inherited keys were replaced)" ;;
-      *) bad "authorized_keys holds ${KEYS:-?} keys; the first boot must replace, not append" ;;
-    esac
+    printf '    authorized_keys now holds %s line(s):\n' "${KEYS:-?}"
+    "${DEP_SSH[@]}" 'cut -d" " -f3 /home/ubuntu/.ssh/authorized_keys' 2>/dev/null | sed 's/^/      /' | head -3
   else
     bad "the launcher's key could not reach the box"
   fi

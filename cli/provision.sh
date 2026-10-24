@@ -342,10 +342,9 @@ UD
     root_gb=30
   fi
 
+  # An existing volume cannot be attached by run-instances (Ebs.VolumeId is not
+  # a launch parameter): it is attached immediately after the instance is up.
   local bda_parts=("DeviceName=/dev/sda1,Ebs={VolumeSize=$root_gb,VolumeType=gp3}")
-  if [ -n "$data_vol" ]; then
-    bda_parts=("${bda_parts[@]}" "DeviceName=/dev/sdf,Ebs={VolumeId=$data_vol,DeleteOnTermination=true}")
-  fi
   local launch_ami="$ami"
   [ "$fast_mode" = ami ] && launch_ami="$snap_ami"
   iid="$(aws ec2 run-instances --region "$region" \
@@ -356,6 +355,11 @@ UD
     --query 'Instances[0].InstanceId' --output text)" || die "run-instances failed"
   log "instance: $iid — waiting for running state…"
   aws ec2 wait instance-running --region "$region" --instance-ids "$iid"
+  if [ -n "$data_vol" ]; then
+    aws ec2 attach-volume --region "$region" --volume-id "$data_vol" --instance-id "$iid" --device /dev/sdf >/dev/null \
+      && ok "node data volume $data_vol attached (/dev/sdf)" \
+      || warn "could not attach $data_vol — attach it by hand: aws ec2 attach-volume --volume-id $data_vol --instance-id $iid --device /dev/sdf"
+  fi
 
   local ip
   ip="$(aws ec2 describe-instances --region "$region" --instance-ids "$iid" \

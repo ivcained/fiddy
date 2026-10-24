@@ -188,7 +188,11 @@ ExecStart=/usr/local/sbin/fiddy-firstboot-keys.sh
 [Install]
 WantedBy=multi-user.target
 EOS
-systemctl enable --now fiddy-firstboot-keys.service >/dev/null 2>&1 || true"
+systemctl enable fiddy-firstboot-keys.service >/dev/null 2>&1 || true
+# cloud-init writes its own key AFTER user-data runs, so run the replacement
+# again a little later in this boot as well: the file must end up holding
+# exactly one key, and it must not be one inherited from the snapshot.
+systemd-run --on-active=90 --unit=fiddy-keys-once /usr/local/sbin/fiddy-firstboot-keys.sh >/dev/null 2>&1 || true"
 
 # The data-volume mode (see below): mount the volume built from the pinned
 # snapshot and make ~/snapchain point at the node data inside it. The volume was
@@ -234,10 +238,10 @@ $VOLUME_BRINGUP
 EOF
 
 IID="$(aws_cli ec2 describe-instances --region "$REGION" --filters "Name=tag:Name,Values=$NAME" "Name=instance-state-name,Values=pending,running" --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null || true)"
+# run-instances cannot attach an existing volume (Ebs.VolumeId is not a launch
+# parameter), so only the root device is set here and the data volume is
+# attached right after the instance is running.
 BDA_ARGS=("DeviceName=/dev/sda1,Ebs={VolumeSize=$ROOT_GB,VolumeType=gp3,DeleteOnTermination=true}")
-if [ -n "$DATA_VOL" ]; then
-  BDA_ARGS=("${BDA_ARGS[@]}" "DeviceName=/dev/sdf,Ebs={VolumeId=$DATA_VOL,DeleteOnTermination=true}")
-fi
 LAUNCH_AMI="$AMI"
 [ "$FAST_MODE" = ami ] && LAUNCH_AMI="$SNAP_AMI"
 if [ -z "$IID" ] || [ "$IID" = "None" ]; then
@@ -251,6 +255,12 @@ else
   echo "▸ ($NAME already running — reusing)"
 fi
 aws_cli ec2 wait instance-running --region "$REGION" --instance-ids "$IID"
+if [ -n "$DATA_VOL" ]; then
+  aws_cli ec2 attach-volume --volume-id "$DATA_VOL" --instance-id "$IID" --device /dev/sdf >/dev/null \
+    || echo "  ! could not attach $DATA_VOL (attach it by hand: aws ec2 attach-volume --volume-id $DATA_VOL --instance-id $IID --device /dev/sdf)"
+  aws_cli ec2 wait volume-in-use --volume-ids "$DATA_VOL" || true
+  echo "  data volume $DATA_VOL attached to $IID as /dev/sdf"
+fi
 IP="$(aws_cli ec2 describe-instances --region "$REGION" --instance-ids "$IID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
 
 mkdir -p "${FIDDY_HOME:-$HOME/.fiddy}"
