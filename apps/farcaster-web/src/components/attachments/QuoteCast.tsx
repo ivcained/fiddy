@@ -26,6 +26,8 @@ import { CastAuthorLine } from '~/components/casts/CastAuthorLine';
 import { Image } from '~/components/images/Image';
 import { LinkToConversationWithoutUsername } from '~/components/links/LinkToConversationWithoutUsername';
 import { useUserAppContext } from '~/contexts/UserAppContextProvider';
+import { mutedAuthorInUse, mutedWordInUse } from '~/snapchain/mutePreferences';
+import { useActiveMutes } from '~/snapchain/useMutePreferences';
 
 import { SnapEmbedAttachment } from './SnapEmbedAttachment';
 
@@ -163,6 +165,46 @@ const QuoteCast: FC<QuoteCastProps> = memo(
         shouldAvoidUpdatingGlobalCache: true,
       });
     }, [cast.hash, prefetchThread]);
+
+    /**
+     * A quote of somebody this reader hides is REPLACED, not left blank: a hole
+     * where a card should be reads as a bug, while the sentence names the
+     * reader's own decision. `mutes` is the subscription, so a mute saved a
+     * moment ago redraws this card.
+     *
+     * This is the only place a mute is honoured inside a conversation, and
+     * deliberately so: the quote is part of THIS cast's own body, not a second
+     * item in the view. A conversation itself stays whole (see `reads.ts`).
+     */
+    const mutes = useActiveMutes();
+    // Recomputed on every render on purpose: it is two small array scans and one
+    // regex test, and `mutes` is the subscription that redraws this card when
+    // the reader hides somebody — a memo would only fight the hook.
+    const hiddenByMutes =
+      mutes !== null &&
+      (mutedAuthorInUse(cast.author?.fid) || mutedWordInUse(cast.text));
+
+    if (hiddenByMutes) {
+      return (
+        <div
+          className={classNames(
+            'relative flex w-full flex-col pt-2',
+            disabled && 'mt-2',
+          )}
+        >
+          <div
+            className={classNames(
+              'px-3 py-2 text-faint',
+              !skipBorderStyles &&
+                'rounded-[12px] border bg-[#00000005] border-default dark:bg-[#ffffff05]',
+            )}
+            data-fiddy="quote-hidden-by-mutes"
+          >
+            Hidden by your mutes.
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div

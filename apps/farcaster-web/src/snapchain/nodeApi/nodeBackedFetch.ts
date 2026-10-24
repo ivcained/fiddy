@@ -46,6 +46,7 @@ import {
   clientFilterPolicyInUse,
   knownClientsInUse,
 } from '~/snapchain/clientFilterPreferences';
+import { mutesInUse } from '~/snapchain/mutePreferences';
 import { THIS_CLIENT_APP_FID } from '~/snapchain/thisClientApp';
 
 import { type EmbedCardResolver } from './embedCards';
@@ -534,6 +535,12 @@ export const createNodeBackedFetch = ({
       thisAppFid: THIS_CLIENT_APP_FID,
       knownClients: knownClientsInUse,
       clientFilter: clientFilterPolicyInUse,
+      // The reader's own mutes, blocks and hidden words. Protocol messages carry
+      // none of it and a node stores none of it, so this is the only thing that
+      // can make "hide this person" true of a node-assembled feed — read fresh
+      // on every request from the store the app shell keeps in step with
+      // storage, so saving a mute changes the very next page with no reload.
+      mutes: mutesInUse,
       ...(countCap ? { countCap } : {}),
       ...(embedKinds ? { embedKinds } : {}),
       ...(embedCards ? { embedCards } : {}),
