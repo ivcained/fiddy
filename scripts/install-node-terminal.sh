@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# Put a per-node web terminal (and a token-gated node-API proxy) in front of one
+# managed node. Runs ON THE HOST THAT RUNS THE DEPLOY-AGENT (the VPS), as root.
+#
+#   bash scripts/install-node-terminal.sh \
+#     --fid 191554 --token <32-64 hex chars> \
+#     --ssh ubuntu@<node-ip> --key /path/to/instance.pem \
+#     [--node-port 3381] [--host fiddy.fun] [--json]
+#
+# What it does, in order:
+#   1. installs ttyd (apt, else the upstream static binary) — once per host;
+#   2. stores the node's SSH key at /etc/fiddy/nodes/fid-<fid>.pem (mode 600);
+#      the key lives here and nowhere else; the miniapp never sees it;
+#   3. starts ttyd as a systemd unit, bound to 127.0.0.1, whose command is an
+#      SSH login to the node. So the terminal is an SSH session to the node —
+#      it holds no keys, and the node holds none by design;
+#   4. writes an nginx snippet with two locations for this node:
+#        /term/<token>/   -> that ttyd            (interactive ops shell)
+#        /node/<token>/   -> the node's HTTP API  (so "your endpoint" is a
+#                            real HTTPS URL, reachable from a browser)
+#      The token is 128-bit random and is the only thing in the path; rotating
+#      it is re-running this script with a new token (the old URL 404s).
+#   5. reloads nginx and READS BOTH PATHS BACK, then prints
+#        FIDDY_TERMINAL_JSON {…}
+#      so the caller stores verified facts, not intentions.
+#
+# Idempotent: re-running for the same fid rewrites the unit and snippet in place
+# and keeps the port already allocated to that fid.
+set -euo pipefail
+
+FID=""
+TOKEN=""
+SSH_TARGET=""
+KEY=""
+NODE_PORT="${SNAP_HTTP_PORT:-3381}"
+SITE_HOST="fiddy.fun"
+SITE_CONF="/etc/nginx/sites-available/${SITE_HOST}"
+SNIPPET_DIR="/etc/nginx/snippets/fiddy-terminals"
+NODE_DIR="/etc/fiddy/nodes"
+STATE_DIR="/etc/fiddy/terminals"
+PORT_BASE=7701
+JSON=0
+
+log() { printf '▸ %s\n' "$*"; }
+ok()  { printf '✓ %s\n' "$*"; }
+warn(){ printf '! %s\n' "$*" >&2; }
+die() { warn "$*"; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fid) FID="$2"; shift 2 ;;
+    --token) TOKEN="$2"; shift 2 ;;
+    --ssh) SSH_TARGET="$2"; shift 2 ;;
+    --key) KEY="$2"; shift 2 ;;
+    --node-port) NODE_PORT="$2"; shift 2 ;;
+    --host) SITE_HOST="$2"; SITE_CONF="/etc/nginx/sites-available/$2"; shift 2 ;;
+    --json) JSON=1; shift ;;
+    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+case "$FID" in ''|*[!0-9]*) die "--fid must be a positive integer" ;; esac
+[ "$FID" -gt 0 ] || die "--fid must be a positive integer"
+printf '%s' "$TOKEN" | grep -Eq '^[0-9a-f]{32,64}$' \
+  || die "--token must be 32-64 lowercase hex chars (128+ bits of randomness)"
+printf '%s' "$SSH_TARGET" | grep -Eq '^[\w.-]+@[\w.-]+$' || die "--ssh must look like user@host"
+[ -n "$KEY" ] && [ -f "$KEY" ] || die "--key must point at the node's private key"
+[ "$(id -u)" = "0" ] || die "run as root (systemd + nginx live here)"
+command -v nginx >/dev/null || die "nginx not found on this host"
+command -v python3 >/dev/null || die "python3 not found"
+[ -f "$SITE_CONF" ] || die "$SITE_CONF not found — pass --host with the right site"
+
+# --- 1. ttyd ---------------------------------------------------------------
+if ! command -v ttyd >/dev/null 2>&1 && [ ! -x /usr/local/bin/ttyd ]; then
+  log "installing ttyd…"
+  if apt-get install -y -qq ttyd >/dev/null 2>&1; then
+    ok "ttyd from apt"
+  else
+    # ttyd is not in every distro's repos; the upstream static release is.
+    ver="1.7.7"
+    curl -fsSL -o /usr/local/bin/ttyd \
+      "https://github.com/tsl0922/ttyd/releases/download/${ver}/ttyd.x86_64" \
+      || die "could not install ttyd (apt and the static release both failed)"
+    chmod 755 /usr/local/bin/ttyd
+    ok "ttyd $ver static binary"
+  fi
+fi
+TTYD_BIN="$(command -v ttyd || echo /usr/local/bin/ttyd)"
+TTYD_BASE_PATH="$($TTYD_BIN --help 2>&1 | grep -c -- '--base-path' || true)"
+[ "$TTYD_BASE_PATH" -gt 0 ] || die "this ttyd has no --base-path: it cannot be served under /term/<token>/"
+
+# --- 2. the node's key, in one place --------------------------------------
+install -d -m 700 "$NODE_DIR"
+install -m 600 "$KEY" "$NODE_DIR/fid-${FID}.pem"
+ok "key stored: $NODE_DIR/fid-${FID}.pem (mode 600)"
+
+# --- 3. port, reused if this fid already had one --------------------------
+install -d -m 700 "$STATE_DIR"
+PORT=""
+if [ -f "$STATE_DIR/fid-${FID}.env" ]; then
+  PORT="$(sed -n 's/^PORT=//p' "$STATE_DIR/fid-${FID}.env" | head -1)"
+fi
+if [ -z "$PORT" ]; then
+  taken=" $(sed -n 's/^PORT=//p' "$STATE_DIR"/*.env 2>/dev/null | tr '\n' ' ')"
+  PORT="$PORT_BASE"
+  while printf '%s' "$taken" | grep -q " $PORT "; do PORT=$((PORT + 1)); done
+fi
+printf 'PORT=%s\nTOKEN=%s\nSSH=%s\n' "$PORT" "$TOKEN" "$SSH_TARGET" > "$STATE_DIR/fid-${FID}.env"
+chmod 600 "$STATE_DIR/fid-${FID}.env"
+ok "terminal port: 127.0.0.1:$PORT"
+
+# --- 4. ttyd unit: an SSH session to the node ------------------------------
+UNIT="/etc/systemd/system/fiddy-term-${FID}.service"
+cat > "$UNIT" <<EOF
+# Managed by scripts/install-node-terminal.sh — fid ${FID}.
+# ttyd speaks to the node over SSH with the key stored above; it listens on
+# loopback only, so the token'd nginx location is the only way in.
+[Unit]
+Description=Fiddy managed node terminal (fid ${FID})
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${TTYD_BIN} --port ${PORT} --interface 127.0.0.1 --writable \\
+  --base-path /term/${TOKEN}/ \\
+  --client-option fontSize=13 --client-option scrollback=5000 \\
+  /usr/bin/ssh -i ${NODE_DIR}/fid-${FID}.pem \\
+    -o BatchMode=yes -o StrictHostKeyChecking=accept-new \\
+    -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \\
+    -o LogLevel=ERROR ${SSH_TARGET}
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# --- 5. nginx: two token'd paths for this node ----------------------------
+install -d -m 755 "$SNIPPET_DIR"
+SNIPPET="$SNIPPET_DIR/fid-${FID}.conf"
+cat > "$SNIPPET" <<EOF
+# Managed by scripts/install-node-terminal.sh — fid ${FID}. Regenerate to rotate
+# the token. Both paths are token-gated; without the token they 404.
+location = /term/${TOKEN} { return 301 /term/${TOKEN}/; }
+location /term/${TOKEN}/ {
+    limit_except GET POST { deny all; }
+    proxy_pass http://127.0.0.1:${PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
+}
+location = /node/${TOKEN} { return 301 /node/${TOKEN}/v1/info; }
+location /node/${TOKEN}/ {
+    limit_except GET { deny all; }
+    proxy_pass http://${SSH_TARGET#*@}:${NODE_PORT}/;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_read_timeout 60s;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
+}
+EOF
+
+# The snippet has to be included by the site's TLS server block, once.
+if ! grep -q "snippets/fiddy-terminals" "$SITE_CONF"; then
+  log "adding the snippet include to $SITE_CONF"
+  SITE_CONF="$SITE_CONF" python3 - <<'PY'
+import os, pathlib, sys
+path = pathlib.Path(os.environ["SITE_CONF"])
+text = path.read_text()
+anchor = "root /var/www/fiddy.fun/current/web;"
+if text.count(anchor) != 1:
+    sys.exit("anchor line is not unique in the site config — include it by hand")
+include = ("    # Managed node terminals (scripts/install-node-terminal.sh): a token'd\n"
+           "    # ttyd per node and a token'd proxy to that node's own HTTP API.\n"
+           "    include /etc/nginx/snippets/fiddy-terminals/*.conf;\n")
+path.write_text(text.replace(anchor, anchor + "\n" + include.rstrip("\n"), 1))
+print("include added")
+PY
+fi
+
+# --- 6. apply ---------------------------------------------------------------
+systemctl daemon-reload
+systemctl enable --now "fiddy-term-${FID}.service" >/dev/null 2>&1 || true
+systemctl restart "fiddy-term-${FID}.service"
+nginx -t >/dev/null 2>&1 || { nginx -t; die "nginx config is invalid — snippet left in place for inspection"; }
+systemctl reload nginx
+
+# --- 7. read it back -------------------------------------------------------
+sleep 2
+UNIT_STATE="$(systemctl is-active "fiddy-term-${FID}.service" || true)"
+LOCAL_CODE="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "http://127.0.0.1:${PORT}/" || echo 000)"
+TERM_CODE="$(curl -s -o /dev/null -m 15 -k -w '%{http_code}' \
+  --resolve "${SITE_HOST}:443:127.0.0.1" "https://${SITE_HOST}/term/${TOKEN}/" || echo 000)"
+NODE_CODE="$(curl -s -o /dev/null -m 15 -k -w '%{http_code}' \
+  --resolve "${SITE_HOST}:443:127.0.0.1" "https://${SITE_HOST}/node/${TOKEN}/v1/info" || echo 000)"
+NO_TOKEN_CODE="$(curl -s -o /dev/null -m 10 -k -w '%{http_code}' \
+  --resolve "${SITE_HOST}:443:127.0.0.1" "https://${SITE_HOST}/term/deadbeefdeadbeefdeadbeefdeadbeef/" || echo 000)"
+
+# The terminal is an SSH session; prove the SSH half independently of ttyd.
+SSH_PROBE="$(ssh -i "$NODE_DIR/fid-${FID}.pem" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+  -o ConnectTimeout=10 "$SSH_TARGET" 'echo ssh-ok; hostname' 2>&1 || true)"
+
+printf 'state=%s local=%s term=%s node=%s no_token=%s ssh=%s\n' \
+  "$UNIT_STATE" "$LOCAL_CODE" "$TERM_CODE" "$NODE_CODE" "$NO_TOKEN_CODE" \
+  "$(printf '%s' "$SSH_PROBE" | head -1)"
+
+python3 - <<PY
+import json
+print("FIDDY_TERMINAL_JSON " + json.dumps({
+  "fid": ${FID},
+  "terminalUrl": "https://${SITE_HOST}/term/${TOKEN}/",
+  "endpointUrl": "https://${SITE_HOST}/node/${TOKEN}/",
+  "port": ${PORT},
+  "unit": "fiddy-term-${FID}.service",
+  "unitState": "${UNIT_STATE}",
+  "localHttp": "${LOCAL_CODE}",
+  "terminalHttp": "${TERM_CODE}",
+  "nodeApiHttp": "${NODE_CODE}",
+  "wrongTokenHttp": "${NO_TOKEN_CODE}",
+  "sshReachable": "${SSH_PROBE}" .startswith("ssh-ok"),
+}))
+PY
+
+[ "$UNIT_STATE" = "active" ] || die "ttyd unit is $UNIT_STATE — check: journalctl -u fiddy-term-${FID}"
+[ "$TERM_CODE" = "200" ] || warn "terminal path answered $TERM_CODE (ttyd may still be starting)"
+ok "terminal: https://${SITE_HOST}/term/${TOKEN}/  ·  endpoint: https://${SITE_HOST}/node/${TOKEN}/"

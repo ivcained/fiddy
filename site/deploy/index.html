@@ -176,14 +176,18 @@ bin/fiddy node up</span></pre>
 
   <div class="card" id="managedCard">
     <h2><span class="n">✦</span>Zero clicks — we run it for you</h2>
-    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, $320/mo.</strong>
-    Pay from your Farcaster wallet; we provision and babysit a node on our cloud and hand you the endpoint.
-    Cancel anytime. Your node holds no keys and only public data — casts are always signed on your device.</p>
+    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, <span id="priceLabel">$320</span>/mo.</strong>
+    Pay from your Farcaster wallet and your machine is created on our cloud immediately — no waiting for us
+    to wake up. You get an HTTPS endpoint for your node and a terminal into it; the terminal holds no keys,
+    and your node holds none either: casts are always signed on your device.</p>
     <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $320 USDC &amp; deploy</button>
     <span id="payStatus" style="margin-left:12px;font-size:13.5px" class="dim"></span></p>
     <div id="subView" hidden style="margin-top:14px;font:14px/1.7 var(--mono)"></div>
     <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
-    On the open web the button tells you how to pay instead. Nodes go live within 24h of payment — overnight is the snapshot, not us.</p>
+    On the open web the button tells you how to pay instead. The machine appears in minutes; the node answers once it has
+    caught up with chain history (~470 GB — hours, not minutes). <strong style="color:var(--ink)">Money honesty:</strong>
+    the machine costs us about $285/mo at list; the balance is the babysitting. Cancel anytime — a lapsed
+    subscription gets 7 days' grace before the machine goes back.</p>
   </div>
 
   <footer>
@@ -272,12 +276,182 @@ async function poll(ip) {
 </script>
 <script src="/client/assets/miniapp-sdk.min.js"></script>
 <script>
-// Managed-by-Fiddy: one click → USDC send from the user's Farcaster wallet →
-// we record the order and deploy within 24h. Recipient is the operator's
-// Farcaster-verified wallet (fid 191554). USDC on Base, 6 decimals.
+// Managed-by-Fiddy, now self-serve: pay $480 USDC from your Farcaster wallet and
+// OUR account provisions the node. Two rules the page enforces, because the
+// server does:
+//   1. an order exists only if Base confirms the transfer to us — a payment that
+//      has not mined is not an order, and the page says which of the two it is;
+//   2. the node starts only when you sign in with the Farcaster account that
+//      paid, and that same sign-in is the only thing that ever returns the
+//      terminal link. There is no path here that spends money quietly.
 const PAY_TO = '0xde4dcfca310b6a7ade321b6981363e2d7e0323d9';
 const USDC_BASE = 'eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const AMOUNT = '320000000'; // $320.00 USDC
+// The price is the server's, not this file's: the status answer carries it and
+// setPrice() writes it into the headline, the button and the amount. A price
+// change is then one env change, not a release.
+let PRICE_USDC = 320;
+let AMOUNT = '320000000';
+
+function setPrice(usdc) {
+  if (typeof usdc !== 'number' || !isFinite(usdc) || usdc <= 0) return;
+  PRICE_USDC = usdc;
+  AMOUNT = String(Math.round(usdc * 1e6));
+  const label = $('priceLabel');
+  if (label) label.textContent = '$' + (Number.isInteger(usdc) ? usdc : usdc.toFixed(2));
+  const pay = $('payBtn');
+  if (pay && /^Pay \$/.test(pay.textContent)) pay.textContent = 'Pay $' + usdc + ' USDC & deploy';
+}
+
+// One sentence per state, written for a person waiting on a download.
+const STATE_TEXT = {
+  pending: 'paid · sign in to start it',
+  provisioning: 'creating your machine…',
+  bootstrapping: 'machine up · downloading chain history',
+  live: 'live',
+  stopped: 'stopped',
+  terminated: 'retired',
+  failed: 'provisioning failed — we are on it',
+};
+
+function line(parts) {
+  const view = $('subView');
+  view.replaceChildren(...parts);
+  view.hidden = false;
+}
+
+function span(className, text, color) {
+  const node = document.createElement('span');
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  if (color) node.style.color = color;
+  return node;
+}
+
+function link(href, text) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.textContent = text;
+  a.rel = 'noreferrer';
+  return a;
+}
+
+function stateDot(state) {
+  const color = state === 'live' ? 'var(--lime)' : state === 'failed' ? '#ff8a5c' : '#ffd166';
+  return span('', '●', color);
+}
+
+// The one path to a terminal link: a challenge we issued, signed in the host,
+// exchanged for that FID's token'd URLs. Called on demand — not on every load —
+// because the host shows a sign-in sheet each time.
+async function signedInNode(fid) {
+  const sdk = window.miniapp && window.miniapp.sdk;
+  if (!sdk) return { error: 'Open this page inside a Farcaster client to sign in.' };
+  let challenge;
+  try {
+    challenge = await fetch('/api/fiddy/managed-node/claim?fid=' + encodeURIComponent(fid)).then((r) => (r.ok ? r.json() : null));
+  } catch { challenge = null; }
+  if (!challenge || !challenge.nonce) return { error: 'Could not start a sign-in. Try again in a moment.' };
+  let signed;
+  try {
+    signed = await sdk.actions.signIn({ nonce: challenge.nonce });
+  } catch {
+    return { error: 'Sign-in was cancelled, so nothing was started.' };
+  }
+  let r;
+  try {
+    r = await fetch('/api/fiddy/managed-node/claim', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ fid, nonce: challenge.nonce, message: signed.message, signature: signed.signature }),
+    });
+  } catch {
+    return { error: 'We could not reach the server. Try again in a moment.' };
+  }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return { error: d.message || 'We could not match that sign-in to your payment.' };
+  return d;
+}
+
+async function showSubscription(fid) {
+  try {
+    const r = await fetch('/api/fiddy/managed-node/status?fid=' + encodeURIComponent(fid));
+    if (!r.ok) return;
+    const d = await r.json();
+    // Whatever the server says the price is, that is what this page charges.
+    if (typeof d.priceUsdc === 'number') setPrice(d.priceUsdc);
+    if (!d.subscribed) return;
+    renderSubscription(fid, d);
+    // While the machine is being made, keep looking — and stop looking once it
+    // is live, because a node that answers does not need watching.
+    if (['provisioning', 'bootstrapping'].includes(d.state)) schedulePoll(fid);
+  } catch { /* status is a nicety; never break the pay flow */ }
+}
+
+function renderSubscription(fid, d) {
+  const since = new Date(d.since).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const renews = new Date(d.renewsOn).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const parts = [
+    stateDot(d.state),
+    document.createTextNode(` ${STATE_TEXT[d.state] || d.state} · subscribed ${since} · ${d.daysLeft} days left` +
+      (d.daysLeft <= 5 ? ' — time to renew' : '')),
+  ];
+  if (d.state === 'live' && typeof d.height === 'number' && d.height > 0) {
+    parts.push(document.createTextNode(` · height ${d.height.toLocaleString()}`));
+  } else if (d.state === 'bootstrapping' || d.state === 'provisioning') {
+    parts.push(document.createTextNode(' · bootstrap takes hours, not minutes'));
+  }
+  parts.push(document.createTextNode(` · renews ${renews}`));
+
+  if (d.terminalAvailable) {
+    const open = document.createElement('button');
+    open.className = 'btn ghost';
+    open.style.marginLeft = '10px';
+    open.textContent = 'Open your node';
+    open.addEventListener('click', async () => {
+      const before = open.textContent;
+      open.textContent = 'Signing in…';
+      const result = await signedInNode(fid);
+      open.textContent = before;
+      if (result.error) { $('payStatus').textContent = result.error; return; }
+      renderTerminal(result);
+    });
+    parts.push(open);
+  }
+  if (d.error && d.state === 'failed') parts.push(document.createTextNode(` · ${d.error}`));
+  line(parts);
+  $('payBtn').textContent = d.daysLeft <= 5 ? 'Renew — $' + PRICE_USDC + ' USDC' : 'Renew early';
+}
+
+function renderTerminal(node) {
+  const parts = [document.createTextNode('your node: '), link(node.endpointUrl, node.endpointUrl)];
+  if (node.terminalUrl) {
+    parts.push(document.createTextNode(' · '));
+    parts.push(link(node.terminalUrl, 'open the terminal'));
+  }
+  // A sentence, not a footnote: the terminal holds no keys.
+  parts.push(document.createTextNode(' · ops shell for logs and status; the node holds no keys'));
+  line(parts);
+  $('payStatus').textContent = '✓ Signed in. The endpoint and terminal are yours.';
+}
+
+let pollTimer = null;
+function schedulePoll(fid) {
+  if (pollTimer) return;
+  let tries = 0;
+  pollTimer = setInterval(async () => {
+    tries += 1;
+    if (tries > 40) { clearInterval(pollTimer); pollTimer = null; return; }
+    try {
+      const r = await fetch('/api/fiddy/managed-node/status?fid=' + encodeURIComponent(fid));
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.subscribed) renderSubscription(fid, d);
+      if (d.state === 'live' || d.state === 'failed' || d.state === 'terminated') {
+        clearInterval(pollTimer); pollTimer = null;
+      }
+    } catch { /* keep polling; the next tick may work */ }
+  }, 20000);
+}
 
 $('payBtn').addEventListener('click', async () => {
   const status = $('payStatus');
@@ -299,45 +473,41 @@ $('payBtn').addEventListener('click', async () => {
     });
     if (!result || !result.success) { status.textContent = 'Payment cancelled — nothing was charged.'; return; }
     const txHash = result.send && result.send.transaction;
-    status.textContent = 'Paid. Registering your order…';
+    status.textContent = 'Paid. Waiting for Base to confirm the transfer…';
     const r = await fetch('/api/fiddy/managed-node', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ fid, address: (ctx.user.custodyAddress || ''), txHash: txHash || '' }),
     });
-    if (!r.ok) throw new Error('order registration failed');
-    status.textContent = '✓ Order in. We deploy within 24h and message you on Farcaster with your endpoint.';
+    const order = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      // The server names the reason (not mined yet, not to us, too small), and
+      // the tx hash is the receipt either way.
+      status.textContent = order.message
+        ? `${order.message} Your receipt: https://basescan.org/tx/${txHash}`
+        : 'We could not register the order. Your receipt: https://basescan.org/tx/' + txHash;
+      return;
+    }
+    status.textContent = '✓ Payment recorded. Sign in to start your node…';
+    // The order is in. Starting the node is a separate, signed step: it is what
+    // binds the machine — and the terminal link — to this account.
+    const started = await signedInNode(fid);
+    if (started.error) {
+      status.textContent = `✓ Paid and recorded. ${started.error} Your node starts the moment you sign in.`;
+      showSubscription(fid);
+      return;
+    }
+    status.textContent = started.started
+      ? '✓ Your node is being created. This page will follow it.'
+      : '✓ Your node is already running on this subscription.';
+    renderTerminal(started);
     showSubscription(fid);
   } catch (e) {
     status.textContent = 'Something failed: ' + (e && e.message ? e.message : String(e)) + ' — if you paid, your tx hash is your receipt; message @ivc.';
   }
 });
 
-// Subscription view: once the host tells us who this is, swap the pay pitch for
-// their live subscription — since when, days left, renewal date. At ≤5 days the
-// line turns into a renewal reminder.
-async function showSubscription(fid) {
-  const view = $('subView');
-  try {
-    const r = await fetch('/api/fiddy/managed-node/status?fid=' + encodeURIComponent(fid));
-    if (!r.ok) return;
-    const d = await r.json();
-    if (!d.subscribed) return;
-    const since = new Date(d.since).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    const renews = new Date(d.renewsOn).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    const dot = document.createElement('span');
-    dot.style.color = d.daysLeft <= 5 ? '#ff8a5c' : 'var(--lime)';
-    dot.textContent = '●';
-    const state = d.nodeStatus === 'deployed' ? 'node live' : 'deploying';
-    view.replaceChildren(dot, document.createTextNode(
-      ` ${state} · subscribed ${since} · ${d.daysLeft} days left · renews ${renews}` +
-      (d.daysLeft <= 5 ? ' — time to renew' : '')));
-    view.hidden = false;
-    $('payBtn').textContent = d.daysLeft <= 5 ? 'Renew — $320 USDC' : 'Renew early';
-  } catch { /* status is a nicety; never break the pay flow */ }
-}
-
 // On load: clear the host splash (ready), then if a Farcaster host knows this
-// user, show their subscription.
+// user, show what their subscription and node are doing.
 (function () {
   const sdk = window.miniapp && window.miniapp.sdk;
   if (!sdk) return;
