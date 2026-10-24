@@ -240,13 +240,11 @@ provision_aws() {
   done
   ok "security group: $sg_id (SSH/API → you only; gossip 3382 → world)"
 
-  # user-data: Docker preinstalled so `fiddy node up` is fast.
-  local ud="$FIDDY_HOME/user-data.sh"
-  cat > "$ud" <<'UD'
-#!/bin/bash
-curl -fsSL https://get.docker.com | bash
-usermod -aG docker ubuntu
-UD
+  # user-data: ONE shared file (scripts/aws-node-user-data.sh) so the box this
+  # path creates and the box scripts/aws-deploy.sh creates cannot drift —
+  # Docker, cron, and the fiddy CLI the node's own terminal is meant to run.
+  local ud="$FIDDY_REPO/scripts/aws-node-user-data.sh"
+  [ -f "$ud" ] || die "missing $ud — the fiddy checkout is incomplete"
 
   local iid
   iid="$(aws ec2 run-instances --region "$region" \

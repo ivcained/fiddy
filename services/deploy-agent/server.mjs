@@ -13,17 +13,32 @@
 //                   {"kind":"ssh", "sshTarget":"user@host"}   -> { jobId }
 //                   kind=aws creates OUR EC2 instance, installs the node on it
 //                   and, when a token is given, the per-node terminal.
-//   POST /teardown  {"instanceId":"i-…", "region":"us-east-1"} -> { jobId }
-//                   terminates the instance and proves the billing stopped.
+//   POST /retry     {"fid":N, "token":"<hex>"}               -> { jobId }
+//                   re-runs the node-up and terminal steps against the SAME
+//                   instance a failed job already created — the target and key
+//                   come from the persisted facts of that job (or an explicit
+//                   jobId), so a retry never mints a second box.
+//   POST /teardown  {"instanceId":"i-…", "region":"us-east-1", "fid":N?} -> { jobId }
+//                   terminates the instance, proves the billing stopped, and
+//                   (when fid is given) removes that node's terminal.
 //   GET  /status/:jobId    -> { state, step, facts, terminal, teardown, logTail }
 //   GET  /health           -> { ok: true, active }
 //
-// Auth: Authorization: Bearer $DEPLOY_AGENT_TOKEN on everything but /health.
+// Auth: a bearer token from the environment file on everything but /health.
 // The agent never sees user keys or seed phrases — it only touches compute.
+//
+// Jobs are PERSISTED to $HOME/.fiddy/jobs/<id>/job.json (state, step, facts and
+// the capped log, which is where the verdict lines live). A restart used to
+// empty the in-memory JOBS map and strand the facts with it: the 191554 row
+// kept instanceId: null after a restart, and its instance was only reachable
+// because the job JSON happened to still be on disk (measured 2026-10-24). Now
+// the map is rebuilt from disk at boot, and a job that was mid-flight when the
+// agent died is marked failed — with its facts — so the ledger's reconcile
+// path can still see (and tear down) what the job created.
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 
 const PORT = process.env.PORT || 3225
@@ -35,6 +50,7 @@ const REPO = process.env.FIDDY_REPO || new URL('../..', import.meta.url).pathnam
 // A key that only resolves from one cwd is a key you lose; fall back to the
 // passwd database rather than trusting the environment to be complete.
 const HOME = process.env.HOME || homedir()
+const JOBS_DIR = `${HOME}/.fiddy/jobs`
 const JOBS = new Map()
 const MAX_LOG = 64 * 1024
 // Two at a time: a provision spends real money on AWS, so a third parallel run
@@ -58,6 +74,72 @@ function pruneJobs() {
   const finished = [...JOBS.values()].filter((j) => j.state !== 'running' && j.state !== 'queued')
   finished.sort((a, b) => a.startedAt - b.startedAt)
   for (const job of finished.slice(0, Math.max(0, JOBS.size - KEEP_JOBS))) JOBS.delete(job.id)
+}
+
+// --- persistence -----------------------------------------------------------
+// The job record is small (state, step, facts, the capped log — which is where
+// the scripts' verdict lines live) and a job's home directory already exists
+// while it runs, so job.json sits next to the config and pem the CLI wrote.
+// Written at creation and at every step/state boundary, which is also when the
+// verdict lines land in the log.
+async function persistJob(job) {
+  try {
+    await mkdir(`${JOBS_DIR}/${job.id}`, { recursive: true })
+    await writeFile(`${JOBS_DIR}/${job.id}/job.json`, JSON.stringify({
+      id: job.id, kind: job.kind, fid: job.fid ?? null, state: job.state,
+      step: job.step, facts: job.facts, startedAt: job.startedAt,
+      updatedAt: Date.now(), home: job.home ?? null, log: job.log,
+    }))
+  } catch (error) {
+    console.error(`could not persist job ${job.id}: ${error?.message ?? error}`)
+  }
+}
+
+async function fileExists(path) {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function reviveJob(record) {
+  return {
+    id: String(record.id), kind: String(record.kind ?? 'unknown'), fid: record.fid ?? null,
+    state: String(record.state ?? 'failed'), step: record.step ?? null,
+    log: typeof record.log === 'string' ? record.log : '', facts: record.facts ?? {},
+    startedAt: Number(record.startedAt) || Date.now(), home: record.home ?? null,
+    append(d) { this.log = (this.log + d.toString()).slice(-MAX_LOG) },
+  }
+}
+
+// Rebuild the JOBS map from disk at boot, so a restart cannot strand a billing
+// instance behind a job the agent no longer remembers. A job that was queued or
+// running when the process died is marked failed — its steps died with it, and
+// an honest failed state (with the facts) is what lets the ledger tear the
+// instance down, or retry it in place.
+async function loadJobs() {
+  let entries = []
+  try { entries = await readdir(JOBS_DIR, { withFileTypes: true }) } catch { return }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    let record
+    try { record = JSON.parse(await readFile(`${JOBS_DIR}/${entry.name}/job.json`, 'utf8')) } catch { continue }
+    if (!record || typeof record.id !== 'string' || JOBS.has(record.id)) continue
+    const job = reviveJob(record)
+    if (job.state === 'queued' || job.state === 'running') {
+      job.state = 'failed'
+      job.append('\n✗ the agent restarted while this job was running — its steps died with it; the recorded facts are kept\n')
+      await persistJob(job)
+    }
+    JOBS.set(job.id, job)
+  }
+  if (JOBS.size > KEEP_JOBS) {
+    const finished = [...JOBS.values()].filter((j) => j.state !== 'queued' && j.state !== 'running')
+    finished.sort((a, b) => a.startedAt - b.startedAt)
+    for (const job of finished.slice(0, Math.max(0, JOBS.size - KEEP_JOBS))) JOBS.delete(job.id)
+  }
 }
 
 // The CLI records what it created in $FIDDY_HOME/config (mode 600, shell-quoted).
@@ -102,11 +184,12 @@ function runSteps(job, steps, env) {
   job.state = 'running'
   // `void` is load-bearing, not decoration: without it automatic semicolon
   // insertion reads the next line as a CALL on the string assigned above —
-  // `'running'(async () => {…})()` — and every job dies at birth with
+  // `'running'(async () => {…})()' — and every job dies at birth with
   // `TypeError: "running" is not a function`.
   void (async () => {
     for (const step of steps) {
       job.step = step.label
+      await persistJob(job)
       const code = await new Promise((resolve) => {
         const p = spawn(step.cmd, step.args, { env })
         p.stdout.on('data', (d) => job.append(d))
@@ -117,14 +200,18 @@ function runSteps(job, steps, env) {
       if (code !== 0) {
         job.state = 'failed'
         job.append(`\n✗ ${job.step} exited ${code}\n`)
+        await persistJob(job)
         return
       }
       job.facts = { ...job.facts, ...pick(await readFacts(env.FIDDY_HOME)) }
+      await persistJob(job)
     }
     job.state = 'done'
+    await persistJob(job)
   })().catch((error) => {
     job.state = 'failed'
     job.append(`\n✗ agent error: ${error?.message ?? String(error)}\n`)
+    void persistJob(job)
   })
 }
 
@@ -150,7 +237,8 @@ function cli(args) {
 // either answering or honestly reported as still bootstrapping — it must not
 // hold the job open for the multi-hour snapshot download.
 function startProvision(job, body) {
-  const env = { ...process.env, HOME, FIDDY_HOME: `${HOME}/.fiddy/jobs/${job.id}` }
+  const env = { ...process.env, HOME, FIDDY_HOME: `${JOBS_DIR}/${job.id}` }
+  job.home = env.FIDDY_HOME
   const steps = []
   if (body.kind === 'aws') {
     // Region/type/size come from the agent's own environment (operator config),
@@ -168,24 +256,121 @@ function startProvision(job, body) {
 
 // The terminal install is a second process because it needs the target and key
 // path the provision steps just recorded.
-async function startTerminal(job, body) {
-  const env = { ...process.env, HOME, FIDDY_HOME: `${HOME}/.fiddy/jobs/${job.id}` }
-  const facts = pick(await readFacts(env.FIDDY_HOME))
+async function startTerminal(job, body, home) {
+  const env = { ...process.env, HOME, FIDDY_HOME: home }
+  const full = await readFacts(home)
+  const facts = pick(full)
   job.facts = { ...job.facts, ...facts }
   if (!facts.target || !facts.keyPath) {
     job.state = 'failed'
     job.append('\n✗ terminal requested but the provision recorded no target/key\n')
+    await persistJob(job)
     return
   }
-  runSteps(job, [repoScript('scripts/install-node-terminal.sh', [
+  const args = [
     '--fid', String(body.fid), '--token', body.token,
     '--ssh', facts.target, '--key', facts.keyPath, '--json',
-  ])], env)
+  ]
+  // The network this node follows is recorded by `fiddy node up` in the same
+  // config — pass it on so the node-local copy says the same thing.
+  if (full.FIDDY_NODE_NETWORK) args.push('--network', full.FIDDY_NODE_NETWORK)
+  runSteps(job, [repoScript('scripts/install-node-terminal.sh', args)], env)
+}
+
+// The terminal install is chained behind the provision steps INSIDE the same
+// job, so the caller polls one id and cannot see a half-finished terminal.
+function chainTerminal(job, body, home) {
+  const wait = setInterval(async () => {
+    if (job.state === 'done') {
+      clearInterval(wait)
+      job.state = 'running'
+      job.step = 'install-node-terminal.sh'
+      await persistJob(job)
+      await startTerminal(job, body, home)
+    } else if (job.state === 'failed') {
+      clearInterval(wait)
+    }
+  }, 2000)
+  if (typeof wait.unref === 'function') wait.unref()
+}
+
+// --- retry in place --------------------------------------------------------
+// A retry works against an instance that already exists, so it must NOT run
+// `fiddy provision` (that mints a new box). It needs a job home that already
+// holds the target + key: a prior job's home on this host, or an explicit
+// target + a key that already lives in one of the two directories this agent
+// owns (never an arbitrary path a caller names).
+async function findRetrySource(body) {
+  const usable = async (facts) =>
+    Boolean(facts.target && facts.keyPath && (await fileExists(facts.keyPath)))
+
+  if (typeof body.jobId === 'string' && /^[\w-]+$/.test(body.jobId)) {
+    const home = `${JOBS_DIR}/${body.jobId}`
+    const facts = pick(await readFacts(home))
+    if (await usable(facts)) return { home, facts, jobId: body.jobId }
+  }
+
+  // The most recent persisted job for this fid whose target + key still exist.
+  const candidates = []
+  let entries = []
+  try { entries = await readdir(JOBS_DIR, { withFileTypes: true }) } catch { entries = [] }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    let record
+    try { record = JSON.parse(await readFile(`${JOBS_DIR}/${entry.name}/job.json`, 'utf8')) } catch { continue }
+    if (Number(record?.fid) !== Number(body.fid)) continue
+    const home = record.home ?? `${JOBS_DIR}/${entry.name}`
+    const facts = pick({ ...(record.facts ?? {}), ...await readFacts(home) })
+    if (await usable(facts)) {
+      candidates.push({ home, facts, jobId: String(record.id), updatedAt: Number(record.updatedAt) || 0 })
+    }
+  }
+  if (candidates.length) {
+    candidates.sort((a, b) => a.updatedAt - b.updatedAt)
+    return candidates[candidates.length - 1]
+  }
+
+  if (typeof body.target === 'string' && typeof body.keyPath === 'string') {
+    if (!/^[\w.-]+@[\w.-]+$/.test(body.target)) return null
+    const allowed = [JOBS_DIR, '/etc/fiddy/nodes']
+    if (!allowed.some((root) => body.keyPath.startsWith(`${root}/`))) return null
+    if (!(await fileExists(body.keyPath))) return null
+    // A fresh home that points at the existing box, so `fiddy node up` and the
+    // terminal installer read the same shape of config any job would.
+    const home = `${JOBS_DIR}/retry-${randomUUID()}`
+    await mkdir(home, { recursive: true })
+    const lines = [
+      `FIDDY_TARGET='${body.target}'`,
+      `FIDDY_SSH_KEY='${body.keyPath}'`,
+      "FIDDY_PROVIDER='aws'",
+    ]
+    if (body.instanceId) lines.push(`FIDDY_AWS_INSTANCE_ID='${body.instanceId}'`)
+    if (body.region) lines.push(`FIDDY_AWS_REGION='${body.region}'`)
+    await writeFile(`${home}/config`, `${lines.join('\n')}\n`, { mode: 0o600 })
+    return { home, facts: pick(await readFacts(home)), jobId: null }
+  }
+  return null
+}
+
+// Re-run the node-up and terminal steps against the SAME instance a failed job
+// recorded. Same steps, same key, no second box.
+async function startRetry(job, body, source) {
+  job.home = source.home
+  job.facts = { ...job.facts, ...source.facts }
+  job.append(`▸ retrying in place against ${source.facts.target} (source: ${source.jobId ?? 'operator-supplied target'})\n`)
+  await persistJob(job)
+  const env = { ...process.env, HOME, FIDDY_HOME: source.home }
+  runSteps(job, [cli(['node', 'up'])], env)
+  if (body.token !== undefined) chainTerminal(job, body, source.home)
 }
 
 function startTeardown(job, body) {
   const region = body.region || process.env.FIDDY_AWS_REGION || 'us-east-1'
-  runSteps(job, [repoScript('scripts/aws-teardown.sh', [body.instanceId, '--region', region, '--json'])], { ...process.env, HOME })
+  const args = [body.instanceId, '--region', region, '--json']
+  // A fid means this host also serves that node's terminal — teardown removes
+  // it (the ttyd unit, the nginx snippet, the token'd paths) along with the box.
+  if (body.fid) args.push('--fid', String(body.fid))
+  runSteps(job, [repoScript('scripts/aws-teardown.sh', args)], { ...process.env, HOME })
 }
 
 function jobsPayload(job) {
@@ -210,14 +395,16 @@ function jobsPayload(job) {
   }
 }
 
-function newJob(kind) {
+function newJob(kind, fid = null) {
   const id = randomUUID()
   const job = {
-    id, kind, state: 'queued', step: null, log: '', facts: {}, startedAt: Date.now(),
+    id, kind, fid, state: 'queued', step: null, log: '', facts: {}, startedAt: Date.now(),
+    home: null,
     append(d) { this.log = (this.log + d.toString()).slice(-MAX_LOG) },
   }
   JOBS.set(id, job)
   pruneJobs()
+  void persistJob(job)
   return job
 }
 
@@ -261,24 +448,37 @@ const server = createServer(async (req, res) => {
       if (!Number.isInteger(body.fid) || body.fid <= 0) return send(400, { error: 'fid must be a positive integer' })
     }
     if (activeCount() >= MAX_ACTIVE) return send(429, { error: 'too many active jobs' })
-    const job = newJob(body.kind === 'aws' ? 'provision-aws' : 'provision-ssh')
+    const job = newJob(body.kind === 'aws' ? 'provision-aws' : 'provision-ssh', body.fid ?? null)
     startProvision(job, body)
-    if (wantsTerminal) {
-      // Chain the terminal install behind the provision inside the same job, so
-      // the caller polls one id and cannot see a half-finished terminal.
-      const wait = setInterval(async () => {
-        if (job.state === 'done') {
-          clearInterval(wait)
-          job.state = 'running'
-          job.step = 'install-node-terminal.sh'
-          await startTerminal(job, body)
-        } else if (job.state === 'failed') {
-          clearInterval(wait)
-        }
-      }, 2000)
-      if (typeof wait.unref === 'function') wait.unref()
-    }
+    if (wantsTerminal) chainTerminal(job, body, `${JOBS_DIR}/${job.id}`)
     return send(202, { jobId: job.id, statusUrl: `/status/${job.id}` })
+  }
+
+  // Retry a failed provision IN PLACE: the same instance, the same key, the
+  // node-up and terminal steps re-run. Nothing here creates compute.
+  if (req.method === 'POST' && url.pathname === '/retry') {
+    const body = await readBody()
+    if (!body) return send(400, { error: 'invalid JSON' })
+    if (!Number.isInteger(body.fid) || body.fid <= 0) return send(400, { error: 'fid must be a positive integer' })
+    if (body.token !== undefined && !/^[0-9a-f]{32,64}$/.test(String(body.token))) {
+      return send(400, { error: 'token must be 32-64 hex chars' })
+    }
+    if (typeof body.jobId === 'string' && !/^[\w-]+$/.test(body.jobId)) {
+      return send(400, { error: 'jobId must look like a job id' })
+    }
+    if (activeCount() >= MAX_ACTIVE) return send(429, { error: 'too many active jobs' })
+    for (const active of JOBS.values()) {
+      if (active.fid === body.fid && (active.state === 'queued' || active.state === 'running')) {
+        return send(409, { error: `a job is still active for fid ${body.fid}` })
+      }
+    }
+    const source = await findRetrySource(body)
+    if (!source) {
+      return send(400, { error: 'no recorded target/key for this fid — pass jobId, or target + keyPath' })
+    }
+    const job = newJob('retry', body.fid)
+    await startRetry(job, body, source)
+    return send(202, { jobId: job.id, statusUrl: `/status/${job.id}`, sourceJobId: source.jobId })
   }
 
   if (req.method === 'POST' && url.pathname === '/teardown') {
@@ -287,8 +487,11 @@ const server = createServer(async (req, res) => {
     if (!/^i-[0-9a-f]{8,17}$/.test(String(body.instanceId ?? ''))) {
       return send(400, { error: 'instanceId must look like i-…' })
     }
+    if (body.fid !== undefined && (!Number.isInteger(body.fid) || body.fid <= 0)) {
+      return send(400, { error: 'fid must be a positive integer' })
+    }
     if (activeCount() >= MAX_ACTIVE) return send(429, { error: 'too many active jobs' })
-    const job = newJob('teardown')
+    const job = newJob('teardown', body.fid ?? null)
     startTeardown(job, body)
     return send(202, { jobId: job.id, statusUrl: `/status/${job.id}` })
   }
@@ -302,6 +505,8 @@ const server = createServer(async (req, res) => {
   send(404, { error: 'not found' })
 })
 
+await loadJobs()
+
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`fiddy-deploy-agent listening on 127.0.0.1:${PORT}`)
+  console.log(`fiddy-deploy-agent listening on 127.0.0.1:${PORT} (${JOBS.size} job(s) recalled from disk)`)
 })
