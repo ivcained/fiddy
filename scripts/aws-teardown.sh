@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Tear down a fiddy node's AWS compute — and prove the billing stopped.
 #
-#   bash scripts/aws-teardown.sh <instance-id> [--region us-east-1] [--json]
+#   bash scripts/aws-teardown.sh <instance-id> [--region us-east-1] [--fid N] [--json]
 #
 # Terminates the instance, deletes the volume(s) it owned, then deletes the key
 # pair and security group that were created for it — but only after checking no
-# other running instance still uses them. Finally it READS AWS STATE BACK and
-# prints a verdict on the last line as
+# other running instance still uses them. With --fid (the managed path), it also
+# removes that node's web terminal on THIS host (ttyd unit, nginx snippet,
+# state, key) so a token'd /term/ URL can never outlive its node. Finally it
+# READS AWS STATE BACK and prints a verdict on the last line as
 #
 #   FIDDY_TEARDOWN_JSON {"instanceId":"i-…","billingStopped":true,…}
 #
@@ -21,10 +23,12 @@ set -euo pipefail
 
 REGION="${FIDDY_AWS_REGION:-us-east-1}"
 IID=""
+FID=""
 JSON=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --region) REGION="${2:?--region needs a value}"; shift 2 ;;
+    --fid) FID="${2:?--fid needs a value}"; shift 2 ;;
     --json) JSON=1; shift ;;
     -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
@@ -37,10 +41,25 @@ ok()  { printf '✓ %s\n' "$*"; }
 warn(){ printf '! %s\n' "$*" >&2; }
 die() { warn "$*"; exit 1; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 command -v aws >/dev/null 2>&1 || die "aws CLI not found — install it (or run this on the deploy-agent host)"
 command -v python3 >/dev/null 2>&1 || die "python3 not found"
 aws sts get-caller-identity >/dev/null 2>&1 || die "aws CLI is not authenticated for this host"
-[ -n "$IID" ] || die "usage: aws-teardown.sh <instance-id> [--region R] [--json]"
+[ -n "$IID" ] || die "usage: aws-teardown.sh <instance-id> [--region R] [--fid N] [--json]"
+case "$FID" in ''|*[!0-9]*) die "--fid must be a positive integer" ;; esac
+
+# The node's terminal (ttyd unit + nginx snippet + token'd paths on THIS host)
+# only exists if a fid was passed — the managed path does, a bare
+# `fiddy provision --teardown` does not. Removing it is part of teardown: a
+# terminal that outlives its node serves a ttyd that can SSH nowhere, forever
+# (measured 2026-10-24, card t_9b6ac005). Called only once billing is verifiably
+# stopped, so a half-failed AWS teardown never takes a live node's terminal away.
+remove_terminal() {
+  [ -n "$FID" ] || return 0
+  bash "$SCRIPT_DIR/remove-node-terminal.sh" --fid "$FID" --json \
+    || warn "terminal removal for fid $FID reported a problem — run: bash $SCRIPT_DIR/remove-node-terminal.sh --fid $FID"
+}
 
 VERDICT=""
 emit() { # state note — always prints the JSON line last
@@ -63,6 +82,7 @@ PY
 info="$(aws ec2 describe-instances --region "$REGION" --instance-ids "$IID" --output json 2>/dev/null || true)"
 if [ -z "$info" ] || [ "$(printf '%s' "$info" | tr -d ' [:space:]')" = "" ]; then
   log "$IID is not in $REGION — already gone (terminated with its volume), or never existed here"
+  remove_terminal
   VERDICT='nothing to terminate; no AWS resources are billing for this id'
   emit absent "instance not found in $REGION"
   ok "nothing is running for $IID"
@@ -192,13 +212,16 @@ VERDICT="instance $IID is $FINAL in $REGION; volumes deleted:$DELETED; key delet
 [ -n "$VOLS_STILL" ] && VERDICT="$VERDICT; STILL BILLING:$VOLS_STILL"
 
 if [ "$FINAL" = "terminated" ] && [ -z "$VOLS_STILL" ]; then
+  remove_terminal
   ok "billing stopped: $IID terminated, no volume left behind"
   emit terminated "compute and storage gone"
 elif [ "$FINAL" = "absent" ]; then
+  remove_terminal
   ok "billing stopped: $IID absent from $REGION"
   emit absent "instance gone"
 else
   warn "not clean: state=$FINAL volumes_left='$VOLS_STILL'"
+  warn "terminal left in place — the instance may still be reachable"
   emit "$FINAL" "teardown incomplete — check manually"
   exit 1
 fi
