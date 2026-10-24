@@ -210,6 +210,22 @@ describe('a feed page says which app made each cast', () => {
     }
   });
 
+  it('reads a cast whose key the account asked for itself as no app at all', async () => {
+    // The fixture casts are fid 3's, so an app FID of 3 is the self-requested
+    // case — and the stated profile is there to catch the failure measured on
+    // live: naming the AUTHOR's own profile as if it were the client.
+    const page = await readHome(
+      readerFor({ appFid: 3, username: 'dwr', displayName: 'Dan Romero' }),
+    );
+
+    expect(page.items.length).toBeGreaterThan(0);
+    for (const item of page.items) {
+      expect(item.cast.client?.kind).toBe('own');
+      expect(item.cast.client?.clientId).toBe('own');
+      expect(item.cast.client?.displayName).toBe('their own key');
+    }
+  });
+
   it('carries no client at all when the node cannot name the signer', async () => {
     // No stated signer page: the fake answers 404 for /v1/signer, which is a
     // real answer ("this node has no such key"), not a broken read.
