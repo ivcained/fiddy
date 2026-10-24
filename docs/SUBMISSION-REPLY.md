@@ -2,7 +2,8 @@
 
 **Reply to:** https://farcaster.xyz/balajis.eth/0x50184b62 (hash `0x50184b62b4c52fd76628713562e1eda3dccaf63d`, @balajis.eth, FID 37)
 **Posted:** 2026-10-17T14:47:30Z · **Deadline:** 2026-10-24T14:47:30Z (Sat 20:17:30 IST) — 7 days exactly from the post.
-**Post from:** the owner's Farcaster account. No Farcaster credentials exist on this machine, so this cannot be scripted here.
+**Post from:** the owner's Farcaster account. The only posting signer on this machine belongs to @fiddy-one
+(fid 3356372), so this reply cannot be scripted here: it goes out from @ivc's own client.
 
 ## Cast-length reality check — read this before posting
 

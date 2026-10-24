@@ -67,3 +67,22 @@ immediately.
 The two people who are already past the long pole: **@webthe3rd.eth** publicly said he completed the quickstart on
 2026-10-23T17:57:05Z (he needs one more cast to turn that into the vouch URL), and **@mddvm** ran a rival entry end
 to end and posted its vouch at 2026-10-24T08:47:13Z (so the whole loop takes him half a day, not a week).
+
+## 5. The one DM that converts a proven runner into a voucher
+
+The highest-conversion message left is not to a stranger, it is to one of the people who already ran a rival's
+tutorial on their own box and posted a public vouch: @runn3rr, @eat, @mddvm, @otterly. They have the rig, the
+habit and the box already running. Send this from @ivc's own account (DMs need the owner's client):
+
+```
+Hey <handle>, you ran <entry> end to end on your own box and posted the honest notes, which is exactly what I'm
+looking for.
+
+I'm one short of a human vouch on mine: https://fiddy.fun/client, three commands, own Snapchain read node plus a
+client, no API keys, same 2 TB disk and ports 3381-3383 as yours. The bounty closes 14:47Z today. If you can run
+it and post your honest vouch, I'll take whatever it says, including the parts that are wrong, and I'll pair live
+while you do it if that helps.
+```
+
+The same message to @webthe3rd.eth needs one line changed: he already ran it, so ask for the vouch cast rather than
+the run.
