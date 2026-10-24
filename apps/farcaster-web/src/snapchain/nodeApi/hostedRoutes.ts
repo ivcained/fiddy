@@ -41,6 +41,14 @@
  *                   answered from Neynar's public app catalog instead, which is
  *                   a real index of real apps — never from a list this client
  *                   invented. See `capabilities.ts` for who may answer it.
+ *   - `market`    — it is a token's market: which token a ticker means, and what
+ *                   that token is worth. No Farcaster server keeps it (a node
+ *                   keeps no markets; Neynar's fungible reads take contract
+ *                   addresses and never a ticker, MEASURED 2026-10-24), and it
+ *                   needs no key of anyone's, so it is answered from a public
+ *                   market index before any provider sees it — the same one this
+ *                   client already reads a `$cashtag`'s price from. See
+ *                   `~/snapchain/providers/marketIndex`.
  *
  * The classification is by path, because that is all a `fetch` sees: the
  * hosted client builds `${baseUrl}${relativeUrl}` itself, so the path is the
@@ -56,6 +64,7 @@ export type HostedRoutePolicy =
   | { kind: 'write'; why: string }
   | { kind: 'catalog'; why: string }
   | { kind: 'index'; why: string }
+  | { kind: 'market'; why: string }
   | { kind: 'hosted'; why: string };
 
 export type HostedRouteMatch = HostedRoutePolicy & {
@@ -282,6 +291,31 @@ const MEDIA_ROUTES: { method: string; path: string; why: string }[] = [
     method: 'POST',
     path: '/v1/generate-image-upload-url',
     why: 'the media pipeline is ours now: the bytes go to POST /api/fiddy/media, not to Warpcast’s CDN',
+  },
+];
+
+/**
+ * The token markets: the one read the `$TICKER` surfaces make.
+ *
+ * `/v2/token-links` asks which token a ticker means, and the hosted API answers
+ * it from Warpcast's own registry of the tokens Farcaster's casts link with a
+ * ticker — an index nobody else keeps. MEASURED (2026-10-24, with this build's
+ * own Neynar key): Neynar's fungible reads take contract addresses, never a
+ * ticker (`/v2/farcaster/fungibles/?fungibles=degen` → `400`), so no Farcaster
+ * server can answer this one. A **public market index** can, and it is the one
+ * this client already reads a `$cashtag`'s price from
+ * (`~/lib/tokens/price.ts`): Dexscreener answers by symbol and by address, needs
+ * no key of anyone's, and answers the same whichever server the reader is on.
+ *
+ * That is why this route is answered *before* any provider sees it, the way the
+ * media pipeline and this device's own drafts are: nobody's key is involved, and
+ * there is nothing for a provider in the catalog to decide.
+ */
+const MARKET_ROUTES: { method: string; path: string; why: string }[] = [
+  {
+    method: 'GET',
+    path: '/v2/token-links',
+    why: 'a ticker’s market is read from a public market index (Dexscreener), which is nobody’s Farcaster server — the same answer whichever server is live, and no key of anyone’s',
   },
 ];
 
@@ -743,6 +777,16 @@ export const classifyHostedRequest = ({
     };
   }
 
+  const market = find(MARKET_ROUTES, normalizedMethod, endpoint);
+  if (market) {
+    return {
+      kind: 'market',
+      path: endpoint,
+      method: normalizedMethod,
+      why: market.why,
+    };
+  }
+
   const index = find(INDEX_ROUTES, normalizedMethod, endpoint);
   if (index) {
     return {
@@ -813,6 +857,9 @@ export const mediaRoutes = MEDIA_ROUTES.map(
   (entry) => `${entry.method} ${entry.path}`,
 );
 export const catalogRoutes = CATALOG_ROUTES.map(
+  (entry) => `${entry.method} ${entry.path}`,
+);
+export const marketRoutes = MARKET_ROUTES.map(
   (entry) => `${entry.method} ${entry.path}`,
 );
 export const indexRoutes = INDEX_ROUTES.map(
