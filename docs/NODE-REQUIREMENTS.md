@@ -100,3 +100,20 @@ gateway VPS is exactly this case):
    statsd ports to `127.0.0.1:18125/18126` so they do not collide either.
 
 To upgrade a node anyway without the cron, run `fiddy node upgrade` by hand.
+
+## The fast path (handing out a synced copy)
+
+Everything above is the *cold* bootstrap: a node with an empty database pulls
+~470 GB of chunks and keeps ~1.66 TB of peak disk while it unpacks. That work is
+the same for every node, so fiddy can also start from a copy:
+
+| Route | What boots | Peak disk | Measured stage skipped |
+| --- | --- | --- | --- |
+| cold (default) | upstream chunks | ~1.66 TB (chunks + tars + DB) | none |
+| AWS snapshot | the volume of a synced node, created from a public EBS snapshot | the volume you launch (2 TB) | all of it: the DB is already unpacked on disk |
+| mirror tarball | `tar`+`zstd` of `.rocks`, streamed into `~/snapchain` | ~2.3× the tarball (~470 GB compressed → ~1.1 TB) | the chunk download and the tar stage |
+
+Both are pinned with the date they were taken (`config/fast-bootstrap.json`) and
+both are conveniences, not trust roots. `docs/FAST-BOOTSTRAP.md` has the whole
+picture: publishing, the weekly refresh, the verification that boots a fresh box
+and measures it, and the trust/privacy notes.

@@ -9,7 +9,11 @@
 # Storage is the constraint that decides whether this works at all: a mainnet
 # read node wants 1.5 TB free, and the snapshot bootstrap needs scratch space
 # on top of that (chunks + assembled tar before unpack). See
-# docs/NODE-REQUIREMENTS.md for the measured numbers.
+# docs/NODE-REQUIREMENTS.md for the measured numbers. The AWS path also reads
+# the pinned pre-synced snapshot (config/fast-bootstrap.json) so a fresh box
+# boots already synced: docs/FAST-BOOTSTRAP.md.
+
+. "${FIDDY_REPO:?}/cli/lib/fast-bootstrap.sh"
 
 provision_main() {
   local mode=""
@@ -233,19 +237,69 @@ provision_aws() {
   done
   ok "security group: $sg_id (SSH/API → you only; gossip 3382 → world)"
 
+  # Pre-synced state: when a snapshot is pinned, the root volume is created from
+  # it and the box boots already synced (no bootstrap download to wait out). Nothing pinned, or FIDDY_AWS_FAST_BOOTSTRAP=0, is the old
+  # behavior exactly.
+  local snapshot_id="" snap_date="" snap_age="" snap_max="14" snap_state=""
+  if [ "${FIDDY_AWS_FAST_BOOTSTRAP:-1}" = 1 ]; then
+    snapshot_id="$(fb_pin_get .aws.snapshotId)"
+    snap_date="$(fb_pin_get .aws.createdAt)"
+    snap_max="$(fb_pin_get .maxAgeDays)"; snap_max="${snap_max:-14}"
+    snap_age="$(fb_age_days "$snap_date")"
+    if [ -n "$snapshot_id" ]; then
+      snap_state="$(aws ec2 describe-snapshots --region "$region" --snapshot-ids "$snapshot_id" \
+        --query 'Snapshots[0].State' --output text 2>/dev/null || echo '?')"
+      if [ "$snap_state" = "completed" ]; then
+        log "pre-synced state: snapshot $snapshot_id (synced as of ${snap_date:-unknown}${snap_age:+, $snap_age day(s) old})"
+        log "the box boots from that state: no bootstrap download, just the catch-up on recent blocks"
+        if [ -n "$snap_age" ] && [ "$snap_age" -gt "$snap_max" ] 2>/dev/null; then
+          warn "that pin is older than $snap_max days: catch-up will be longer than usual (scripts/fast-bootstrap-refresh.sh)"
+        fi
+      else
+        warn "pinned snapshot $snapshot_id is '$snap_state', not completed — provisioning a cold box instead"
+        snapshot_id=""
+      fi
+    else
+      log "no pre-synced copy pinned: this box downloads ~470 GB of chunks (overnight on HDD-class disks)"
+    fi
+  fi
+
+  # A snapshot carries whatever SSH keys the source box trusted, so the first
+  # boot replaces them with this launcher's key: booting from a public snapshot
+  # never grants anyone else access to your instance.
+  local pubkey="" key_replace="" bring_up=""
+  if command -v ssh-keygen >/dev/null 2>&1; then
+    pubkey="$(ssh-keygen -y -f "$key_path" 2>/dev/null || true)"
+  fi
+  if [ -n "$pubkey" ]; then
+    key_replace="install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
+printf '%s\\n' '$pubkey' > /home/ubuntu/.ssh/authorized_keys
+chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
+chmod 600 /home/ubuntu/.ssh/authorized_keys"
+  fi
+  if [ -n "$snapshot_id" ]; then
+    bring_up="if [ -d /home/ubuntu/snapchain ]; then (cd /home/ubuntu/snapchain && docker compose up -d snapchain statsd >>/var/log/fiddy-boot.log 2>&1); fi"
+  fi
+
   # user-data: Docker preinstalled so `fiddy node up` is fast.
   local ud="$FIDDY_HOME/user-data.sh"
-  cat > "$ud" <<'UD'
+  cat > "$ud" <<UD
 #!/bin/bash
 curl -fsSL https://get.docker.com | bash
 usermod -aG docker ubuntu
+$key_replace
+$bring_up
 UD
 
   local iid
+  local bda="DeviceName=/dev/sda1,Ebs={VolumeSize=$volume_gb,VolumeType=gp3}"
+  if [ -n "$snapshot_id" ]; then
+    bda="DeviceName=/dev/sda1,Ebs={SnapshotId=$snapshot_id,VolumeSize=$volume_gb,VolumeType=gp3,DeleteOnTermination=true}"
+  fi
   iid="$(aws ec2 run-instances --region "$region" \
     --image-id "$ami" --instance-type "$itype" --key-name "$name" \
     --security-group-ids "$sg_id" --user-data "file://$ud" \
-    --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$volume_gb,VolumeType=gp3}" \
+    --block-device-mappings "$bda" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$name},{Key=project,Value=fiddy}]" \
     --query 'Instances[0].InstanceId' --output text)" || die "run-instances failed"
   log "instance: $iid — waiting for running state…"

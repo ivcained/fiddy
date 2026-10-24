@@ -42,6 +42,14 @@ exact terminate command at the end. (AWS has no broad free-credit program like
 GCP's $300 — if you're new to cloud entirely, the [GCP path](GCP-DEPLOY.md) is
 free to start; if you're already on AWS, this is the fewest-moving-parts path.)
 
+**Pre-synced state:** the script reads `config/fast-bootstrap.json`. When a
+snapshot is pinned there, your root volume is created **from** a fully synced
+node's volume, so the box boots already caught up (minutes, not an overnight
+download) and the script prints how old that copy is. With nothing pinned it
+provisions a cold box exactly as before; `FIDDY_AWS_FAST_BOOTSTRAP=0` forces
+that even when a copy exists. Details, the trust note and the refresh cadence:
+[FAST-BOOTSTRAP.md](FAST-BOOTSTRAP.md).
+
 ## 3. Install the node
 
 From any machine with the fiddy repo cloned and the `.pem` from step 2:
@@ -51,9 +59,13 @@ bin/fiddy provision --ssh ubuntu@<IP-from-step-2>
 bin/fiddy node up
 ```
 
-The node downloads ~470 GB of snapshot chunks before its API answers — overnight
-is normal. `bin/fiddy node status` shows progress; `bin/fiddy node verify` must
-print all green before you continue.
+On a cold box the node downloads ~470 GB of snapshot chunks before its API
+answers — overnight is normal. On a box booted from a pinned snapshot there is no
+download: `fiddy node status` answers as soon as the copied database loads, and
+the node syncs the blocks it missed. (The measured boot-to-answer time for a
+pinned snapshot is what `scripts/fast-bootstrap-verify.sh` prints; quote that
+number, not an estimate.) Either way `bin/fiddy node verify` must print all green before
+you continue.
 
 ## 4. Run the client
 

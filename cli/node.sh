@@ -19,6 +19,14 @@
 #   * the auto-upgrade cron it installs runs `docker system prune --volumes -f`
 #     against the whole Docker host — hostile on a server that runs anything
 #     else, so we set SKIP_CRONTAB=true by default.
+#
+# Fast bootstrap: when config/fast-bootstrap.json pins a pre-synced copy (an EBS
+# snapshot for AWS, a tarball mirror for everything else), `fiddy node up`
+# installs it instead of pulling ~470 GB of upstream chunks. Nothing unexpected
+# is fatal: no pin, an unreachable mirror, no room, or a data dir that already
+# has a database all fall back to the upstream bootstrap silently.
+
+. "${FIDDY_REPO:?}/cli/lib/fast-bootstrap.sh"
 
 node_main() {
   local sub="${1:-}"; shift || true
@@ -82,8 +90,9 @@ node_up() {
   log "What you're getting: a read node (read_node = true). It follows the chain,"
   log "stores full state, serves HTTP :$SNAP_HTTP_PORT + gRPC :$SNAP_GRPC_PORT, and"
   log "relays your writes to validators over gossip. No API keys. Your compute only."
-  log "First boot downloads the historical snapshot from Farcaster's public bucket"
-  log "(up to ~2h), then it syncs blocks."
+  log "First boot loads the historical snapshot; on HDD-class disks that is an"
+  log "overnight, and this node's API stays silent until it finishes. When a"
+  log "pre-synced copy is pinned (scripts/node-snapshot.sh), it takes minutes."
 
   if [ "$local_mode" = 1 ]; then
     node_install_local "$force"
@@ -109,6 +118,8 @@ node_install_remote() {
   log "ensuring cron (snapchain.sh requires crontab)…"
   ssh_run 'command -v crontab >/dev/null 2>&1 || { sudo -n apt-get update -qq && sudo -n apt-get install -y -qq cron >/dev/null && sudo systemctl enable --now cron >/dev/null 2>&1; }; command -v crontab >/dev/null 2>&1 && echo cron-ok' | grep -q cron-ok \
     || die "cron is missing on $FIDDY_TARGET and needs sudo to install (sudo apt-get install -y cron), then re-run."
+
+  node_fast_bootstrap_remote || true
 
   log "installing Snapchain (official snapchain.sh, fetched directly)…"
   remote_seed_snapchain_env
@@ -201,6 +212,7 @@ node_install_local() {
   fi
 
   mkdir -p "$FIDDY_HOME/snapchain"
+  node_fast_bootstrap_local || true
   ( cd "$FIDDY_HOME/snapchain" && fetch_snapchain_script && seed_env_file && start_upgrade_detached )
   wait_for_node "http://127.0.0.1:$SNAP_HTTP_PORT" 120 "node logs: fiddy node logs"
   config_set FIDDY_NODE_HTTP "http://127.0.0.1:$SNAP_HTTP_PORT"
@@ -307,8 +319,12 @@ node_status() {
   local base="${FIDDY_NODE_HTTP:-http://$host:$SNAP_HTTP_PORT}"
   step "Node status ($base)"
   local body
-  body="$(curl -fsS --max-time 10 "$base/v1/info")" || die "node not answering — try: fiddy node logs"
+  body="$(curl -fsS --max-time 10 "$base/v1/info")" || {
+    log "pre-synced copy: $(fb_describe)"
+    die "node not answering — try: fiddy node logs"
+  }
   printf '%s\n' "$body" | if command -v jq >/dev/null 2>&1; then jq '.'; else cat; fi
+  log "pre-synced copy: $(fb_describe)"
 }
 
 node_verify() { # the bounty's acceptance checks, against the node's HTTP API
@@ -426,4 +442,90 @@ node_upgrade() {
   ssh_run 'cd ~/snapchain && (setsid ./snapchain.sh upgrade > upgrade.log 2>&1 < /dev/null &) ; sleep 2; tail -n 5 upgrade.log' \
     || die "upgrade failed to start"
   ok "upgrade running in the background — fiddy node logs to follow"
+}
+
+# --- fast bootstrap (pre-synced state) ------------------------------------
+#
+# config/fast-bootstrap.json may pin a tarball mirror of a synced mainnet node
+# (see docs/FAST-BOOTSTRAP.md). When it is reachable from the target and the
+# target has room, the data dir is filled in one streaming pass
+# (curl | zstd | tar) and the node starts already caught up: minutes, not a
+# night. Every failure path returns silently to the upstream bootstrap, because
+# this is a convenience and never a requirement.
+#
+# The decision itself lives in cli/lib/fast-bootstrap.sh (fb_fast_path_decision)
+# so it can be tested without a cloud account.
+
+node_fast_bootstrap_announce() {
+  local need_gb="$1"
+  log "a pre-synced copy of mainnet is available: $(fb_describe)"
+  log "  it replaces ~468 GB of upstream chunks (overnight) with ~$(fb_human_gb "${FB_MIRROR_BYTES:-0}") GB (minutes); peak disk ~${need_gb} GB"
+  fb_trust_note | sed 's/^/  /'
+}
+
+node_fast_bootstrap_remote() {
+  fb_mirror_fields
+  [ -n "$FB_MIRROR_URL" ] || return 1
+  local reachable=0 have_zstd=0 data_present=0 free_gb=0 need_gb rhome dest decision
+  if ssh_run "curl -fsSI --max-time 15 '$FB_MIRROR_URL' >/dev/null 2>&1 && echo reachable" 2>/dev/null | grep -q reachable; then
+    reachable=1
+  fi
+  [ "$reachable" = 1 ] || return 1
+  if ssh_run 'command -v zstd >/dev/null 2>&1 && echo zstd' 2>/dev/null | grep -q zstd; then
+    have_zstd=1
+  else
+    # zstd is small and packaged everywhere; if it needs sudo we simply skip.
+    ssh_run 'command -v apt-get >/dev/null 2>&1 && sudo -n apt-get install -y -qq zstd >/dev/null 2>&1' >/dev/null 2>&1 || true
+    if ssh_run 'command -v zstd >/dev/null 2>&1 && echo zstd' 2>/dev/null | grep -q zstd; then
+      have_zstd=1
+    fi
+  fi
+  if ssh_run 'test -d ~/snapchain/.rocks && [ -n "$(ls -A ~/snapchain/.rocks 2>/dev/null)" ] && echo state' 2>/dev/null | grep -q state; then
+    data_present=1
+  fi
+  free_gb="$(ssh_run 'df -Pk ~/snapchain 2>/dev/null || df -Pk ~' 2>/dev/null | awk "NR==2 {print int(\$4 / 1048576)}")"
+  case "$free_gb" in ''|*[!0-9]*) free_gb=0 ;; esac
+  need_gb="$(fb_mirror_peak_gb "$FB_MIRROR_BYTES")"
+  decision="$(fb_fast_path_decision "$FB_MIRROR_URL" "$reachable" "$data_present" "$free_gb" "$need_gb" "$have_zstd")"
+  if [ "$decision" != use ]; then
+    [ "$decision" = skip:no-space ] && warn "a pre-synced copy is pinned but $FIDDY_TARGET has ${free_gb} GB free (needs ~${need_gb} GB): using the upstream bootstrap"
+    return 1
+  fi
+  rhome="$(ssh_run 'printf %s "$HOME"' 2>/dev/null || true)"
+  [ -n "$rhome" ] || rhome="/home/${FIDDY_TARGET%%@*}"
+  dest="$rhome/snapchain"
+  node_fast_bootstrap_announce "$need_gb"
+  log "streaming it into $dest on the target (progress is the download itself)"
+  if fb_apply_mirror_remote "$FIDDY_TARGET" "$FB_MIRROR_URL" "$dest" "$FB_MIRROR_SHA256" "$FIDDY_SSH_KEY"; then
+    ok "pre-synced state is in place: the node starts caught up and syncs the gap"
+    return 0
+  fi
+  warn "the pre-synced copy did not land cleanly: falling back to the upstream chunks"
+  return 1
+}
+
+node_fast_bootstrap_local() {
+  fb_mirror_fields
+  [ -n "$FB_MIRROR_URL" ] || return 1
+  local dir="$FIDDY_HOME/snapchain" reachable=0 have_zstd=0 data_present=0 free_gb=0 need_gb decision
+  fb_mirror_reachable "$FB_MIRROR_URL" && reachable=1
+  [ "$reachable" = 1 ] || return 1
+  if command -v zstd >/dev/null 2>&1; then have_zstd=1; fi
+  if fb_dir_has_state "$dir/.rocks"; then data_present=1; fi
+  free_gb=$(( $(df -Pk "$FIDDY_HOME" 2>/dev/null | awk 'NR==2 {print $4}') / 1048576 ))
+  case "$free_gb" in ''|*[!0-9]*) free_gb=0 ;; esac
+  need_gb="$(fb_mirror_peak_gb "$FB_MIRROR_BYTES")"
+  decision="$(fb_fast_path_decision "$FB_MIRROR_URL" "$reachable" "$data_present" "$free_gb" "$need_gb" "$have_zstd")"
+  if [ "$decision" != use ]; then
+    [ "$decision" = skip:no-space ] && warn "a pre-synced copy is pinned but this machine has ${free_gb} GB free (needs ~${need_gb} GB): using the upstream bootstrap"
+    return 1
+  fi
+  node_fast_bootstrap_announce "$need_gb"
+  log "streaming it into $dir"
+  if fb_apply_mirror "$FB_MIRROR_URL" "$dir" "$FB_MIRROR_SHA256"; then
+    ok "pre-synced state is in place: the node starts caught up and syncs the gap"
+    return 0
+  fi
+  warn "the pre-synced copy did not land cleanly: falling back to the upstream chunks"
+  return 1
 }

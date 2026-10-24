@@ -167,8 +167,11 @@ bin/fiddy node up</span></pre>
 
   <div class="card" id="statusCard" hidden>
     <h2><span class="n">3</span>Watch it sync</h2>
-    <p class="dim" style="font-size:14.5px">The node downloads ~470 GB of snapshot chunks before its API answers —
-    overnight on the default HDD is normal. This polls your node directly; nothing goes through us.
+    <p class="dim" style="font-size:14.5px">On a cold box the node downloads ~470 GB of snapshot chunks before its API
+    answers — overnight on the default HDD is normal. When a pre-synced copy is pinned
+    (<code style="font-family:var(--mono)">config/fast-bootstrap.json</code>, stamped with the date it was
+    taken), your instance boots from that state instead, so the wait is the catch-up, not the download.
+    Either way this polls your node directly; nothing goes through us.
     Some browsers block the poll from an HTTPS page — the reliable check is
     <code style="font-family:var(--mono)">bin/fiddy node status</code> from your terminal.</p>
     <div id="status"></div>
@@ -183,7 +186,8 @@ bin/fiddy node up</span></pre>
     <span id="payStatus" style="margin-left:12px;font-size:13.5px" class="dim"></span></p>
     <div id="subView" hidden style="margin-top:14px;font:14px/1.7 var(--mono)"></div>
     <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
-    On the open web the button tells you how to pay instead. Nodes go live within 24h of payment — overnight is the snapshot, not us.</p>
+    On the open web the button tells you how to pay instead. Nodes go live within 24h of payment — overnight is the snapshot, not us;
+    a pinned pre-synced copy cuts that to minutes.</p>
   </div>
 
   <footer>

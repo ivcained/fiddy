@@ -266,7 +266,15 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
     <p><strong>Validators</strong> propose and vote on blocks; only keys in the validator set can. <strong>Read nodes</strong> do everything else — including accepting writes.</p>
     <p>When you <code class="inline">submitMessage</code> to your read node, it validates the message and <strong>gossips it to validators</strong> — a read node has no mempool of its own. A success response means "valid, accepted for relay," <em>not</em> "in a block." Confirm inclusion by watching for a <code class="inline">MERGE_MESSAGE</code> event or querying the message back. Under heavy network load a gossiped message can drop and need resubmitting; the client can fall back to submitting at a validator endpoint, and this tutorial shows you the trade-off when it matters.</p>
   </div>
-  <p class="dim">Full sync takes hours; the API answers immediately and catches up in the background.</p>
+  <p class="dim">Full sync takes hours and the API stays silent until it finishes — a fresh node
+  refuses connections on <code class="inline">:3381</code> for the whole bootstrap, so
+  <code class="inline">fiddy node status</code> is the "is it up yet" command, not a broken-node alarm.
+  When a pre-synced copy is pinned in <code class="inline">config/fast-bootstrap.json</code>
+  (the state of a fully synced node, stamped with the date it was taken), your box boots from
+  that instead, so the wait is the catch-up from that date, not the ~470 GB download. Nothing pinned, or
+  <code class="inline">FIDDY_AWS_FAST_BOOTSTRAP=0</code>, and you pay the download as before.
+  It is a convenience, never a trust root: your node still re-validates everything it reads over
+  gossip. <a href="/client/docs/FAST-BOOTSTRAP.md">How the copy is made and verified</a>.</p>
 </div></section>
 
 <section id="step2"><div class="wrap">
