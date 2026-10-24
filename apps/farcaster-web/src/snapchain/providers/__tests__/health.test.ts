@@ -1,9 +1,15 @@
 /**
  * The measurements, as tests — including the ones taken from the real servers.
  *
- * The snapchain body below is the shape a live public node returned on
- * 2026-10-20 (`haatz.quilibrium.com`, trimmed): per-shard `maxHeight` and
- * `blockDelay`, plus `numShards`. The Neynar and `api.farcaster.xyz` bodies are
+ * The snapchain bodies below are the shapes live public nodes returned:
+ * per-shard `maxHeight` and `blockDelay`, plus `numShards`. `blockDelay` is the
+ * AGE OF THAT SHARD'S NEWEST BLOCK, IN SECONDS — MEASURED at the source
+ * (`farcasterxyz/snapchain`, `src/network/server.rs`:
+ * `block_delay: current_time.saturating_sub(max_block_time)`, where
+ * `max_block_time` is that shard's `max_block_timestamp()`) — so the 2026-10-24
+ * body, in which two shards sat still while their ages climbed with the wall
+ * clock, is the fixture for "the node answers and is not following the chain".
+ * The Neynar and `api.farcaster.xyz` bodies are
  * the shapes their documented endpoints return. What the tests check is the part
  * that would otherwise be a claim: which of those answers counts as live, slow,
  * stale, refused or not a node at all.
@@ -17,7 +23,10 @@ import {
   ownNodeProvider,
 } from '~/snapchain/providers/catalog';
 import {
+  combineFreshness,
   DEFAULT_HEALTH_CONFIG,
+  type Freshness,
+  type FreshnessRecord,
   judgeFreshness,
   judgeProbe,
   probeFarcasterPublic,
@@ -25,6 +34,8 @@ import {
   probeProvider,
   type ProbeSample,
   probeSnapchain,
+  type ProviderHealth,
+  type ShardSample,
 } from '~/snapchain/providers/health';
 
 const jsonResponse = (body: unknown, status = 200): Response =>
@@ -37,11 +48,149 @@ const NODE_INFO = {
   version: '1.5.5',
   isSyncing: false,
   numShards: 2,
+  // `blockDelay` is the age of that shard's newest block: 0–1 s here, which is
+  // a shard that is keeping up.
   shardInfos: [
     { shardId: 0, maxHeight: 48_501_853, blockDelay: 1 },
     { shardId: 1, maxHeight: 49_177_741, blockDelay: 0 },
     { shardId: 2, maxHeight: 49_013_091, blockDelay: 0 },
   ],
+};
+
+/**
+ * MEASURED (2026-10-24, 15:42 and 15:43 UTC, `https://haatz.quilibrium.com` — the
+ * route the hosted client reads by default): the node answered every read while
+ * two of its three shards did not advance. Shard 0 applied about a block a
+ * second (48,836,025 → 48,836,071 in 46 s), so its newest block stayed 2 s old;
+ * shard 1 sat at 49,477,354 and shard 2 at 49,328,400, so their newest blocks
+ * got older in step with the wall clock (35,793 → 35,839 s and 19,903 → 19,949 s).
+ */
+const PUBLIC_NODE_READ_1 = {
+  version: '0.13.5',
+  numShards: 2,
+  shardInfos: [
+    { shardId: 0, maxHeight: 48_836_025, blockDelay: 2 },
+    { shardId: 1, maxHeight: 49_477_354, blockDelay: 35_793 },
+    { shardId: 2, maxHeight: 49_328_400, blockDelay: 19_903 },
+  ],
+};
+
+const PUBLIC_NODE_READ_2 = {
+  ...PUBLIC_NODE_READ_1,
+  shardInfos: [
+    { shardId: 0, maxHeight: 48_836_071, blockDelay: 2 },
+    { shardId: 1, maxHeight: 49_477_354, blockDelay: 35_839 },
+    { shardId: 2, maxHeight: 49_328_400, blockDelay: 19_949 },
+  ],
+};
+
+/**
+ * The same node in the shape a single number across shards hides: the HIGHEST
+ * shard is the one advancing, so a maximum taken over the shards keeps moving
+ * while shard 2 sits frozen at 49,328,400.
+ */
+const PUBLIC_NODE_HIDDEN_STOP_1 = {
+  version: '0.13.5',
+  numShards: 2,
+  shardInfos: [
+    { shardId: 0, maxHeight: 48_836_025, blockDelay: 2 },
+    { shardId: 1, maxHeight: 49_477_354, blockDelay: 2 },
+    { shardId: 2, maxHeight: 49_328_400, blockDelay: 19_903 },
+  ],
+};
+
+const PUBLIC_NODE_HIDDEN_STOP_2 = {
+  ...PUBLIC_NODE_HIDDEN_STOP_1,
+  shardInfos: [
+    { shardId: 0, maxHeight: 48_836_071, blockDelay: 2 },
+    { shardId: 1, maxHeight: 49_477_400, blockDelay: 0 },
+    { shardId: 2, maxHeight: 49_328_400, blockDelay: 19_949 },
+  ],
+};
+
+/** MEASURED (2026-10-20): every shard following the chain, tip ages 0–2 s. */
+const HEALTHY_NODE_READ_1 = {
+  version: '1.5.5',
+  isSyncing: false,
+  numShards: 2,
+  shardInfos: [
+    { shardId: 0, maxHeight: 48_501_853, blockDelay: 1 },
+    { shardId: 1, maxHeight: 49_177_741, blockDelay: 0 },
+    { shardId: 2, maxHeight: 49_013_091, blockDelay: 2 },
+  ],
+};
+
+const HEALTHY_NODE_READ_2 = {
+  ...HEALTHY_NODE_READ_1,
+  shardInfos: [
+    { shardId: 0, maxHeight: 48_501_906, blockDelay: 0 },
+    { shardId: 1, maxHeight: 49_177_795, blockDelay: 1 },
+    { shardId: 2, maxHeight: 49_013_144, blockDelay: 0 },
+  ],
+};
+
+/**
+ * Walk two `/v1/info` reads through both halves the runtime uses: the freshness
+ * of each shard (its height across the two reads), then the status and the
+ * sentence for the second read.
+ */
+const readTwice = async (
+  first: unknown,
+  second: unknown,
+  nows: [number, number] = [1_000_000, 1_046_000],
+): Promise<{
+  samples: ProbeSample[];
+  freshness: Freshness;
+  health: ProviderHealth;
+}> => {
+  const bodies = [first, second];
+  let read = 0;
+  const fetchImpl = (async () =>
+    jsonResponse(
+      bodies[Math.min(read++, bodies.length - 1)],
+    )) as unknown as typeof fetch;
+  const config = DEFAULT_HEALTH_CONFIG;
+  const records = new Map<string, FreshnessRecord>();
+  const samples: ProbeSample[] = [];
+  let freshness: Freshness = 'unknown';
+
+  for (const now of nows) {
+    const sample = await probeSnapchain({
+      provider: ownNodeProvider('https://haatz.quilibrium.com'),
+      fetchImpl,
+      config,
+    });
+    samples.push(sample);
+    const shards = sample.shards.filter(
+      (shard): shard is ShardSample & { maxHeight: number } =>
+        shard.maxHeight !== null,
+    );
+    freshness = combineFreshness(
+      shards.map((shard) => {
+        const key = `shard-${shard.shardId}`;
+        const judgement = judgeFreshness(
+          records.get(key),
+          shard.maxHeight,
+          now,
+          config,
+        );
+        records.set(key, judgement.record);
+        return judgement.freshness;
+      }),
+    );
+  }
+
+  return {
+    samples,
+    freshness,
+    health: judgeProbe({
+      providerId: 'public',
+      sample: samples[samples.length - 1]!,
+      freshness,
+      now: nows[1],
+      config,
+    }),
+  };
 };
 
 describe('judgeFreshness', () => {
@@ -82,7 +231,7 @@ describe('judgeProbe', () => {
     reason: null,
     watermark: 10,
     catchingUp: false,
-    blocksBehind: 0,
+    shards: [],
     ...overrides,
   });
 
@@ -123,10 +272,66 @@ describe('judgeProbe', () => {
     expect(health.detail).toContain('catching up');
   });
 
-  it('calls a server many blocks behind stale', () => {
-    const health = judge({ blocksBehind: 400 });
+  it('calls a node a shard is hours behind on stale, in seconds', () => {
+    // MEASURED (2026-10-24): the public node's shard 1 held height 49,477,354
+    // while its age climbed past 35,000 s. A duration, not a count of blocks,
+    // and the sentence says exactly what the field says.
+    const health = judge({
+      shards: [
+        { shardId: 0, maxHeight: 48_836_025, tipAgeSeconds: 2 },
+        { shardId: 1, maxHeight: 49_477_354, tipAgeSeconds: 35_793 },
+      ],
+    });
     expect(health.status).toBe('stale');
-    expect(health.detail).toContain('400 blocks behind');
+    expect(health.detail).toBe(
+      "It answered, but shard 1's newest block is 9h 56m old.",
+    );
+  });
+
+  it('names every shard that is behind, each with its own age', () => {
+    const health = judge({
+      shards: [
+        // Listed the way the node listed them on 2026-10-24 (0, then 2, then 1)
+        // and NOT the way the sentence reads them: shard order, worst included.
+        { shardId: 0, maxHeight: 48_836_025, tipAgeSeconds: 2 },
+        { shardId: 2, maxHeight: 49_328_400, tipAgeSeconds: 19_903 },
+        { shardId: 1, maxHeight: 49_477_354, tipAgeSeconds: 35_793 },
+      ],
+    });
+    expect(health.status).toBe('stale');
+    expect(health.detail).toBe(
+      'It answered, but the newest blocks on shards 1 and 2 are 9h 56m and 5h 31m old.',
+    );
+  });
+
+  it('refuses to invent an age the node did not report', () => {
+    // A shard with no `blockDelay` has said nothing about how old its newest
+    // block is; that is not a number this client may supply.
+    const health = judge({
+      shards: [{ shardId: 1, maxHeight: 49_477_354, tipAgeSeconds: null }],
+    });
+    expect(health.status).toBe('live');
+    expect(health.detail).toContain('normally');
+  });
+
+  it('names no shard number when the node did not give one', () => {
+    const health = judge({
+      shards: [{ shardId: null, maxHeight: 49_477_354, tipAgeSeconds: 35_793 }],
+    });
+    expect(health.status).toBe('stale');
+    expect(health.detail).toBe(
+      'It answered, but its newest block is 9h 56m old.',
+    );
+  });
+
+  it('says the plain sentence when only the heights stopped moving', () => {
+    // The freshness half can go stale with no per-shard age to quote, and the
+    // sentence then stays true without a number in it.
+    const health = judge({}, 'stale');
+    expect(health.status).toBe('stale');
+    expect(health.detail).toBe(
+      'Answering, but it has stopped keeping up with the network.',
+    );
   });
 
   it('calls a server whose watermark stopped moving stale', () => {
@@ -139,8 +344,12 @@ describe('judgeProbe', () => {
     expect(health.detail).toBe('It did not answer at all.');
   });
 
-  it('never lets a fast answer hide a stale one', () => {
-    expect(judge({ latencyMs: 50, blocksBehind: 1_000 }).status).toBe('stale');
+  it('never lets a fast answer hide a shard that is behind', () => {
+    const health = judge({
+      latencyMs: 50,
+      shards: [{ shardId: 1, maxHeight: 49_477_354, tipAgeSeconds: 1_000 }],
+    });
+    expect(health.status).toBe('stale');
   });
 });
 
@@ -155,7 +364,12 @@ describe('probeSnapchain', () => {
     });
     expect(sample.ok).toBe(true);
     expect(sample.watermark).toBe(49_177_741);
-    expect(sample.blocksBehind).toBe(1);
+    // Every shard as the node painted it, tip age in seconds and all.
+    expect(sample.shards).toEqual([
+      { shardId: 0, maxHeight: 48_501_853, tipAgeSeconds: 1 },
+      { shardId: 1, maxHeight: 49_177_741, tipAgeSeconds: 0 },
+      { shardId: 2, maxHeight: 49_013_091, tipAgeSeconds: 0 },
+    ]);
     expect(sample.catchingUp).toBe(false);
     expect(
       String(
@@ -163,6 +377,30 @@ describe('probeSnapchain', () => {
           .calls[0]![0],
       ),
     ).toBe('https://node.example/v1/info?dbstats=0');
+  });
+
+  it('keeps a tip age the node did not report unknown, per shard', async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({
+        version: '1.5.5',
+        shardInfos: [{ shardId: 1, maxHeight: 49_177_741 }],
+      })) as unknown as typeof fetch;
+    const sample = await probeSnapchain({
+      provider: ownNodeProvider('https://node.example'),
+      fetchImpl,
+    });
+    expect(sample.shards).toEqual([
+      { shardId: 1, maxHeight: 49_177_741, tipAgeSeconds: null },
+    ]);
+    // Nothing says this shard stopped, so nothing here claims it did.
+    expect(
+      judgeProbe({
+        providerId: 'mine',
+        sample,
+        freshness: 'unknown',
+        now: 1_000,
+      }).status,
+    ).toBe('live');
   });
 
   it('reports a node that is syncing as catching up', async () => {
@@ -219,6 +457,80 @@ describe('probeSnapchain', () => {
     });
     expect(sample.ok).toBe(false);
     expect(sample.reason).toContain('0.02s');
+  });
+});
+
+describe('the public node, read twice', () => {
+  it('answers, and is not live: two shards have not applied a block in hours', async () => {
+    const { samples, freshness, health } = await readTwice(
+      PUBLIC_NODE_READ_1,
+      PUBLIC_NODE_READ_2,
+    );
+
+    // It answered every read — this is not a "down" story.
+    expect(samples[1]!.ok).toBe(true);
+    expect(samples[1]!.httpStatus).toBe(200);
+    // The shard that is following the chain applied 46 blocks in 46 s, so its
+    // newest block stayed 2 s old. The two that stopped did not move at all, so
+    // their newest blocks got 46 s older: that is exactly what `blockDelay`
+    // reports, in seconds.
+    expect(
+      samples[1]!.shards[0]!.maxHeight! - samples[0]!.shards[0]!.maxHeight!,
+    ).toBe(46);
+    expect(samples[1]!.shards[1]!.maxHeight).toBe(
+      samples[0]!.shards[1]!.maxHeight,
+    );
+    expect(
+      samples[1]!.shards[1]!.tipAgeSeconds! -
+        samples[0]!.shards[1]!.tipAgeSeconds!,
+    ).toBe(46);
+    // One minute in, a shard's own history is still inside the two-minute
+    // window, so nothing about the heights says stale yet: the node's per-shard
+    // age is what catches this, immediately and in its own words.
+    expect(freshness).toBe('fresh');
+    expect(health.status).toBe('stale');
+    expect(health.detail).toBe(
+      'It answered, but the newest blocks on shards 1 and 2 are 9h 57m and 5h 32m old.',
+    );
+  });
+
+  it('cannot be talked into "live" by the shard that is still advancing', async () => {
+    // The shape a single number across shards hides: the HIGHEST shard is the
+    // one moving, so a maximum over the shards just keeps climbing while shard
+    // 2 sits frozen. Two minutes on, its history says so too.
+    const { freshness, health } = await readTwice(
+      PUBLIC_NODE_HIDDEN_STOP_1,
+      PUBLIC_NODE_HIDDEN_STOP_2,
+      [1_000_000, 1_121_000],
+    );
+
+    const top = (read: { shardInfos: { maxHeight: number }[] }): number =>
+      Math.max(...read.shardInfos.map((shard) => shard.maxHeight));
+    expect(top(PUBLIC_NODE_HIDDEN_STOP_2)).toBeGreaterThan(
+      top(PUBLIC_NODE_HIDDEN_STOP_1),
+    );
+    expect(freshness).toBe('stale');
+    expect(health.status).toBe('stale');
+    expect(health.detail).toBe(
+      "It answered, but shard 2's newest block is 5h 32m old.",
+    );
+  });
+
+  it('holds a healthy node live, with every shard moving', async () => {
+    const { samples, freshness, health } = await readTwice(
+      HEALTHY_NODE_READ_1,
+      HEALTHY_NODE_READ_2,
+    );
+
+    expect(samples[1]!.ok).toBe(true);
+    expect(
+      samples[1]!.shards.every(
+        (shard) => shard.tipAgeSeconds !== null && shard.tipAgeSeconds <= 2,
+      ),
+    ).toBe(true);
+    expect(freshness).toBe('fresh');
+    expect(health.status).toBe('live');
+    expect(health.detail).toContain('Answering normally');
   });
 });
 

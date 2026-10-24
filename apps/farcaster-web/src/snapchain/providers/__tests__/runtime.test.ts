@@ -27,8 +27,11 @@ vi.mock('~/utils/storageUtils', () => ({
   }),
 }));
 
-import { FARCASTER_PUBLIC_PROVIDER_ID } from '~/snapchain/providers/catalog';
-import type { ProbeSample } from '~/snapchain/providers/health';
+import {
+  FARCASTER_PUBLIC_PROVIDER_ID,
+  ownNodeProvider,
+} from '~/snapchain/providers/catalog';
+import { type ProbeSample, probeSnapchain } from '~/snapchain/providers/health';
 import { providerPillView } from '~/snapchain/providers/pill';
 import {
   checkProvidersNow,
@@ -57,7 +60,7 @@ const sample = (overrides: Partial<ProbeSample> = {}): ProbeSample => ({
   reason: null,
   watermark: 100,
   catchingUp: false,
-  blocksBehind: 0,
+  shards: [],
   ...overrides,
 });
 
@@ -70,6 +73,39 @@ const down = (): ProbeSample =>
   });
 
 const slow = (): ProbeSample => sample({ latencyMs: 6_400 });
+
+const jsonResponse = (body: unknown, status = 200): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+
+/**
+ * MEASURED (2026-10-24, 15:42 and 15:43 UTC, `https://haatz.quilibrium.com`): the
+ * node answered every read while shards 1 and 2 did not advance. Read as the
+ * loop reads it, the heights a maximum is taken over climb with shard 0 while
+ * those two sit still.
+ */
+const STOPPED_NODE_READS = [
+  {
+    version: '0.13.5',
+    numShards: 2,
+    shardInfos: [
+      { shardId: 0, maxHeight: 48_836_025, blockDelay: 2 },
+      { shardId: 1, maxHeight: 49_477_354, blockDelay: 35_793 },
+      { shardId: 2, maxHeight: 49_328_400, blockDelay: 19_903 },
+    ],
+  },
+  {
+    version: '0.13.5',
+    numShards: 2,
+    shardInfos: [
+      { shardId: 0, maxHeight: 48_836_071, blockDelay: 2 },
+      { shardId: 1, maxHeight: 49_477_354, blockDelay: 35_839 },
+      { shardId: 2, maxHeight: 49_328_400, blockDelay: 19_949 },
+    ],
+  },
+];
 
 /** The dead server is dead; Farcaster's own public server always answers. */
 const probeWhere =
@@ -148,6 +184,39 @@ describe('startProviderWatch', () => {
     expect(getProviderSnapshot().activeId).toBe(DEAD);
     expect(getProviderSnapshot().failover.reason).toBe('backup-recovered');
     expect(getProviderSnapshot().explanation).toContain('answering again');
+  });
+});
+
+describe('a node that answers while one of its shards has stopped', () => {
+  it('is not live, and the sentence says which shard stopped and for how long', async () => {
+    store.set(`snapchain_provider_order_${FID}`, [DEAD]);
+
+    let read = 0;
+    const probe = async (provider: { id: string }): Promise<ProbeSample> => {
+      if (provider.id !== DEAD) {
+        return sample();
+      }
+      const body =
+        STOPPED_NODE_READS[Math.min(read, STOPPED_NODE_READS.length - 1)];
+      read += 1;
+      return probeSnapchain({
+        provider: ownNodeProvider('https://dead.example'),
+        fetchImpl: (async () => jsonResponse(body)) as unknown as typeof fetch,
+      });
+    };
+
+    await startProviderWatch(FID, { probe, autoStart: false });
+    await checkProvidersNow();
+
+    const snapshot = getProviderSnapshot();
+    expect(snapshot.health[DEAD]!.status).toBe('stale');
+    expect(snapshot.health[DEAD]!.detail).toContain(
+      'the newest blocks on shards 1 and 2 are 9h 57m and 5h 32m old',
+    );
+    // The reader is moved off it, because the list has a real node behind it —
+    // and the pill says why, in the same measured words.
+    expect(snapshot.activeId).toBe(RELAY);
+    expect(snapshot.failover.reason).toBe('preferred-stale');
   });
 });
 

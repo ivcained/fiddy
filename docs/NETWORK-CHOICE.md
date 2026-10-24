@@ -32,17 +32,31 @@ UTC.** The public node answered every one of eleven reads over four minutes whil
 its two message shards did not advance: shard 1 sat at `49,477,354` and shard 2
 at `49,328,400`, with `blockDelay` climbing in step with the wall clock
 (`31,706` → `31,937` s on shard 1, `15,816` → `16,047` s on shard 2), while shard
-0 advanced about one block a second. `blockDelay` is *seconds since that shard's
-last block* (`farcasterxyz/snapchain`, `src/storage/store/engine.rs`:
-`block_delay_seconds = now - block.timestamp`), not a count of blocks, so a
-number that climbs in step with the wall clock means that shard is not advancing
-at all. This was not a stale validator list: the on-chain registry still reports
+0 advanced about one block a second. `blockDelay` is *the age of that shard's
+newest block, in seconds* — MEASURED at the source (`farcasterxyz/snapchain`:
+`src/network/server.rs` sets `block_delay: current_time.saturating_sub(max_block_time)`
+from that shard's `max_block_timestamp()`, and `src/storage/store/engine.rs`
+gauges the same quantity per commit as `block_delay_seconds = now - block.timestamp`)
+— not a count of blocks, so a number that climbs in step with the wall clock
+means that shard is not advancing at all. This was not a stale validator list: the on-chain registry still reports
 the current set (§3), so it is a shard that stopped advancing as far as this node
 could see. Which of the two it was, this node or the network, could not be settled
 from here: there is no second reachable Farcaster or Hypersnap read node
 (`hub.pinata.cloud` and `nemes.farcaster.xyz` do not resolve,
 `snapchain-api.neynar.com` answers `402`, `api.warpcast.com` and
 `api.farcaster.xyz` answer `401`).
+
+**The same node two hours later was applying blocks again and still behind
+(MEASURED 2026-10-24 16:07 to 16:27 UTC, three reads 21 s apart).** After the halt
+in §3 the shards resumed and caught up: shard 0 kept a newest block 2–6 s old
+throughout, while shard 1 and shard 2 *advanced* (~200 blocks in 21 s) with their
+newest blocks still `26,597` s → `16,773` s and `10,627` s → `795` s old, falling
+as they caught up. So the field is a **lag**: the frozen shape above (age climbing
+1 s per second) and this catching-up shape (heights moving, age falling slowly)
+are both readings of the same number, and either way the shard is behind by
+exactly what the field says. The client reports that, per shard, in those words
+(§4). The raw reads are in
+[evidence/client-freshness-2026-10-24.json](evidence/client-freshness-2026-10-24.json).
 
 ## 2. A node cannot be asked which network it is
 
@@ -173,6 +187,30 @@ refusing.
 - `PUBLIC_READ_NODES` gained a `network` field, and the public entry's name is now
   honest about what it is ("The public Hypersnap node" — it always was one; the
   picker used to call it "a public Farcaster node").
+- **Freshness is now claimed per shard, from the node's own fields**
+  (`apps/farcaster-web/src/snapchain/providers/health.ts`). A Snapchain `/v1/info`
+  body carries, for each shard, `maxHeight` (a block number) and `blockDelay` (the
+  age of that shard's newest block, in seconds). `ProbeSample.shards` keeps both as
+  the node reported them; freshness is judged per shard (that shard's height across
+  two reads, `judgeFreshness` + `combineFreshness`), and a shard whose age is over
+  the threshold makes the server `stale` (`shardsBehind`). A single number taken
+  across the shards is exactly what let an advancing shard vouch for a stopped one,
+  so the client no longer takes one.
+- **The threshold is a duration and its name says so**:
+  `DEFAULT_HEALTH_CONFIG.maxTipAgeMs = 120_000`. MEASURED: a shard that is keeping
+  up has a newest block 0–6 s old (blocks land about once a second), so two minutes
+  is twenty times the worst healthy reading; the public node's other shards measured
+  795 s to 31,937 s.
+- **The sentence says what the field says, never "blocks"**: *"It answered, but
+  shard 1's newest block is 4h 39m old."*, or for several at once *"…the newest
+  blocks on shards 1 and 2 are 4h 39m and 13m 15s old."* A shard whose `blockDelay`
+  the node did not report keeps `tipAgeSeconds: null` and is never given a number;
+  a server that goes stale with no per-shard number to quote gets the numberless
+  sentence *"Answering, but it has stopped keeping up with the network."*
+- A node that answers while a shard is hours behind is therefore `stale`, not
+  `live`. The pill and Settings → your node say which shard and how old its newest
+  block is; the failover only moves the reader off it when something better on their
+  list is answering, so the sentence stays true either way.
 
 ## 5. The release carries the network
 
@@ -198,6 +236,15 @@ of theirs running, and `--network snapchain` (default) points it at their node.
   `@latest` tag as `validators.toml HTTP 404`, and the public node's shards 1 and
   2 flagged `not advancing`. The run's machine-readable copy is
   [evidence/hypersnap-sweep-2026-10-24.json](evidence/hypersnap-sweep-2026-10-24.json).
+- Client freshness, 2026-10-24: 42 tests across
+  `apps/farcaster-web/src/snapchain/providers/__tests__/health.test.ts` and
+  `runtime.test.ts`, including a fixture of the public node as measured here (one
+  shard advancing, two hours behind, ages climbing) and a healthy node, asserting in
+  both the status, the per-shard freshness judgement and the human sentence. Then a
+  live run of `probeSnapchain` against `https://haatz.quilibrium.com` twice, 21 s
+  apart, 2026-10-24 16:27 UTC, which printed `STATUS stale` and *"It answered, but
+  the newest blocks on shards 1 and 2 are 4h 39m and 13m 15s old."* — the reads are
+  in [evidence/client-freshness-2026-10-24.json](evidence/client-freshness-2026-10-24.json).
 - CLI, after the corrections: `fiddy node up --network hypersnap` prints the
   record above (registry version and set count, the three missing rotations, the
   issue's state, how to read the public node's freshness numbers) and exits 1
