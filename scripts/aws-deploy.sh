@@ -57,6 +57,9 @@ else
     -o "$PIN_FILE" 2>/dev/null || PIN_FILE=""
 fi
 
+AWS_ARGS=(--region "$REGION")
+[ -n "${FIDDY_AWS_PROFILE:-}" ] && AWS_ARGS=("${AWS_ARGS[@]}" --profile "$FIDDY_AWS_PROFILE")
+
 SNAPSHOT_ID=""; SNAP_AMI=""; SNAP_VOL_GB="0"; SNAP_DATE=""; SNAP_AGE=""; SNAP_MAX_AGE="14"
 if [ -n "$PIN_FILE" ] && command -v fb_pin_get >/dev/null 2>&1; then
   SNAPSHOT_ID="$(fb_pin_get .aws.snapshotId "$PIN_FILE")"
