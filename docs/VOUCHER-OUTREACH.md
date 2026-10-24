@@ -116,16 +116,22 @@ person has answered. Outcomes here are read from the net, never assumed.
 | @vaibhavmule | 2 | 2026-10-24T10:29:12Z | reply to his readnode submission | asked | box up, node synced; offered to cover $15 of AWS costs for a voucher for his own entry |
 | @mobeen02 | 1 | 2026-10-24T10:29:14Z | reply to "Need a voucher" | asked | publicly still short a voucher |
 | @0xzoz | 5 | 2026-10-24T10:30:19Z | reply to "Looking for a human to test this" | asked | traded: @ivc is mid agent-led run of In Three (vouch cast 2026-10-24T09:22:24Z); the human half of the trade is still open |
+| @jpfraneto | new | 2026-10-24T11:00:03Z | reply in the live trade thread with @ivc | asked | fid 16098, 21.9k followers, entering with "Fatline" and shouting "oh fuck this ends in 4 hours and i need someone to do the thing"; offered to send $ for setup and is paying a server provider via x402. @ivc is running his entry now, so the reciprocal ask is live in front of him |
+| @runn3rr | new (vouch pool) | 2026-10-24T11:11:17Z | reply to his townhall vouch | asked | fid 18763, 16k, "core contributor @faircaster". Vouched for a rival entry on 2026-10-22 after running it on his own Snapchain node + client, with honest notes. Proven voucher, already owns the rig |
+| @eat | new (vouch pool) | 2026-10-24T11:11:19Z | reply to his townhall vouch | asked | fid 18850, 4.7k, developer. Same pattern: ran a rival's tutorial on his own server 2026-10-22 and posted the vouch with his client URL |
+| @grin | new (vouch pool) | 2026-10-24T11:11:20Z | reply to his offer to the Selfcaster dev | asked | fid 1970, 159k. Publicly offered 2026-10-18: "If you make it bounty-ready, I'll run through it and vouch for ya :-)" |
 | @topocount.eth | 6 | not yet | none | not_contacted | Neynar engineer, posts the node-runner releases |
 | @0xael.eth | 7 | not yet | none | not_contacted | publicly offered to test and post for another entrant (2026-10-17) |
 | @felirami.eth | 8 | not yet | none | not_contacted | |
 | @boiler | 9 | not yet | none | not_contacted | |
 | @mvr | 10 | not yet | none | not_contacted | |
 | @manan | 11 | not yet | none | not_contacted | |
-| @borodutch | 12 | not yet | none | not_contacted | |
+| @borodutch | 12 | not yet | none | not_contacted | entered quilcast in the bounty thread himself |
 | @darrylyeo | 13 | not yet | none | not_contacted | |
-| @nashrad | hold | not yet | none | not_contacted | docs-stress run only; also short a voucher himself |
-| @piratekev.eth | hold | — | — | dropped | last cast 530 days old — dead DM |
+| @nashrad | hold | not yet | none | not_contacted | docs-stress run only; he has vouched for his own entry (@otterly) while still short one himself |
+| @vaipraonde | new (bounty thread) | not yet | none | not_contacted | in the bounty thread: "a client is super easy. a node is not. we would like to setup a NODE." The exact person the tutorial is for, cost-sensitive |
+| @otterly | new (proven voucher) | not yet | none | not_contacted | vouched for @nashrad's entry on 2026-10-22 (https://farcaster.xyz/otterly/0x07aa2e8a) |
+| @piratekev.eth | hold | none | none | dropped | last cast 530 days old - dead DM |
 
 Owner-sent DMs are invisible to this machine, so a row can be `asked` by the owner without this file knowing.
 What is visible is the effect: @ivc vouched for @webthe3rd.eth's snapstart (2026-10-23T04:18:03Z) and ran
@@ -152,6 +158,18 @@ All eight were read back from Neynar after posting; each reply is a confirmed di
 | @vaibhavmule | reply to `0x7d39f9239317…` | `0x5696cd017f1f80c8264b466fe79d7ae83a4ab64c`, 10:29:12Z | see §6 |
 | @mobeen02 | reply to `0x282b776d99f4…` | `0x76e906d5dfbbbd75a01acc35f8faf99a050c2e20`, 10:29:14Z | see §6 |
 | @0xzoz | reply to `0xdfeb7bce3114…` | `0x788bbb09c9f36187115cba3347027efd60c2be90`, 10:30:19Z | see §6 |
+| bounty thread (balajis's cast) | trade offer to all entrants | `0xb38f80516881d5a2ca1bc217affae6a3a13c4399`, 10:39:08Z | see §6 |
+| @jpfraneto | reply to `0x85e6d962ad91…` | `0x2b6db8d82962335124ff3a9b8d23a20bb751eeb9`, 11:00:03Z | see §6 |
+| @runn3rr | reply to `0x2d001899dec0…` | `0x6eae8aad085398338c18d3f6be58e3565d8c52cc`, 11:11:17Z | see §6 |
+| @eat | reply to `0x0bc3b39c6476…` | `0xd6b5d214ba6a99dae1da9a056f5671dc9e3dc315`, 11:11:19Z | see §6 |
+| @grin | reply to `0x72e0efbf14fe…` | `0x4219aad63159a76bdb4601d40a03d7530b23aba1`, 11:11:20Z | see §6 |
+
+Twelve asks in total (twelve people plus two casts). The vouch-pool idea came out of reading the **other entrants' submissions** in the
+bounty thread: `townhall` names two vouchers (`runn3rr`, `eat`) who each ran its tutorial on their own box and published honest
+notes, and those two are the best remaining candidates because they already proved they will do the whole loop for free.
+Worth knowing for the submission reply: `casty`'s "vouches from two node runners" come from **1-follower accounts**
+(`alxsharuk` fid 3356625, `kamilaa` fid 3355345), the same shape as @fiddy-one, so a judge may discount them; `runn3rr`
+and `eat` are 16k and 4.7k-follower accounts with their own client URLs in the vouch, which is what a real one looks like.
 
 Reproduce the whole read side with `docs/evidence/`-style scripts; the send used the Fiddy plugin
 (`farcaster_post` / `farcaster_reply`) and needs writes enabled plus the saved Neynar signer.
