@@ -5,12 +5,23 @@
  * the front door — because a second three.js setup would be a second renderer,
  * a second GLTFLoader config and a second set of GPU contexts to leak.
  *
+ * THE HERO IS A LIVING CHARACTER. It is the owner's own mascot (`fiddy-baby.glb`),
+ * which carries its authored 5s loop and a `HeadGroup` inside it: the head turns
+ * toward the pointer and the whole figure hops when it is greeted. Nothing here
+ * turns the model to face the camera — the camera is fixed on the model's own
+ * bounds and the character's own rig does the performing. (The vinyl figure this
+ * replaced had no rig and no clips, so it had to be orbited by the camera to look
+ * alive at all.)
+ *
  * Deliberately minimal, and deliberately the same rules for both callers:
  *   - matte outline shells render BackSide (the black-model lesson),
- *   - a clip loops seamlessly, a still model is turned by the camera instead,
+ *   - a clip loops seamlessly; a caller that sets `restAfterMs` lets it settle
+ *     instead of looping forever on a page somebody is reading,
+ *   - the frame loop STOPS when there is nothing left to draw — a landing page
+ *     must not hold a rAF loop open to show a character standing still,
+ *   - nothing renders while the tab is hidden,
  *   - everything is disposed with an explicit context loss, so a top bar that
  *     unmounts or a route that changes does not leak a GPU context,
- *   - nothing renders while the tab is hidden,
  *   - the model is framed on its own bounds, so one shot is correct for any
  *     model without anyone hand-tuning a camera per asset.
  */
@@ -19,12 +30,13 @@ import {
   AnimationMixer,
   BackSide,
   Box3,
-  Clock,
   DirectionalLight,
   Group,
   HemisphereLight,
   LoopRepeat,
+  MathUtils,
   PerspectiveCamera,
+  Quaternion,
   Scene,
   Sphere,
   Vector3,
@@ -37,6 +49,8 @@ import { FIDDY_MARK_CLIP, FIDDY_MARK_MODEL } from './fiddyMark';
 /** A live model on screen. Call `dispose` to take it down for good. */
 export interface MountedModel {
   dispose(): void;
+  /** Greet the visitor: a hop, and the clip runs again for a while. */
+  react(): void;
 }
 
 export interface ModelSceneOptions {
@@ -45,18 +59,30 @@ export interface ModelSceneOptions {
   /**
    * The clip to play, looped. Named rather than "first one" so a model that
    * grows a second clip does not silently start playing a different one.
-   * Absent means the file is a still, which is the hero's case.
+   * Absent means the file is a still and only the camera may move.
    */
   clip?: string;
-  /** Extra azimuth per second while no pointer is on the model. 0 = still. */
-  turntable?: number;
   /**
-   * Let a pointer set the azimuth. Off for a model that sits beside a form: a
-   * canvas that eats a tap meant for the input next to it is a bug, not a toy.
+   * Turn this node toward the pointer, by this many radians at full deflection.
+   *
+   * What the head follows is the pointer over the WINDOW, never its position
+   * inside this box: a character that only looks at you while the cursor is
+   * inside its own square is not looking at you. `yaw` is radians to the right
+   * at full rightward deflection, `pitch` radians up at full upward deflection.
+   * A model whose rig has no such node simply does not turn its head.
    */
-  draggable?: boolean;
-  /** Wait this long after the last drag before the turntable resumes. */
-  resumeAfterMs?: number;
+  look?: { node: string; yaw: number; pitch: number };
+  /**
+   * Let the clip settle this long after the last thing that asked it to move
+   * (mounting counts, and so does a greeting). Absent means loop forever, which
+   * is what the 36px mark in the chrome wants and what a hero on a page
+   * somebody is reading does not: a character that never stops is noise.
+   */
+  restAfterMs?: number;
+  /** A pointer move keeps a resting model awake this long. */
+  awakeForMs?: number;
+  /** A greeting keeps it awake this long. */
+  reactForMs?: number;
   /** Vertical field of view, in degrees. */
   fov?: number;
   /**
@@ -88,6 +114,20 @@ export const FIDDY_MARK_PRESET: ModelSceneOptions = {
 const DEFAULT_FOV = 34;
 const DEFAULT_VIEW: [number, number, number] = [0.5, 0.32, 1];
 
+/** How long a pointer keeps a resting model awake, and how long a greeting does. */
+const DEFAULT_AWAKE_MS = 900;
+const DEFAULT_REACT_MS = 5000;
+
+/** Seconds for the head to get most of the way to where the pointer is. */
+const LOOK_DAMPING = 8;
+
+/** A greeting lasts a second: the figure rises and settles back in one breath. */
+const HOP_SECONDS = 1;
+/** The hop's height, as a share of the model's own radius. */
+const HOP_HEIGHT = 0.07;
+/** Radians of roll at the peak of the hop — a lean into it, not a spin. */
+const HOP_ROLL = 0.035;
+
 /**
  * Draw `options.model` into `host` and keep drawing it until `signal` aborts.
  *
@@ -118,47 +158,38 @@ export const mountFiddyModel = async (
   scene.add(sun);
 
   let mixer: AnimationMixer | null = null;
-  const clock = new Clock();
   let frame = 0;
   let disposed = false;
-  /** Radians of orbit the turntable has drawn so far. */
-  let spin = 0;
-  /** Radians the visitor has dragged on top of the turntable. */
-  let drag = 0;
-  let dragging = false;
-  let lastPointerX = 0;
-  /** Wall-clock ms after which the turntable may turn again. */
-  let resumeAt = 0;
+  /** Seconds of clip drawn so far. Frozen while the model is resting. */
+  let elapsed = 0;
+  /** Wall-clock ms the clip may keep running until. */
+  let awakeUntil = 0;
+  /** Wall-clock ms the last greeting started. */
+  let reactAt = -Infinity;
+  /** Last frame's timestamp, or 0 when the loop has just (re)started. */
+  let lastFrameAt = 0;
+  /** Where the pointer is pointing, -1..1 on each axis. */
+  let targetX = 0;
+  let targetY = 0;
+  /** Where the head is actually pointing, damped toward the target. */
+  let lookX = 0;
+  let lookY = 0;
+  let loaded = false;
+  /** The loaded figure and the parts of it the pointer and a greeting need. */
+  let figure: Group | null = null;
+  let headNode: Group | null = null;
+  /** The figure's own resting height, and how high its greeting carries it. */
+  let restY = 0;
+  let hopHeight = 0;
+  /** Scratch rotations, rebuilt every frame rather than allocated per frame. */
+  const yawAxis = new Vector3(0, 1, 0);
+  const pitchAxis = new Vector3(1, 0, 0);
+  const yaw = new Quaternion();
+  const pitch = new Quaternion();
 
-  const onPointerDown = (event: PointerEvent) => {
-    if (!options.draggable) {
-      return;
-    }
-    dragging = true;
-    lastPointerX = event.clientX;
-    // Capture so a drag that leaves the box keeps arriving here, and so the
-    // page underneath does not start a text selection mid-turn.
-    host.setPointerCapture?.(event.pointerId);
-    event.preventDefault();
-  };
-
-  const onPointerMove = (event: PointerEvent) => {
-    if (!dragging) {
-      return;
-    }
-    drag += (event.clientX - lastPointerX) * 0.01;
-    lastPointerX = event.clientX;
-    resumeAt = performance.now() + (options.resumeAfterMs ?? 0);
-  };
-
-  const endDrag = (event: PointerEvent) => {
-    if (!dragging) {
-      return;
-    }
-    dragging = false;
-    host.releasePointerCapture?.(event.pointerId);
-    resumeAt = performance.now() + (options.resumeAfterMs ?? 0);
-  };
+  const restAfterMs = options.restAfterMs;
+  const awakeForMs = options.awakeForMs ?? DEFAULT_AWAKE_MS;
+  const reactForMs = options.reactForMs ?? DEFAULT_REACT_MS;
 
   const dispose = () => {
     if (disposed) {
@@ -167,10 +198,8 @@ export const mountFiddyModel = async (
     disposed = true;
     cancelAnimationFrame(frame);
     mixer?.stopAllAction();
-    host.removeEventListener('pointerdown', onPointerDown);
-    host.removeEventListener('pointermove', onPointerMove);
-    host.removeEventListener('pointerup', endDrag);
-    host.removeEventListener('pointercancel', endDrag);
+    window.removeEventListener('pointermove', onLook);
+    document.removeEventListener('visibilitychange', onVisibility);
     renderer.dispose();
     // An explicit context loss: a browser keeps only a handful of live WebGL
     // contexts, and these live in chrome that mounts on every route.
@@ -178,6 +207,122 @@ export const mountFiddyModel = async (
     renderer.domElement.remove();
   };
   signal.addEventListener('abort', dispose);
+
+  /**
+   * A pointer move aims the head and wakes the clip. Touch is ignored on
+   * purpose: a finger has no hover position, and the last place a thumb rested
+   * is not somewhere the character should stare.
+   */
+  function onLook(event: PointerEvent) {
+    if (event.pointerType === 'touch') {
+      return;
+    }
+    targetX = MathUtils.clamp(
+      (event.clientX / window.innerWidth - 0.5) * 2,
+      -1,
+      1,
+    );
+    targetY = MathUtils.clamp(
+      (0.5 - event.clientY / window.innerHeight) * 2,
+      -1,
+      1,
+    );
+    if (restAfterMs !== undefined) {
+      awakeUntil = Math.max(awakeUntil, performance.now() + awakeForMs);
+    }
+    requestFrame();
+  }
+
+  function onVisibility() {
+    // A tab coming back has no frame timestamp to compare against, and a tab
+    // going away has nothing left to draw.
+    lastFrameAt = 0;
+    if (!document.hidden) {
+      requestFrame();
+    }
+  }
+
+  /**
+   * One frame, and the decision about whether there is another one.
+   *
+   * This is not a loop that runs for the lifetime of the page: a landing page
+   * showing a settled character must not hold a rAF callback open, so a frame is
+   * only requested while something is still changing — the clip, the head on its
+   * way to the pointer, or a greeting.
+   */
+  function render(now: number) {
+    frame = 0;
+    if (disposed) {
+      return;
+    }
+    const delta = lastFrameAt ? Math.min((now - lastFrameAt) / 1000, 0.05) : 0;
+    lastFrameAt = now;
+
+    const awake = restAfterMs === undefined || now < awakeUntil;
+    if (awake) {
+      elapsed += delta;
+    }
+    // The mixer writes the head's own rotation from the clip every time it is
+    // asked for a pose, which is what makes the pointer's rotation an addition
+    // to the authored loop rather than a rotation that accumulates: if the pose
+    // were not rewritten first, the head would spin away on its own.
+    mixer?.setTime(elapsed);
+
+    const damping = delta || 0.016;
+    lookX = MathUtils.damp(lookX, targetX, LOOK_DAMPING, damping);
+    lookY = MathUtils.damp(lookY, targetY, LOOK_DAMPING, damping);
+    if (headNode && options.look) {
+      yaw.setFromAxisAngle(yawAxis, lookX * options.look.yaw);
+      pitch.setFromAxisAngle(pitchAxis, -lookY * options.look.pitch);
+      headNode.quaternion.multiply(yaw).multiply(pitch);
+    }
+
+    const sinceGreeting = (now - reactAt) / 1000;
+    const greeting = sinceGreeting >= 0 && sinceGreeting < HOP_SECONDS;
+    if (figure) {
+      if (greeting) {
+        figure.position.y =
+          restY + Math.sin(sinceGreeting * Math.PI) * hopHeight;
+        figure.rotation.z = Math.sin(sinceGreeting * Math.PI * 2) * HOP_ROLL;
+      } else if (figure.position.y !== restY || figure.rotation.z !== 0) {
+        figure.position.y = restY;
+        figure.rotation.z = 0;
+      }
+    }
+
+    renderer.render(scene, camera);
+
+    // What the character is doing, on the element a probe can read: pixels
+    // alone cannot tell "resting" from "a very small hop", and the head's own
+    // angle is what says whether it is following the pointer.
+    const state = greeting ? 'reacting' : awake ? 'playing' : 'resting';
+    if (host.dataset.motion !== state) {
+      host.dataset.motion = state;
+    }
+    if (options.look && headNode) {
+      // Reported as the DEFLECTION in degrees — yaw positive to the right,
+      // pitch positive upward — not as the rotation about the head's own axes.
+      // The two disagree in sign (looking up is a negative rotation about the
+      // head's X axis) and a probe reading this should have to know the
+      // character's direction, not three.js's.
+      const degrees = `${MathUtils.radToDeg(lookX * options.look.yaw).toFixed(1)},${MathUtils.radToDeg(lookY * options.look.pitch).toFixed(1)}`;
+      if (host.dataset.look !== degrees) {
+        host.dataset.look = degrees;
+      }
+    }
+
+    const settled =
+      Math.abs(lookX - targetX) + Math.abs(lookY - targetY) < 0.002;
+    if (awake || greeting || !settled) {
+      requestFrame();
+    }
+  }
+
+  function requestFrame() {
+    if (!disposed && !frame && loaded && !document.hidden) {
+      frame = requestAnimationFrame(render);
+    }
+  }
 
   try {
     const response = await fetch(options.model, { signal });
@@ -196,13 +341,24 @@ export const mountFiddyModel = async (
 
     model.traverse((child) => {
       const mesh = child as { material?: { name?: string; side?: number } };
-      if (mesh.material?.name === 'ToonOutline') {
+      // Every outline shell in these files is an inflated copy of a part (all of
+      // them are scaled up in the file), so with their FRONT faces on they are a
+      // lid over the figure and the character arrives as a dark silhouette.
+      // Drawn back-faces-only, they are the rim the artist drew. The two
+      // revisions of the mascot spell the material differently — `ToonOutline`
+      // in the 148 KB mark, `OutlineMat` in the full figure — so the rule
+      // matches the name rather than one spelling; the ink that draws eyes and
+      // brows (`DarkInk`/`DarkInkMat`) is not a shell and keeps its faces.
+      if (mesh.material?.name && /outline/i.test(mesh.material.name)) {
         mesh.material.side = BackSide;
       }
     });
 
     // Frame the model's own bounds — the same shot its still was captured from,
-    // so the swap from still to moving does not jump.
+    // so the swap from still to moving does not jump. Measured on the pose the
+    // file ships (the bind pose), which is the pose
+    // `scripts/render-hero-poster.mjs` draws the still in: the clip is applied
+    // afterwards, so the two framings stay the same arithmetic.
     const bounds = new Box3().setFromObject(model);
     const center = bounds.getCenter(new Vector3());
     const sphere = bounds.getBoundingSphere(new Sphere());
@@ -210,15 +366,16 @@ export const mountFiddyModel = async (
     const view = options.view ?? DEFAULT_VIEW;
     const distance =
       (sphere.radius / Math.sin(fov / 2)) * (options.padding ?? 1);
-
-    // The camera sits on a circle around the model's own vertical axis, at the
-    // azimuth `view` names and the height it names. At zero orbit this is
-    // exactly `view * distance + center`, which is the shot every still of
-    // these models was rendered from.
     const viewLength = Math.hypot(...view);
-    const orbitRadius = (distance * Math.hypot(view[0], view[2])) / viewLength;
-    const orbitHeight = center.y + (distance * view[1]) / viewLength;
-    const viewAzimuth = Math.atan2(view[0], view[2]);
+    // The camera sits off the model's own vertical axis, at the direction
+    // `view` names. The model is not rotated to meet it: this is one fixed shot,
+    // and it is the shot every still of this model was rendered from.
+    camera.position.set(
+      center.x + (distance * view[0]) / viewLength,
+      center.y + (distance * view[1]) / viewLength,
+      center.z + (distance * view[2]) / viewLength,
+    );
+    camera.lookAt(center);
 
     const clip = options.clip
       ? (gltf.animations.find((entry) => entry.name === options.clip) ??
@@ -229,42 +386,39 @@ export const mountFiddyModel = async (
       mixer.clipAction(clip).setLoop(LoopRepeat, Infinity).play();
     }
 
-    const turn = options.turntable ?? 0;
-    if (options.draggable) {
-      host.style.touchAction = 'pan-y';
-      host.addEventListener('pointerdown', onPointerDown);
-      host.addEventListener('pointermove', onPointerMove);
-      host.addEventListener('pointerup', endDrag);
-      host.addEventListener('pointercancel', endDrag);
+    figure = model;
+    restY = model.position.y;
+    hopHeight = sphere.radius * HOP_HEIGHT;
+    headNode = options.look
+      ? ((model.getObjectByName(options.look.node) as Group | null) ?? null)
+      : null;
+
+    // The clip runs for `restAfterMs` from the moment it is mounted, then
+    // settles wherever the loop left it.
+    if (restAfterMs !== undefined) {
+      awakeUntil = performance.now() + restAfterMs;
     }
 
-    const render = () => {
-      if (disposed) {
-        return;
-      }
-      frame = requestAnimationFrame(render);
-      if (document.hidden) {
-        return;
-      }
-      const delta = clock.getDelta();
-      mixer?.update(delta);
-      if (turn !== 0 && !dragging && performance.now() >= resumeAt) {
-        spin += delta * turn;
-      }
-      // A visitor's drag and the turntable are the same number, added up before
-      // the camera moves — so the two cannot fight over the model's facing.
-      const azimuth = viewAzimuth + spin + drag;
-      camera.position.set(
-        center.x + Math.sin(azimuth) * orbitRadius,
-        orbitHeight,
-        center.z + Math.cos(azimuth) * orbitRadius,
-      );
-      camera.lookAt(center);
-      renderer.render(scene, camera);
-    };
-    render();
+    loaded = true;
+    if (options.look) {
+      window.addEventListener('pointermove', onLook, { passive: true });
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+    requestFrame();
 
-    return { dispose };
+    return {
+      dispose,
+      react() {
+        if (disposed) {
+          return;
+        }
+        reactAt = performance.now();
+        if (restAfterMs !== undefined) {
+          awakeUntil = reactAt + reactForMs;
+        }
+        requestFrame();
+      },
+    };
   } catch (error) {
     dispose();
     if (signal.aborted) {

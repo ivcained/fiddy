@@ -312,8 +312,11 @@ mkdir -p "$WEB/preview" "$STAGE/release/server"
 # …and only the ones this repo no longer builds: `fiddy-splash.png` left this
 # list when the app-list manifest's splash moved into `public/` (card
 # t_8654d91e) — a carried-forward copy would WIN over the repo's, so an updated
-# splash would never ship while the release still reported success.
-for f in fiddy-card.png fiddy-icon.png fiddy-mark-180.png fiddy-favicon.svg fiddy-baby.glb ROBOT-HEADS-NOTICE.txt; do
+# splash would never ship while the release still reported success. Same reason
+# `fiddy-baby.glb` left it (card t_5c4b847b): the interactive hero's model is a
+# file THIS repo now owns, and carrying the previous release's copy forward
+# would silently pin the hero to the old bytes.
+for f in fiddy-card.png fiddy-icon.png fiddy-mark-180.png fiddy-favicon.svg ROBOT-HEADS-NOTICE.txt; do
   rsync -a "$HOST:$PRIOR/web/$f" "$WEB/$f"
 done
 # …and moves to /preview/, with its own asset references made relative so both

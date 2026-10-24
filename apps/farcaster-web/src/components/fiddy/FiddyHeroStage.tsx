@@ -11,52 +11,54 @@
  *      identical before and after, so the model's arrival moves nothing on the
  *      page — the thing a hero is most likely to wreck.
  *   3. Motion is asked for, not assumed. Under `prefers-reduced-motion: reduce`
- *      the model is never fetched: the turn is decoration, and a reader who
+ *      the model is never fetched: the loop is decoration, and a reader who
  *      asked for stillness should not pay for it in bytes either.
  *   4. Anything that goes wrong — no WebGL, a missing file, a parse failure —
  *      leaves the still in place and says nothing.
  *
- * What is different from the mark is that this one can be turned by hand: on the
- * front door the pointer drags the model around and the turntable waits for it
- * to let go. The small variant beside a form does not take the pointer at all —
- * a canvas that eats a tap meant for the input next to it is a bug, not a toy.
+ * THE FRONT DOOR'S STAGE IS A BUTTON. It is the one variant that is a toy: the
+ * pointer moves its head from anywhere on the page, and pressing it (a tap, or
+ * Enter/Space on a keyboard) is the greeting — so it is a real `<button>` with a
+ * name, reachable by keyboard, rather than a decorative box with a click handler
+ * hidden in it. The small variant beside the name field is decoration, and is
+ * `aria-hidden` with the pointer turned off: a canvas that eats a tap meant for
+ * the input next to it is a bug, not a toy.
  *
- * `data-fiddy-hero` reports which state is on screen (`still` or `moving`), so a
- * probe can assert it instead of guessing from pixels.
+ * `data-fiddy-hero` reports which state is on screen (`still` or `moving`) and
+ * the canvas inside carries what the character is doing (`playing`, `resting`,
+ * `reacting`) plus the head's own angle in `data-look`, so a probe can assert
+ * all of it instead of guessing from pixels.
  */
 
 import React, { memo, useEffect, useRef, useState } from 'react';
 
 import {
+  FIDDY_HERO_CLIP,
+  FIDDY_HERO_HEAD,
+  FIDDY_HERO_LOOK,
   FIDDY_HERO_MODEL,
   FIDDY_HERO_PADDING,
   FIDDY_HERO_POSTER,
-  FIDDY_HERO_RESUME_MS,
-  FIDDY_HERO_TURN_RADIANS_PER_SECOND,
+  FIDDY_HERO_REST_AFTER_MS,
+  FIDDY_HERO_VIEW,
   heroMotionAllowed,
 } from './fiddyHero';
 
 /** Long enough that the front door is painted and readable first. */
 const AFTER_FIRST_PAINT_MS = 320;
 
-/**
- * How the camera sits on the hero. It looks slightly down on the model from
- * a little to the right, so the face is three-quarter rather than dead-on —
- * the shot the still is rendered from, and the one the turntable starts on.
- */
-const HERO_VIEW: [number, number, number] = [0.34, 0.2, 1];
-
 export interface FiddyHeroStageProps {
   /**
-   * `hero` is the front door's stage: big, and turnable by hand. `form` is the
-   * small one that sits beside a field while you type a name.
+   * `hero` is the front door's stage: big, listening to the pointer, and
+   * greeting a press. `form` is the small one that sits beside a field while you
+   * type a name.
    */
   variant?: 'hero' | 'form';
 }
 
 const FiddyHeroStage = memo<FiddyHeroStageProps>(({ variant = 'hero' }) => {
   const host = useRef<HTMLSpanElement>(null);
-  const mounted = useRef<{ dispose(): void } | null>(null);
+  const mounted = useRef<{ dispose(): void; react(): void } | null>(null);
   const [moving, setMoving] = useState(false);
   const [motionAllowed, setMotionAllowed] = useState(false);
 
@@ -90,11 +92,12 @@ const FiddyHeroStage = memo<FiddyHeroStageProps>(({ variant = 'hero' }) => {
           }
           return mountFiddyModel(host.current, controller.signal, {
             model: FIDDY_HERO_MODEL,
-            // A still file: no rig, no clips. It is turned, not animated.
-            turntable: FIDDY_HERO_TURN_RADIANS_PER_SECOND,
-            draggable: variant === 'hero',
-            resumeAfterMs: FIDDY_HERO_RESUME_MS,
-            view: HERO_VIEW,
+            // The character's own loop, and the rig node the pointer turns
+            // inside it. Nothing orbits the model: the model is the performer.
+            clip: FIDDY_HERO_CLIP,
+            look: { node: FIDDY_HERO_HEAD, ...FIDDY_HERO_LOOK },
+            restAfterMs: FIDDY_HERO_REST_AFTER_MS,
+            view: FIDDY_HERO_VIEW,
             padding: FIDDY_HERO_PADDING,
           });
         })
@@ -123,13 +126,8 @@ const FiddyHeroStage = memo<FiddyHeroStageProps>(({ variant = 'hero' }) => {
     };
   }, [motionAllowed, variant]);
 
-  return (
-    <span
-      className={`fiddy-hero-stage fiddy-hero-stage-${variant}`}
-      data-fiddy-hero={moving ? 'moving' : 'still'}
-      data-fiddy-hero-variant={variant}
-      aria-hidden="true"
-    >
+  const contents = (
+    <>
       {/* Rule 1, and rule 2 with it: the still is an <img> with real dimensions
           inside a box CSS has already sized, so nothing below it moves when the
           canvas takes over. */}
@@ -138,8 +136,38 @@ const FiddyHeroStage = memo<FiddyHeroStageProps>(({ variant = 'hero' }) => {
         src={FIDDY_HERO_POSTER}
         alt=""
         decoding="async"
+        draggable={false}
       />
       <span className="fiddy-hero-stage-canvas" ref={host} />
+    </>
+  );
+
+  // A press is the greeting, and the browser gives a button Enter and Space for
+  // free — so the whole interaction is one onClick, with no key handler to keep
+  // in step with it.
+  if (variant === 'hero') {
+    return (
+      <button
+        type="button"
+        className="fiddy-hero-stage fiddy-hero-stage-hero"
+        data-fiddy-hero={moving ? 'moving' : 'still'}
+        data-fiddy-hero-variant="hero"
+        aria-label="Play with Fiddy"
+        onClick={() => mounted.current?.react()}
+      >
+        {contents}
+      </button>
+    );
+  }
+
+  return (
+    <span
+      className={`fiddy-hero-stage fiddy-hero-stage-${variant}`}
+      data-fiddy-hero={moving ? 'moving' : 'still'}
+      data-fiddy-hero-variant={variant}
+      aria-hidden="true"
+    >
+      {contents}
     </span>
   );
 });

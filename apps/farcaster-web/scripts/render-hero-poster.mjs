@@ -8,14 +8,19 @@
 //   `FiddyHeroStage` paints `public/fiddy-hero-poster.png` first, always — it is
 //   what a visitor sees before the model is fetched, what a reader who asked for
 //   reduced motion gets forever, and what any browser without WebGL gets. So it
-//   has to be a real picture of this model, or the fallback is a lie. It is one
-//   frame of `public/fiddy-hero.glb`, drawn with the same lights, the same lens
-//   and the same shot the live canvas opens on — which is what makes the swap
-//   from still to turning invisible rather than a jump. The recipe it mirrors is
-//   in `src/components/fiddy/fiddyModelScene.ts` and the preset the hero passes
-//   it is in `src/components/fiddy/FiddyHeroStage.tsx`; `verify-fiddy-hero.mjs`
+//   has to be a real picture of this model, or the fallback is a lie. It is the
+//   pose `public/fiddy-baby.glb` ships in, drawn with the same lights, the same
+//   lens and the same shot the live canvas opens on — which is what makes the
+//   swap from still to moving invisible rather than a jump. The recipe it mirrors
+//   is in `src/components/fiddy/fiddyModelScene.ts` and the preset the hero
+//   passes it is in `src/components/fiddy/fiddyHero.ts`; `verify-fiddy-hero.mjs`
 //   measures the two against each other on the live page, so this cannot drift
 //   in silence.
+//
+//   There is no turntable to check against any more: the hero is a rigged
+//   character whose own loop and whose own head do the moving, and the camera is
+//   fixed on it. So the sweep below is one azimuth, and it is the only one the
+//   canvas will ever draw.
 //
 // It uses the app's own `three` and the Playwright Chromium the repo already
 // installs for its probes, and it needs no network: the three.js modules are
@@ -23,8 +28,8 @@
 // and the page stays on about:blank.
 //
 // It also refuses to write a poster that would mislead, twice:
-//   * the drawing must not touch the frame the turntable will turn inside — a
-//     shot that fits here but clips at 90° would be a model that grows horns;
+//   * the drawing must not touch the frame the model is framed inside — a shot
+//     that fits here but clips the ears would be a model that grows horns;
 //   * the picture must be transparent where the model is not, because it is
 //     composited over the page's own ground.
 //
@@ -40,7 +45,7 @@ import { decodePng, minAlpha, visibleBox } from './lib/png.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, '..');
-const MODEL = path.join(APP, 'public', 'fiddy-hero.glb');
+const MODEL = path.join(APP, 'public', 'fiddy-baby.glb');
 const OUT = path.join(APP, 'public', 'fiddy-hero-poster.png');
 
 /** The box the live canvas draws into on a desktop (232px at up to 2x dpr). */
@@ -66,12 +71,13 @@ const dbg = (...message) => {
 /**
  * The hero's shot, in the scene module's own terms. Every number here has a
  * counterpart in `fiddyModelScene.ts` (`fov`, the two lights, the bounds
- * framing) or in `FiddyHeroStage.tsx` (`HERO_VIEW`); `turnDeg` is the turntable.
+ * framing) or in `fiddyHero.ts` (`FIDDY_HERO_VIEW`, `FIDDY_HERO_PADDING`);
+ * `turnDeg` is the azimuth, and the hero's camera is fixed, so it is always 0.
  */
 const RECIPE = {
   fov: 34,
-  view: [0.34, 0.2, 1],
-  padding: 0.85,
+  view: [0.22, 0.16, 1],
+  padding: 0.78,
   near: 0.1,
   far: 50,
   hemisphere: { sky: 0xfff6e8, ground: 0x22231f, intensity: 1.1 },
@@ -101,8 +107,22 @@ const gltf = await new GLTFLoader().parseAsync(window.__glb.buffer, '')
 const model = gltf.scene
 scene.add(model)
 
+// The same material treatment the live scene applies, and for the same reason:
+// every outline shell in these files is an inflated copy of a part (all of them
+// are scaled up in the file), so with their front faces on they are a lid over
+// the figure and the character arrives as a dark silhouette. Drawn
+// back-faces-only, they are the rim the artist drew. The two revisions of the
+// mascot spell the material differently ('ToonOutline' in the 148 KB mark,
+// 'OutlineMat' in the full figure), so the rule matches the name, not one
+// spelling — and the ink that draws eyes and brows ('DarkInk'/'DarkInkMat') is
+// not a shell and keeps its faces.
+model.traverse((child) => {
+  const name = child.material?.name
+  if (name && /outline/i.test(name)) child.material.side = THREE.BackSide
+})
+
 // The same one shot the live scene takes: framed on the model's own bounds, on
-// the azimuth and height HERO_VIEW names.
+// the azimuth and height FIDDY_HERO_VIEW names.
 const bounds = new THREE.Box3().setFromObject(model)
 const centre = bounds.getCenter(new THREE.Vector3())
 const radius = bounds.getBoundingSphere(new THREE.Sphere()).radius
@@ -244,9 +264,9 @@ const main = async () => {
     const info = await page.evaluate(() => window.__info);
     dbg('info', JSON.stringify(info));
 
-    // One frame per quarter turn: a poster is only honest if the shot it was
-    // taken from survives the turntable the model is about to do.
-    const turns = [0, 90, 180, 270];
+    // One azimuth, because that is the only one the live canvas draws: the
+    // camera is fixed on the model, and the character's own rig is what moves.
+    const turns = [0];
     const boxes = {};
     let poster = null;
     for (const turn of turns) {
@@ -268,7 +288,7 @@ const main = async () => {
       if (box.x0 <= 0 || box.y0 <= 0 || box.x1 >= SIZE - 1 || box.y1 >= SIZE - 1) {
         die(
           `the model touches the frame at ${turn} degrees (box ${JSON.stringify(boxes[turn])} in ${SIZE}px): ` +
-            'the turntable would clip it, so no poster is written',
+            'the shot clips it, so no poster is written',
           { boxes },
         );
       }
