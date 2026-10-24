@@ -123,6 +123,14 @@ and it is delivered only to a caller holding the HttpOnly handle cookie.
   for another account, and never for the instance's own account;
 - a proven sign-in is required to bind a request to an account, and a proof
   signed for another host, another FID, or with tampered bytes is refused;
+- **the real network, measured once (2026-10-24):** an instance with no account of
+  its own asked `https://fiddy.fun/api/fiddy/signer-request` and got a signature
+  that recovers (`recoverTypedDataAddress`) to `0x029d612ECF1454bF507e6D7f3602649716FE8bf4`,
+  which a real node (`haatz.quilibrium.com`) reports as owning FID 3356372 — the
+  app account that asked. Farcaster's API accepted the same three fields and
+  answered a real deeplink and token (`pending`), and the instance service, driven
+  with the config a self-hosted instance has by default, answered `200 waiting`
+  with that deeplink and **no key**. What is left is one person's tap;
 - `verify-instance-connect.mjs` drives the whole flow through the **real client**
   in a browser: the QR sheet appears on a copy of Fiddy run locally, the approval
   completes with no second press, the sheet names the account the node names, the
