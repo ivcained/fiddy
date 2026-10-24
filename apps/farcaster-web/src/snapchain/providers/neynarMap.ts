@@ -28,6 +28,8 @@
 import type {
   ApiCast,
   ApiChannel,
+  ApiConnectedAccount,
+  ApiConnectedAccountPlatform,
   ApiFrame,
   ApiOpenGraphMetadata,
   ApiQuoteCastEmbed,
@@ -75,7 +77,12 @@ export interface NeynarCall {
     | 'cast-quotes'
     | 'liked-casts'
     | 'search-users'
-    | 'search-channels';
+    | 'search-channels'
+    /**
+     * …and the accounts linked to the signed-in Farcaster account, which an
+     * index mirrors (`ApiGetConnectedAccounts200Response`).
+     */
+    | 'connected-accounts';
 }
 
 /** The hosted API's error envelope, same as the node-backed adapter's. */
@@ -101,6 +108,12 @@ interface NeynarUser {
   custody_address?: unknown;
   profile?: { bio?: { text?: unknown } };
   verified_addresses?: { eth_addresses?: unknown };
+  /**
+   * The accounts an index mirrors as linked to this Farcaster account, each
+   * stated as `{ platform, username }` — MEASURED 2026-10-24 on
+   * `GET /v2/farcaster/user/bulk?fids=3` (`[{platform:'x',username:'dwr'}]`).
+   */
+  verified_accounts?: unknown;
 }
 
 interface NeynarCast {
@@ -127,10 +140,80 @@ const asString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.length > 0 ? value : undefined;
 
 /**
+ * Neynar's platform names, and the fork's — the two spellings of one fact.
+ *
+ * `github` is the only pair that differs; a platform neither side names is
+ * absent on purpose (see `connectedAccountsFromNeynar`).
+ */
+const CONNECTED_ACCOUNT_PLATFORMS: Record<string, ApiConnectedAccountPlatform> =
+  {
+    x: 'x',
+    github: 'gh',
+    meta: 'meta',
+    discord: 'discord',
+    linkedin: 'linkedin',
+  };
+
+/**
+ * The linked accounts an index mirrors for one Farcaster account.
+ *
+ * WHAT THIS IS FOR. A linked X (or GitHub, Discord, LinkedIn) account is real
+ * account state — and it is NOT a protocol message, so a read node has none of
+ * it. Neynar's index mirrors it, in exactly the two fields the fork's own shape
+ * names (`platform` + `username`), which is what makes this a READ rather than
+ * a refusal (MEASURED 2026-10-24 on `user/bulk?fids=3`; see `hostedRoutes`).
+ *
+ * WHAT IT REFUSES
+ *
+ *   - It never invents a link. A platform the fork's shape does not name is
+ *     dropped rather than mapped onto a neighbour (a row this client cannot
+ *     draw must not become a different row).
+ *   - It states no id an index did not give it. `connectedAccountId` is the
+ *     row's own key here — platform and handle — because that is all the index
+ *     says; the removal that would need a server-side id is not something this
+ *     client can do at all (`hostedRoutes` classifies it and says why).
+ */
+export const connectedAccountsFromNeynar = (
+  user: NeynarUser | undefined,
+): ApiConnectedAccount[] => {
+  const rows = Array.isArray(user?.verified_accounts)
+    ? user.verified_accounts
+    : [];
+  const accounts: ApiConnectedAccount[] = [];
+
+  for (const row of rows) {
+    const record = row as { platform?: unknown; username?: unknown } | null;
+    const platform =
+      CONNECTED_ACCOUNT_PLATFORMS[
+        asString(record?.platform)?.toLowerCase() ?? ''
+      ];
+    const username = asString(record?.username);
+    if (platform === undefined || username === undefined) {
+      continue;
+    }
+    accounts.push({
+      connectedAccountId: `${platform}:${username}`,
+      platform,
+      username,
+      // The index lists the accounts verified NOW, so none of these is an
+      // expired link; it has no third state to report.
+      expired: false,
+    });
+  }
+
+  return accounts;
+};
+
+/**
  * A Neynar user as the fork's `ApiUser`.
  *
  * `verified` on the avatar is Neynar's own claim about the image host; it is
  * carried over only when Neynar states it, never assumed.
+ *
+ * `connectedAccounts` is carried when the index states any: the profile header
+ * draws a reader's linked accounts from this field for anyone who is not the
+ * viewer, and leaving it off would make a profile read through the index look
+ * like an account with no links while the index says otherwise.
  */
 export const apiUserFromNeynar = (user: NeynarUser): ApiUser => {
   const fid = asNumber(user.fid);
@@ -152,6 +235,10 @@ export const apiUserFromNeynar = (user: NeynarUser): ApiUser => {
   const pfpUrl = asString(user.pfp_url);
   if (pfpUrl !== undefined) {
     apiUser.pfp = { url: pfpUrl, verified: false };
+  }
+  const connectedAccounts = connectedAccountsFromNeynar(user);
+  if (connectedAccounts.length > 0) {
+    apiUser.connectedAccounts = connectedAccounts;
   }
 
   return apiUser;
@@ -898,6 +985,21 @@ export const neynarCallFor = ({
     //    {"reactions":[{"reaction_type":"like","cast":{"hash":"0x5c5b…"}}]}
     //  GET /v2/farcaster/user/search?q=dwr&limit=1 → 200 {"result":{"users":[…]}}
     //  GET /v2/farcaster/channel/search?q=ai&limit=2 → 200 {"channels":[…]}
+    case '/v2/connected-accounts': {
+      // “the accounts linked to me”: the read is about the signed-in account,
+      // and the request itself carries no fid (the fork's own params are a
+      // cursor and a limit), so the caller's session is the one fact that makes
+      // it a question at all.
+      if (signedInFid === undefined) {
+        return null;
+      }
+      return {
+        url: `${base}/user/bulk?fids=${signedInFid}`,
+        kind: 'index',
+        shape: 'connected-accounts',
+      };
+    }
+
     case '/v2/cast-quotes': {
       const castHash = searchParams.get('castHash');
       if (!castHash) {
@@ -1194,6 +1296,18 @@ const indexEnvelope = (
 ): unknown => {
   const next = neynarNext(body);
   switch (shape) {
+    case 'connected-accounts': {
+      // The index answers a profile question with the profile: the accounts it
+      // mirrors as linked are on that user. An account it does not know (or one
+      // with no links) is an EMPTY list, which is a fact about the account
+      // rather than a refusal.
+      const users = asNeynarUsers((body as { users?: unknown }).users);
+      return {
+        result: { accounts: connectedAccountsFromNeynar(users[0]) },
+        ...next,
+      };
+    }
+
     case 'cast-quotes':
       return {
         result: {
@@ -1281,6 +1395,12 @@ export const answerFromNeynar = async ({
       return errorResponse(
         501,
         'The apps relevant to you come from Neynar’s index, which needs a signed-in account to work out what is relevant. Sign in, and this list loads.',
+      );
+    }
+    if (path === '/v2/connected-accounts') {
+      return errorResponse(
+        501,
+        'The accounts linked to a Farcaster account are read from Neynar’s index, and it has to be asked about a signed-in account. Sign in, and this list loads.',
       );
     }
     if (path === '/v1/search-miniapps' && !searchParams.get('query')) {

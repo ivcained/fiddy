@@ -420,9 +420,35 @@ const HOSTED_ROUTES: { method: string; path: string; why: string }[] = [
     why: 'saved casts are kept in your Farcaster account on Warpcast’s servers — a bookmark is not a protocol message',
   },
   {
-    method: 'GET',
+    // Unlinking is done where the link is held, and this client has no way to
+    // do it: it can READ the links that exist (see `INDEX_ROUTES`) and cannot
+    // remove one. The classification says so rather than letting the request
+    // reach a server that would refuse it in its own words.
+    method: 'DELETE',
     path: '/v2/connected-accounts',
-    why: 'the accounts linked to your Farcaster account are Warpcast account state',
+    why: 'unlinking an account is done where the link itself is held — Fiddy can show you the links that exist, and cannot remove one for you',
+  },
+  {
+    // The door the fork's own “Connect” button opens: an X sign-in link minted
+    // by the service that keeps the link. No third party can mint one.
+    method: 'GET',
+    path: '/v2/get-x-auth-link',
+    why: 'linking an X account is that service’s own sign-in — it can only be started on it, and Fiddy cannot start it for you',
+  },
+  {
+    method: 'GET',
+    path: '/v2/get-gh-auth-link',
+    why: 'linking a GitHub account is that service’s own sign-in — it can only be started on it, and Fiddy cannot start it for you',
+  },
+  {
+    method: 'GET',
+    path: '/v2/get-discord-auth-link',
+    why: 'linking a Discord account is that service’s own sign-in — it can only be started on it, and Fiddy cannot start it for you',
+  },
+  {
+    method: 'GET',
+    path: '/v2/get-linkedin-auth-link',
+    why: 'linking a LinkedIn account is that service’s own sign-in — it can only be started on it, and Fiddy cannot start it for you',
   },
   {
     method: 'GET',
@@ -641,6 +667,19 @@ export interface HostedApiErrorEnvelope {
  * provider seam answers them from the index when the reader has a key.
  */
 const INDEX_ROUTES: { method: string; path: string; why: string }[] = [
+  {
+    // MEASURED (2026-10-24, this build's own key against api.neynar.com):
+    //   GET /v2/farcaster/user/bulk?fids=3&viewer_fid=3 → 200
+    //     {"users":[{… "verified_accounts":[{"platform":"x","username":"dwr"},
+    //                                       {"platform":"github","username":"danromero"}]}]}
+    // The index mirrors exactly the account state this read is about, in the
+    // fields the fork's own shapes name (`platform` + `username`), so the
+    // linked accounts are READ rather than refused. A node keeps none of it:
+    // an X link is not a protocol message.
+    method: 'GET',
+    path: '/v2/connected-accounts',
+    why: 'the accounts linked to a Farcaster account are mirrored by Neynar’s index — a read node keeps no link to an X, GitHub or Discord account',
+  },
   {
     method: 'GET',
     path: '/v2/cast-quotes',
