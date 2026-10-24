@@ -10,17 +10,26 @@
 # what is known and stops. Nothing here is a stub: every claim carries the
 # command that measured it.
 #
-# Measured 2026-10-24 (see docs/NETWORK-CHOICE.md for the full log):
+# Measured 2026-10-24 (see docs/NETWORK-CHOICE.md for the full log, and
+# scripts/sweep-hypersnap-upstream.py to re-measure all of it in one command):
+#   * the authority for validator sets is the network's own on-chain registry,
+#     SnapchainConfigRegistry (0x00000000fc51aD6eb74EAE89ba4b01b1776fBA85 on
+#     Ethereum L1). configVersion() = 18, and configToml() carries 13 validator
+#     sets, newest effective_at 49_311_000.
+#   * farcasterorg/hypersnap's main validators.toml carries 10 of those 13 and
+#     stops at 39_798_000 (three rotations short).
+#   * the "@latest" tag the default stable channel installs from is commit
+#     dc8d8df (2026-03-30, 29 commits behind v0.11.8 of 2026-05-07): it ships no
+#     validators.toml and hardcodes 7 sets whose newest are 28_415_000 /
+#     28_852_000 / 28_706_000: about 21M blocks behind.
+#   * farcasterxyz/snapchain's copy matches the registry entry for entry: that is
+#     the repair the operators in farcasterorg/hypersnap#41 confirmed.
 #   * https://haatz.quilibrium.com/v1/info → 200, version 0.13.5,
-#     914,322,172 messages, 2 shards (heights 48,822,452 / 49,477,354 /
-#     49,328,400). This is the public Hypersnap node the client reads today.
+#     914,322,172 messages, 2 shards. This is the public Hypersnap node the
+#     client reads today.
 #   * https://snapchain-api.neynar.com/v1/info and https://hub-api.neynar.com/
 #     v1/info → 402 "X-PAYMENT header or API key required". No public Snapchain
 #     node answers a stranger without a paid key.
-#   * https://raw.githubusercontent.com/farcasterorg/hypersnap/@latest/
-#     validators.toml → 404, and the @latest installer does not mount it.
-#   * validators.toml on the main branch ends at effective_at = 39_798_000
-#     while the live network is at 49.5M — before the last validator rotation.
 
 FIDDY_DEFAULT_NETWORK="snapchain"
 
@@ -86,26 +95,33 @@ hypersnap_install_report() {
 
   What that install leaves you with, measured today:
 
-    * The default (stable) channel installs from GitHub's "@latest" tag, which
-      is the v0.11.8 release of 2026-05-07 — and that copy neither fetches nor
-      mounts a validator list at all:
-          curl -sSL .../@latest/scripts/hypersnap.sh   → 200 (May-era script)
+    * The default (stable) channel installs from GitHub's "@latest" tag. That tag
+      is not the v0.11.8 release: it is commit dc8d8df of 2026-03-30, 29 commits
+      behind v0.11.8 (2026-05-07). That copy fetches no validator list and mounts
+      none, and its compose hardcodes seven validator sets whose newest entries
+      are 28_415_000 (shard 0), 28_852_000 (shard 1), 28_706_000 (shard 2):
+          curl -sSL .../@latest/scripts/hypersnap.sh   → 200, no validator list
           curl -sSL .../@latest/validators.toml        → 404
-    * The main-branch installer does fetch validators.toml, but the newest entry
-      in it takes effect at block 39_798_000:
+    * The main-branch installer does fetch validators.toml, but that file is
+      behind the network's own on-chain registry. The registry
+      (SnapchainConfigRegistry, 0x00000000fc51aD6eb74EAE89ba4b01b1776fBA85 on
+      Ethereum L1) reports configVersion() = 18 and publishes 13 validator sets,
+      newest effective_at 49_311_000. Upstream's file carries 10 of them and
+      stops three rotations short:
           effective_at = 39_180_000 (shard 0)
-          effective_at = 39_624_000 (shard 0)
+          effective_at = 39_624_000 (shard 2)
           effective_at = 39_798_000 (shard 1)
-      The live network is at 48,822,452 / 49,477,354 / 49,328,400 — the
-      validator set has rotated since, and upstream's published file does not
-      carry the new keys.
+      Missing: 48_632_000 (shard 0), 49_147_000 (shard 2), 49_311_000 (shard 1).
+      The live network is at 48.8M / 49.5M / 49.3M, past all three.
     * Either way the node answers /v1/info and then stops following the chain:
       it drops decided blocks with "Block contained signatures from unexpected
-      signers". Upstream issue farcasterorg/hypersnap#41 is open, two
-      independent operators reproduced it, and the repair that worked for them
-      was to replace ~/hypersnap/validators.toml with the validator list from
-      the OTHER project (farcasterxyz/snapchain), which already carries the
-      three newer rotations.
+      signers". Upstream issue farcasterorg/hypersnap#41 is still open (3
+      comments, last from an operator on 2026-10-24, who left it open on purpose
+      so it becomes resilient, not just patched). The repair that worked for the
+      operators is to replace ~/hypersnap/validators.toml with the validator
+      list from the OTHER project (farcasterxyz/snapchain), which is the copy
+      that still matches the registry entry for entry. That is a hand repair,
+      not an install, and it is checked again on every sweep.
 
   So: a fresh install is not a working node — it is a node that will report
   itself healthy while falling behind, which is worse than no node. Fiddy will
@@ -113,16 +129,21 @@ hypersnap_install_report() {
 
   What works today:
 
-    * Reading Hypersnap, right now, with no install: the public node
+    * Reading Hypersnap with no install: the public node
       https://haatz.quilibrium.com (the one Fiddy's client reads by default).
         fiddy client up --network hypersnap
+      A node can answer /v1/info and still be behind, so read its own numbers:
+      shardInfos[].maxHeight should move between two reads a minute apart, and
+      shardInfos[].blockDelay is seconds since that shard's last block (a number
+      that climbs in step with the wall clock means that shard is not advancing).
 
   What would change this verdict:
 
-    * validators.toml on upstream main updated with the missing rotations (or a
-      node that syncs validator sets from the on-chain registry at startup —
-      the fix upstream discusses in that same issue).
-    * Then: fiddy node up --network hypersnap, re-run.
+    * validators.toml on upstream main updated to match the on-chain registry (or a
+      node that syncs validator sets from the registry at startup: the fix
+      upstream discusses in that same issue).
+    * Then: fiddy node up --network hypersnap, re-run. Re-measure the facts first
+      with scripts/sweep-hypersnap-upstream.py.
 EOF
 }
 
@@ -131,5 +152,6 @@ hypersnap_refuse() {
   log "To read Hypersnap today, point the client at the public node instead:"
   log "  fiddy client up --network hypersnap"
   log "Details of upstream's install, the stall, and the repair: docs/NETWORK-CHOICE.md"
+  log "Re-measure this verdict in one command: scripts/sweep-hypersnap-upstream.py"
   exit 1
 }

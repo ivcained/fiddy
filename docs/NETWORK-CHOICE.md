@@ -27,6 +27,23 @@ A Snapchain read needs a node of your own, which is exactly what `fiddy node up`
 installs — which is why the client only offers Snapchain where such a node exists
 (see §4) and why the CLI defaults to it.
 
+**"Readable" is not "following the chain", re-measured 2026-10-24 14:34 to 14:46
+UTC.** The public node answered every one of eleven reads over four minutes while
+its two message shards did not advance: shard 1 sat at `49,477,354` and shard 2
+at `49,328,400`, with `blockDelay` climbing in step with the wall clock
+(`31,706` → `31,937` s on shard 1, `15,816` → `16,047` s on shard 2), while shard
+0 advanced about one block a second. `blockDelay` is *seconds since that shard's
+last block* (`farcasterxyz/snapchain`, `src/storage/store/engine.rs`:
+`block_delay_seconds = now - block.timestamp`), not a count of blocks, so a
+number that climbs in step with the wall clock means that shard is not advancing
+at all. This was not a stale validator list: the on-chain registry still reports
+the current set (§3), so it is a shard that stopped advancing as far as this node
+could see. Which of the two it was, this node or the network, could not be settled
+from here: there is no second reachable Farcaster or Hypersnap read node
+(`hub.pinata.cloud` and `nemes.farcaster.xyz` do not resolve,
+`snapchain-api.neynar.com` answers `402`, `api.warpcast.com` and
+`api.farcaster.xyz` answer `401`).
+
 ## 2. A node cannot be asked which network it is
 
 This is the fact that shapes the whole UI. MEASURED 2026-10-24, `GET
@@ -58,38 +75,84 @@ curl -sSL https://raw.githubusercontent.com/farcasterorg/hypersnap/refs/heads/ma
   → same host as a Snapchain node: 16 GB RAM, 4 vCPU, 1.5 TB free disk
 ```
 
-Measured 2026-10-24, on the published install path:
+Measured 2026-10-24, on the published install path (re-measured by the sweep
+described in §3.1; every number below comes from that run):
 
 - The **stable** channel (the default) fetches the installer from GitHub's
-  `@latest` tag — `v0.11.8`, published 2026-05-07. That copy neither fetches nor
-  mounts a validator list: `.../@latest/scripts/hypersnap.sh` → 200,
+  `@latest` tag. That tag is not a release: it resolves to commit `dc8d8df` of
+  `2026-03-30`, which is **29 commits behind** `v0.11.8` (`2026-05-07`, the newest
+  release). That copy fetches no validator list and mounts none, and its
+  `docker-compose.mainnet.yml` hardcodes seven `[[consensus.validator_sets]]`
+  entries whose newest heights are `28_415_000` (shard 0), `28_852_000` (shard 1)
+  and `28_706_000` (shard 2): about 21M blocks behind the live network.
+  `.../@latest/scripts/hypersnap.sh` → `200` (no mention of a validator list),
   `.../@latest/validators.toml` → **404**.
-- The **main**-branch installer does fetch `validators.toml`, whose newest entry
-  takes effect at block `39_798_000` (`39_180_000` shard 0, `39_624_000` shard 0,
-  `39_798_000` shard 1) while the live network is at **49.5M** — the validator set
-  has rotated since, and the published file does not carry the new keys.
+- The **main**-branch installer does fetch `validators.toml`, but that file is
+  behind the network's own on-chain registry. The registry
+  (`SnapchainConfigRegistry`, `0x00000000fc51aD6eb74EAE89ba4b01b1776fBA85` on
+  Ethereum L1, the address baked into `farcasterxyz/snapchain`'s
+  `cli/src/config_pull.rs`) answers `configVersion()` = **18** and publishes
+  **13** validator sets, newest `effective_at = 49_311_000`. Upstream's file
+  carries **10** of those and stops three rotations short (`39_180_000` shard 0,
+  `39_624_000` shard 2, `39_798_000` shard 1); the three it does not carry are
+  `48_632_000` (shard 0), `49_147_000` (shard 2) and `49_311_000` (shard 1), and
+  the live network (48.8M / 49.5M / 49.3M) is past all three.
 - Consequence, as reported upstream in
   [farcasterorg/hypersnap#41](https://github.com/farcasterorg/hypersnap/issues/41)
-  (**open**; two independent operators reproduced it, a third confirmed the fix):
+  (**still open**, 3 comments, the last from an operator on `2026-10-24` who
+  deliberately left it open so the fix becomes resilient rather than patched):
   the node answers `/v1/info` and then stops following shards 1 and 2 with
   `Block contained signatures from unexpected signers`. **The repair that worked
   for them is to replace `~/hypersnap/validators.toml` with the validator list
-  from the other project, `farcasterxyz/snapchain`,** which carries the three
-  newer rotations.
+  from the other project, `farcasterxyz/snapchain`** — measured today, that copy
+  still matches the registry entry for entry (13 sets, newest `49_311_000`). That
+  is a hand repair, not an install: it is only as good as the next sweep.
 
 A fresh install is therefore not a working node: it is a node that reports itself
 healthy while falling behind. Fiddy will not install one and call it done.
 
 **What the CLI does instead** (`cli/networks.sh`, `hypersnap_install_report` +
 `hypersnap_refuse`): `fiddy node up --network hypersnap` prints the whole record
-above — the install path, the stale list with its block heights, the open issue,
-the repair, the host requirements — and exits 1, pointing at the two things that
-do work today: reading the public Hypersnap node, and the upstream issue that
+above — the install path, the registry's version and set count next to upstream's,
+the open issue, the repair and its caveat, the host requirements, and how to read
+the public node's own freshness numbers — and exits 1, pointing at the two things
+that do work today: reading the public Hypersnap node, and the upstream issue that
 would change the verdict.
 
 `--network snapchain` (the default) is unchanged: it installs Snapchain on the
 target exactly as before, and now records `FIDDY_NODE_NETWORK=snapchain` in
 `~/.fiddy/config` so the network is known later rather than assumed.
+
+### 3.1 Re-checking this, in one command
+
+The refusal is only honest while the measurement behind it is true, and the
+measurement moves: a validator rotation, a release tag that catches up, or a fresh
+install path upstream all change the verdict. `scripts/sweep-hypersnap-upstream.py`
+re-derives all of §3 and prints a verdict, so a later sweep does not have to invent
+the method again:
+
+```
+scripts/sweep-hypersnap-upstream.py          # human summary, dated facts
+scripts/sweep-hypersnap-upstream.py --json   # the same facts as JSON
+```
+
+Its exit status is the automation contract:
+
+| exit | meaning |
+| ---- | ------- |
+| `0`  | the premise holds: the published install is still behind the registry, so there is nothing to lift |
+| `1`  | possibly fixed: a published file now matches the registry, so install one on real hardware and prove it follows the chain |
+| `2`  | could not measure: upstream sources unreachable, so do not act on this run |
+
+It reads the on-chain registry first (`eth_call` for `configVersion()` and
+`configToml()` on Ethereum L1, selectors `0xdd64d24d` and `0x5a62bd75`), compares
+`validators.toml` on `farcasterorg/hypersnap` `main` and on the `@latest` tag
+against it entry for entry, checks `farcasterxyz/snapchain`'s copy against the same
+authority, then reads the public node's `/v1/info` twice twenty seconds apart to
+see which shards are moving. **It never decides that an install works.** A file
+that matches the registry only gets you to "now prove it on a real node": heights
+compared against a public node over a few minutes, and only then may the CLI stop
+refusing.
 
 ## 4. What the client does
 
@@ -127,6 +190,18 @@ of theirs running, and `--network snapchain` (default) points it at their node.
 
 ## 6. Verification that was run
 
+- Sweep, 2026-10-24 14:46 UTC: `scripts/sweep-hypersnap-upstream.py` → exit **0**
+  (premise holds). Its verdict line: *"upstream main carries 10 validator sets and
+  is missing 3 of the registry's 13 (newest it publishes: 39_798_000, newest the
+  registry publishes: 49_311_000, configVersion 18)"*, with
+  `farcasterxyz/snapchain`'s copy reported as `matches the registry: yes`, the
+  `@latest` tag as `validators.toml HTTP 404`, and the public node's shards 1 and
+  2 flagged `not advancing`. The run's machine-readable copy is
+  [evidence/hypersnap-sweep-2026-10-24.json](evidence/hypersnap-sweep-2026-10-24.json).
+- CLI, after the corrections: `fiddy node up --network hypersnap` prints the
+  record above (registry version and set count, the three missing rotations, the
+  issue's state, how to read the public node's freshness numbers) and exits 1
+  before any preflight, SSH or install work.
 - CLI: `fiddy node up --network bogus` → `unknown network` + exit 1;
   `--network hypersnap` → the full report + exit 1 (no install attempted);
   `--network snapchain` on a machine with no target → the real installer path
