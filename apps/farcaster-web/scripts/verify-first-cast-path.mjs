@@ -359,10 +359,18 @@ const runWidth = async (width, height) => {
     `gateText=${pressed.gateText.slice(0, 200)}`,
   );
 
-  // Is the service at this address at all? The whole point of the fallback.
-  const serviceAbsent = connectAnswers.some((line) => / 404$/.test(line));
+  // Is there a USABLE approval service at this address? The whole point of the
+  // fallback. Two answers both mean "not here": 404 (a client served as static
+  // files, with no service at all) and the refusal a copy of Fiddy's own
+  // service gives when it has no Farcaster account of its own to ask with
+  // (`server/instance/connect.mjs`, `CONNECT_UNAVAILABLE`, 501 — card
+  // t_745ed5be). Both are the self-hosted case, and both must offer the reader
+  // the way forward this probe asserts.
+  const serviceAbsent = connectAnswers.some((line) =>
+    / (404|501)$/.test(line),
+  );
   check(
-    `${width}: this origin serves no approval service (the self-hosted case)`,
+    `${width}: this origin serves no usable approval service (the self-hosted case)`,
     serviceAbsent,
     connectAnswers.join(' | ') || 'no /api/fiddy/connect call was made',
   );

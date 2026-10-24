@@ -240,12 +240,13 @@ const watchSiwfChannel = async ({
  *      signature harvested from another app or another session being replayed here;
  *   3. the signature recovers to the address the message claims (pure ECDSA, no RPC).
  *
- * What this does NOT prove: that the signing address actually controls the FID the
- * relay reports. That binding lives on Optimism (KeyRegistry / ID registry) and
- * checking it needs an RPC endpoint and a paymaster-grade dependency this client
- * doesn't carry. Since the session is local-only and grants no privileged access,
- * that gap is recorded rather than hidden — `reason` says so, and the UI never
- * claims more than "signed in on this device".
+ * What this does NOT prove on its own: that the signing address actually controls
+ * the FID the relay reports. The relay is only a carrier — it decides nothing —
+ * and that binding lives in Farcaster's own ID registry, which is exactly what
+ * `confirmFidOnNode` below asks the reader's OWN server about. A node that names
+ * the same FID makes the identity proven rather than relayed; a node that names
+ * a different one is refused; a node that cannot answer leaves the session
+ * device-only, with the UI saying so rather than implying more.
  */
 const verifySiwfCompletion = async ({
   message,
@@ -297,6 +298,118 @@ const verifySiwfCompletion = async ({
   }
 
   return { verified: true, address: recovered };
+};
+
+/**
+ * Who this account is, according to the server this copy of Fiddy reads from.
+ *
+ * THE POINT OF THE WHOLE FLOW (fatline's step 4, and the reason the relay is not
+ * trusted here): a signed SIWE message proves somebody controls an address; it
+ * does NOT say which FID that address owns — the relay says that, and the relay
+ * only carries messages. The ID registry says it, and every Snapchain server
+ * serves exactly that one lookup: `/v1/onChainIdRegistryEventByAddress`. So the
+ * FID is taken from the reader's own server, and the account is only treated as
+ * confirmed when that server names the same address's FID.
+ *
+ * Three answers, and each one is used as it is:
+ *   - `confirmed`  the server names this FID for this address. The sign-in is
+ *                  proven, not merely relayed.
+ *   - `mismatch`   the server names a DIFFERENT FID for this address. Something
+ *                  is wrong about the request itself, and the sign-in is refused
+ *                  rather than quietly accepted as another account.
+ *   - `none` / `unavailable`  the address owns no account this server knows, or
+ *                  the server could not answer. The session stays device-only
+ *                  (that is what it was before this existed) and the screen says
+ *                  which of the two it was.
+ *
+ * The two candidates are tried in order: the address the client is pointed at,
+ * then this app's own `/snapchain-api` relay path, which is what a dev or
+ * preview server proxies to the node it was configured with.
+ */
+type FidConfirmation =
+  | { state: 'confirmed'; fid: number; nodeUrl: string }
+  | { state: 'mismatch'; fid: number; nodeUrl: string }
+  | { state: 'none'; nodeUrl: string }
+  | { state: 'unavailable'; nodeUrl: string | null; reason: string };
+
+/** How long the reader's own server gets to answer before it counts as silent. */
+const FID_CONFIRMATION_TIMEOUT_MS = 8_000;
+
+const confirmFidOnNode = async ({
+  address,
+  nodeUrl,
+  expectedFid,
+  fetchImpl = fetch,
+}: {
+  address: `0x${string}`;
+  nodeUrl: string | null;
+  expectedFid: number;
+  fetchImpl?: typeof fetch;
+}): Promise<FidConfirmation> => {
+  const candidates = [nodeUrl, '/snapchain-api'].filter(
+    (candidate): candidate is string =>
+      typeof candidate === 'string' && candidate.length > 0,
+  );
+
+  if (candidates.length === 0) {
+    return {
+      state: 'unavailable',
+      nodeUrl: null,
+      reason: 'this copy of Fiddy is not pointed at any server yet',
+    };
+  }
+
+  let lastReason = 'the server did not answer';
+  for (const base of candidates) {
+    try {
+      const response = await fetchImpl(
+        `${base}/v1/onChainIdRegistryEventByAddress?address=${address.toLowerCase()}`,
+        {
+          headers: { accept: 'application/json' },
+          signal: AbortSignal.timeout(FID_CONFIRMATION_TIMEOUT_MS),
+        },
+      );
+      if (!response.ok) {
+        lastReason = `it answered ${response.status}`;
+        continue;
+      }
+
+      const body = (await response.json()) as {
+        fid?: unknown;
+        idRegisterEventBody?: { to?: unknown };
+      };
+      const fid = Number(body?.fid);
+      const owner = body?.idRegisterEventBody?.to;
+
+      if (
+        !Number.isInteger(fid) ||
+        fid <= 0 ||
+        typeof owner !== 'string' ||
+        owner.toLowerCase() !== address.toLowerCase()
+      ) {
+        // The address owns no account this server knows about — a test key, or
+        // an account that moved. Not an accusation; simply not confirmed.
+        return { state: 'none', nodeUrl: base };
+      }
+
+      if (fid !== expectedFid) {
+        return { state: 'mismatch', fid, nodeUrl: base };
+      }
+
+      return { state: 'confirmed', fid, nodeUrl: base };
+    } catch (error) {
+      lastReason =
+        error instanceof Error && error.message
+          ? error.message
+          : 'the server did not answer';
+    }
+  }
+
+  return {
+    state: 'unavailable',
+    nodeUrl: candidates[0] ?? null,
+    reason: lastReason,
+  };
 };
 
 /**
@@ -489,6 +602,7 @@ export const clearSiwfProof = (): void => {
 export {
   buildLocalAuthToken,
   buildLocalOnboardingState,
+  confirmFidOnNode,
   createSiwfChannel,
   getSiwfChannelStatus,
   isLocalSessionToken,
@@ -502,6 +616,7 @@ export {
   watchSiwfChannel,
 };
 export type {
+  FidConfirmation,
   SiwfCompletion,
   SiwfRelayChannel,
   SiwfRelayStatus,

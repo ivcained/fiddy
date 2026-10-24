@@ -149,6 +149,9 @@ const CONNECTED = {
   approvalUrl: null,
   fid: 4242,
   username: 'fiddy',
+  // On fiddy.fun the posting key stays in the control plane and never reaches a
+  // browser: nothing is written to this device's key store.
+  postingKey: null,
 };
 
 /** A node that reads a nonce, accepts one KEY_ADD, and then reports the signer. */
