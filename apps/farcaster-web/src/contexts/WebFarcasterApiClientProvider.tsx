@@ -37,6 +37,7 @@ import {
   useProviderWatch,
 } from '~/snapchain/providers';
 import { useClientFilterPreferences } from '~/snapchain/useClientFilterPreferences';
+import { useMutePreferences } from '~/snapchain/useMutePreferences';
 import { useNodeChoice } from '~/snapchain/useNodeChoice';
 import { Analytics } from '~/utils/analyticsUtils';
 import { getPersistedDeviceId } from '~/utils/deviceIdUtils';
@@ -85,6 +86,12 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
     // the store synchronously on every request, so a filter changed on the
     // settings screen applies to the next page instead of waiting for a reload.
     useClientFilterPreferences(signedInFid);
+
+    // The reader's own mutes, blocks and hidden words. Loaded here for the same
+    // reason as the filter above: the seam below asks this store synchronously
+    // on every request, so hiding somebody on a profile or a cast menu applies
+    // to the next page instead of waiting for a reload.
+    useMutePreferences(signedInFid);
 
     // The reader's servers, and which one is live right now.
     //

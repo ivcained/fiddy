@@ -61,6 +61,7 @@ import {
   SnapchainNodeClient,
 } from 'farcaster-node-client';
 
+import type { MuteQuery } from '~/snapchain/mutePreferences';
 import { fetchCastAuthorFromOrigin } from '~/snapchain/providers/castAuthorHandoff';
 
 import {
@@ -274,6 +275,13 @@ export interface NodeBackedReadsOptions {
    * signed-out read gets, since the policy is stored per account.
    */
   clientFilter?: () => ClientFilterPolicy | undefined;
+  /**
+   * The reader's own mutes, blocks and hidden words, read at page time for the
+   * same reason as the filter above: a change applies to the next page rather
+   * than waiting for a reload. Absent means "nothing is hidden", which is what
+   * a signed-out read and a reader with no list loaded both get.
+   */
+  mutes?: () => MuteQuery | undefined;
 }
 
 interface CacheEntry<T> {
@@ -339,6 +347,24 @@ const heldHash = (hashes: Set<string>, hash: string): string | undefined => {
 };
 
 /**
+ * Whether one of the node's messages is hidden by the reader's own list: its
+ * author is muted or blocked, or the cast carries a word the reader does not
+ * want to see.
+ *
+ * The reader's OWN messages are never hidden (`hidesAuthor` refuses their own
+ * FID), which is what makes this safe to run over notifications: every one of
+ * them is about the reader, and a mute must never hide the reader's own work
+ * from themselves.
+ */
+const hiddenByMutes = (message: NodeMessage, mutes: MuteQuery): boolean => {
+  if (mutes.hidesAuthor(message.fid)) {
+    return true;
+  }
+  const text = message.castAdd?.text;
+  return text !== undefined && text.length > 0 && mutes.hidesText(text);
+};
+
+/**
  * The snaps channel, as the network actually carries it.
  *
  * MEASURED (2026-10-22, a live public read node):
@@ -375,6 +401,11 @@ export class NodeBackedReads {
   private readonly clients: CastClientResolver;
   /** The reader's include/exclude policy for FEED pages, or undefined. */
   private readonly clientFilter?: () => ClientFilterPolicy | undefined;
+  /**
+   * The reader's own mutes, blocks and hidden words for FEED pages and derived
+   * notifications, or undefined — see `NodeBackedReadsOptions.mutes`.
+   */
+  private readonly mutes?: () => MuteQuery | undefined;
 
   /** The author index for a hash this reader has never served. */
   private readonly resolveCastAuthor: (
@@ -434,6 +465,7 @@ export class NodeBackedReads {
     thisAppFid,
     knownClients,
     clientFilter,
+    mutes,
   }: NodeBackedReadsOptions) {
     this.node = node;
     this.nodeBaseUrl = nodeBaseUrl.replace(/\/$/, '');
@@ -458,6 +490,7 @@ export class NodeBackedReads {
       names: createAppClientNameLookup({ node }),
     });
     this.clientFilter = clientFilter;
+    this.mutes = mutes;
   }
 
   /**
@@ -1030,6 +1063,43 @@ export class NodeBackedReads {
       return messages;
     }
     return filterCastsByClient({ messages, clients, policy });
+  }
+
+  /**
+   * The reader's own mutes, applied to a page's messages before anything else is
+   * spent on them: a cast whose author is hidden, or which carries a word the
+   * reader does not want to see, should not pay for a signer lookup, a counts
+   * read or an embed fetch — and, more to the point, should not be drawn.
+   *
+   * Feeds only, exactly like the client filter beside it: a conversation and a
+   * profile stay whole on purpose. Deleting replies out of a thread because of a
+   * mute would make the thread unreadable rather than quieter, and a profile
+   * somebody deliberately opened is the one surface a MUTE does not hide (a
+   * block does — see `~/snapchain/mutePreferences`).
+   */
+  private filterMutedMessages(messages: NodeMessage[]): NodeMessage[] {
+    const mutes = this.mutes?.();
+    if (!mutes) {
+      return messages;
+    }
+    return messages.filter((message) => !hiddenByMutes(message, mutes));
+  }
+
+  /**
+   * The same filter for the notifications a node derives.
+   *
+   * Notifications are about the reader, and a node knows nothing about their
+   * list — so nobody upstream applies it: a muted person's reply, like or follow
+   * would otherwise arrive as a notification about a cast the feed refuses to
+   * show. Every source of a notification group runs through here, and a group's
+   * own counts are counted from what survives.
+   */
+  private visibleNotifications(messages: NodeMessage[]): NodeMessage[] {
+    const mutes = this.mutes?.();
+    if (!mutes) {
+      return messages;
+    }
+    return messages.filter((message) => !hiddenByMutes(message, mutes));
   }
 
   private rememberCasts(messages: NodeMessage[]): void {
@@ -1747,9 +1817,12 @@ export class NodeBackedReads {
     // cast is built for them: a cast that will be hidden should not pay for its
     // counts, its embeds or its mentions. This is the ONE place a feed is
     // narrowed — a conversation and a profile stay whole on purpose.
+    // The reader's mutes run FIRST, before the client filter's signer lookups:
+    // a cast that is not going to be shown should not pay for anything.
+    const visible = this.filterMutedMessages(readMessages);
     const messages = this.filterFeedMessages(
-      readMessages,
-      await this.resolvePageClients(readMessages),
+      visible,
+      await this.resolvePageClients(visible),
     );
 
     const casts = await this.buildCasts(messages, {
@@ -2607,8 +2680,8 @@ export class NodeBackedReads {
 
     const groups: ApiNotificationGroup[] = [];
 
-    const mentionMessages = mentions.messages.filter(
-      (message) => message.castAdd,
+    const mentionMessages = this.visibleNotifications(
+      mentions.messages.filter((message) => message.castAdd),
     );
     if (mentionMessages.length > 0) {
       this.rememberCasts(mentionMessages);
@@ -2644,9 +2717,9 @@ export class NodeBackedReads {
       });
     }
 
-    const replyMessages = repliesByCast
-      .flat()
-      .filter((message) => message.castAdd);
+    const replyMessages = this.visibleNotifications(
+      repliesByCast.flat().filter((message) => message.castAdd),
+    );
     if (replyMessages.length > 0) {
       this.rememberCasts(replyMessages);
       const items = await mapWithConcurrency(
@@ -2684,7 +2757,11 @@ export class NodeBackedReads {
     const reactionMessages = reactionsByCast
       .map((entry) => ({
         hash: entry.hash,
-        messages: entry.messages.filter((m) => m.reaction),
+        // A muted person's like is their doing, not news about the reader's
+        // cast: the same filter the feed uses, applied to the reactor.
+        messages: this.visibleNotifications(
+          entry.messages.filter((message) => message.reaction),
+        ),
       }))
       .filter((entry) => entry.messages.length > 0);
     if (reactionMessages.length > 0) {
@@ -2741,7 +2818,9 @@ export class NodeBackedReads {
       }
     }
 
-    const followMessages = follows.messages.filter((message) => message.link);
+    const followMessages = this.visibleNotifications(
+      follows.messages.filter((message) => message.link),
+    );
     if (followMessages.length > 0) {
       const items = await mapWithConcurrency(
         followMessages.slice(0, previewLimit),
