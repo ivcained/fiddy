@@ -25,6 +25,7 @@ import React, {
   useState,
 } from 'react';
 
+import { routes } from '~/constants/routes';
 import { authTokenKey, getOnboardingStateKey } from '~/constants/storage';
 import { useClearKeyTransport } from '~/hooks/useClearKeyTransport';
 import { isLocalSessionToken } from '~/lib/siwfSession';
@@ -118,7 +119,16 @@ const AuthProvider: FC<AuthProviderProps> = memo(({ children }) => {
         trackError(new RemovePersistentQueryStorageError({ error }));
       }
 
-      location.reload();
+      // Signing out ends at the FRONT DOOR, not on whatever page the reader
+      // happened to be on. Reloading in place left them on an address that no
+      // longer has a session behind it: some `/~…` routes are mounted outside
+      // the signed-in gate and paint their signed-out self (a wallet page
+      // offering "Login"), the rest paint nothing at all. MEASURED 2026-10-24
+      // (`scripts/verify-sign-out.mjs`, 390 and 1440): signing out from the
+      // wallet left the reader on `/~/wallet` with the session gone, never on
+      // the landing. `replace` rather than `assign`, so the back button cannot
+      // walk into the session that just ended.
+      window.location.replace(routes.homeFeed.path);
     }, 750);
   }, [
     authToken,

@@ -45,6 +45,7 @@
 .fiddy-topbar,
 .fiddy-nav,
 .fiddy-tabs,
+.fiddy-account-menu,
 .fiddy-agent-card {
   font-family: var(--fiddy-font);
 }
@@ -650,6 +651,130 @@ html.fiddy-dark-shell body {
 
 .fiddy-tab[aria-current='page'] svg {
   color: var(--fiddy-accent-deep);
+}
+
+/* ---------- the account menu (the avatar's door) ----------
+   One panel, three anchors: the desktop top bar, the phone's header, and the
+   phone's "You" tab. "Sign out" is deliberately the last item of a panel short
+   enough to sit on screen without scrolling, because that is the whole card:
+   the way out of the account, findable from anywhere in the shell. */
+
+.fiddy-avatar-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.fiddy-account-menu {
+  z-index: 50;
+  width: 252px;
+  padding: 6px;
+  border: 1px solid var(--fiddy-glass-border);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--fiddy-bg-raise), var(--fiddy-bg) 12%);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  color: var(--fiddy-ink);
+}
+
+.fiddy-account-menu-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 10px;
+}
+
+.fiddy-account-menu-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fiddy-account-menu-name {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fiddy-account-menu-handle {
+  font-size: 12px;
+  color: var(--fiddy-ink-dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fiddy-account-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--fiddy-ink);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.fiddy-account-menu-item svg {
+  flex: none;
+  color: var(--fiddy-ink-dim);
+}
+
+.fiddy-account-menu-item:hover {
+  background: var(--fiddy-glass);
+}
+
+.fiddy-account-menu-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--fiddy-glass-border);
+}
+
+/* The one destructive thing in the panel, in the tone the shell's own alerts
+   already use for "this is the sharp edge". */
+.fiddy-account-menu-signout,
+.fiddy-account-menu-signout svg {
+  color: #ff8f8f;
+}
+
+.fiddy-account-menu-signout:hover {
+  background: color-mix(in oklab, #ff8f8f, transparent 88%);
+}
+
+/* Anchors. Each opener's own chrome is the positioned element (a sticky header
+   or a fixed bar), so the panel is positioned against it and travels with it. */
+.fiddy-account-menu-topbar {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 20px;
+}
+
+.fiddy-account-menu-header {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 12px;
+}
+
+.fiddy-account-menu-tabbar {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 8px);
 }
 
 /* ---------- shared buttons and small print ----------

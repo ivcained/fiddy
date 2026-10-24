@@ -22,6 +22,7 @@ import { Link as RouterLink, useLocation } from 'react-router-dom';
 
 import { AvatarImage } from '~/components/avatar/AvatarImage';
 import { AccountSwitcherEntry } from '~/components/fiddy/accounts/AccountSwitcher';
+import { FiddyAccountMenu } from '~/components/fiddy/FiddyAccountMenu';
 import { FiddyBalanceChipConnected } from '~/components/fiddy/FiddyFunding';
 import { ComposeCastButton } from '~/components/forms/buttons/ComposeCastButton';
 import { ExternalLink } from '~/components/links/ExternalLink';
@@ -420,10 +421,12 @@ const MobileHeaderInner: FC = memo(() => {
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
 
   useEffect(() => {
     setIsSearchOpen(false);
     setIsMenuOpen(false);
+    setIsAccountMenuOpen(false);
   }, [location.pathname]);
 
   const {
@@ -462,17 +465,22 @@ const MobileHeaderInner: FC = memo(() => {
           </>
         ) : (
           <>
-            <RouterLink
-              to={profileHref}
-              title="Profile"
-              className="flex shrink-0 items-center"
+            <button
+              type="button"
+              className="flex shrink-0 items-center rounded-full"
+              data-fiddy="account-menu-button"
+              aria-haspopup="menu"
+              aria-expanded={isAccountMenuOpen}
+              aria-label="Your account"
+              title="Your account"
+              onClick={() => setIsAccountMenuOpen((prev) => !prev)}
             >
               <AvatarImage
                 imgUrl={currentUser.pfp?.url}
                 imgAlt={currentUser.displayName || currentUser.username || ''}
                 size="sm1"
               />
-            </RouterLink>
+            </button>
 
             <button
               onClick={() => setIsMenuOpen((prev) => !prev)}
@@ -536,6 +544,14 @@ const MobileHeaderInner: FC = memo(() => {
             )}
           </>
         )}
+        {/* The account menu, anchored under this bar. Inside the nav on
+            purpose: the nav is the positioned element, so the panel opens
+            directly beneath the avatar it belongs to and travels with it. */}
+        <FiddyAccountMenu
+          className="fiddy-account-menu-header"
+          isOpen={isAccountMenuOpen}
+          onClose={() => setIsAccountMenuOpen(false)}
+        />
       </nav>
 
       {!isSearchOpen && isMenuOpen && (
