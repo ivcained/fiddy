@@ -176,6 +176,10 @@ const serviceFor = ({
       appKeyRaw: APP_ACCOUNT_KEY,
       clientApi: 'https://api.farcaster.xyz',
       nodeUrl,
+      // The default for a service built by hand in a test: ask nobody, which is
+      // what an unconfigured instance did before it could borrow a signature.
+      // `env` may override it where the borrowed-signer path is under test.
+      remoteSigner: null,
       ...env,
     },
     store: createMemoryStore(),
@@ -236,6 +240,7 @@ describe('the instance connect service', () => {
         appKeyRaw: null,
         clientApi: 'https://api.farcaster.xyz',
         nodeUrl: null,
+        remoteSigner: null,
       },
       store: createMemoryStore(),
       fetchImpl: api.fetchImpl,
