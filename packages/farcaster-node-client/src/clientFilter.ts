@@ -167,14 +167,16 @@ export const clientIdentityFor = ({
     };
   }
 
-  const named = appClientLabel(requestFid, { knownClients, name });
-
-  if (
-    named.kind === 'unknown' &&
-    typeof authorFid === 'number' &&
-    requestFid === authorFid
-  ) {
-    // The account requested the key for itself: nobody else's app is involved.
+  if (typeof authorFid === 'number' && requestFid === authorFid) {
+    // The account asked for the key itself: nobody else's app is involved.
+    //
+    // Decided from the protocol BEFORE the app's own profile is consulted, and
+    // the difference is not cosmetic: for a self-requested key the "app" account
+    // IS the author, so naming it from its profile puts the AUTHOR'S OWN NAME on
+    // their cast as if it were the client that posted it. MEASURED on live
+    // 2026-10-24: fid 7237's cast read "via Thomas" — Thomas being that
+    // account's own display name, printed under a cast written by Thomas. The
+    // readable answer is that no app is involved here, which is what `own` says.
     return {
       id: OWN_KEY_CLIENT_ID,
       label: 'their own key',
@@ -185,6 +187,8 @@ export const clientIdentityFor = ({
       ...(signer.scopes ? { scopes: signer.scopes } : {}),
     };
   }
+
+  const named = appClientLabel(requestFid, { knownClients, name });
 
   return {
     id: `app:${requestFid}`,

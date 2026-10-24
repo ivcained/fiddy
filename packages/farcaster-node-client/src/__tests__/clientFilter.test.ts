@@ -30,6 +30,8 @@ import {
 } from './fixtures';
 
 const OTHER_APP_FID = 9152;
+/** An account that posts through the app above — never the app FID itself. */
+const POSTING_FID = 4242;
 
 /**
  * A REAL on-chain signer's metadata, taken from a live mainnet node
@@ -120,6 +122,32 @@ describe('clientIdentityFor (pure)', () => {
       },
       thisAppFid: 999,
       authorFid: TEST_FID,
+    });
+    expect(identity).toMatchObject({
+      id: 'own',
+      kind: 'own',
+      label: 'their own key',
+    });
+  });
+
+  it('keeps that answer even when the account has a profile of its own', () => {
+    // The self-requested case, as a real node answers it: fid 7237's own key
+    // has `requestFid: 7237`, and that account's own profile says "Thomas".
+    // Reading the profile here would print "via Thomas" under a cast written by
+    // Thomas — the author's own name wearing the client's clothes (measured on
+    // live 2026-10-24, before this test existed).
+    const identity = clientIdentityFor({
+      signerHex: '0xabc',
+      signer: {
+        source: 'SIGNER_SOURCE_OFFCHAIN',
+        key: '0xabc',
+        keyType: 1,
+        fid: 7237,
+        requestFid: 7237,
+      },
+      thisAppFid: 999,
+      authorFid: 7237,
+      name: { fid: 7237, username: 'aviationdoctor.eth', displayName: 'Thomas' },
     });
     expect(identity).toMatchObject({
       id: 'own',
@@ -305,9 +333,12 @@ describe('CastClientResolver (against the node)', () => {
       source: 'SIGNER_SOURCE_OFFCHAIN',
       requestFid: TEST_FID,
     });
+    // The shape every app key really has: an APP asked for a key, and that key
+    // signs for somebody else. `requestFid` is the app; the key's own `fid` is
+    // the account posting through it.
     node.addSigner({
       key: otherKey.publicKeyHex,
-      fid: OTHER_APP_FID,
+      fid: POSTING_FID,
       source: 'SIGNER_SOURCE_OFFCHAIN',
       requestFid: OTHER_APP_FID,
     });
@@ -319,7 +350,7 @@ describe('CastClientResolver (against the node)', () => {
       timestamp: 12_000_001,
     });
     const theirs = await seedCast({
-      fid: OTHER_APP_FID,
+      fid: POSTING_FID,
       signerPrivateKey: otherKey.privateKey,
       text: 'from another client',
       timestamp: 12_000_002,

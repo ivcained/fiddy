@@ -41,6 +41,14 @@ The vocabulary a resolved cast carries — `ClientKind`:
 | `unknown` | an app FID whose account says nothing about itself | `via app 3356396` |
 | `onchain` | an on-chain key whose metadata names no app | `via an on-chain key` |
 
+A **self-requested** key (`requestFid` = the author's own FID) is never named from
+a profile, even when that account has one. That is not a detail: the "app" account
+in that case IS the author, so reading its profile put the author's own name on
+their own cast as if it were the client. MEASURED live 2026-10-24, fid 7237: the
+card read `via Thomas`, under a cast written by Thomas (`@aviationdoctor.eth`'s
+own display name). `own` is decided from the protocol, before the profile is
+consulted.
+
 ## Where it shows
 
 - **The cast card's author line** (`components/casts/CastAuthorLine.tsx`,

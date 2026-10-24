@@ -97,7 +97,9 @@ const userNameProofByName = async (name) => {
 const castSignerOf = async (fid, hash) => {
   try {
     const answer = await nodeJson('/v1/castById', { fid, hash });
-    const signer = answer?.message?.signer;
+    // The node answers a cast at the TOP level (`{data, hash, signer}`); some
+    // servers wrap it in `message`. Both are read.
+    const signer = answer?.message?.signer ?? answer?.signer;
     return typeof signer === 'string' && signer.length > 0 ? signer : undefined;
   } catch {
     return undefined;
@@ -112,7 +114,13 @@ const appFidOfSigner = async (fid, signerKey) => {
     if (typeof record?.requestFid === 'number' && record.requestFid > 0) {
       return record.requestFid;
     }
-    return appFidFromMetadata(record?.metadata);
+    // An on-chain key carries it ABI-encoded instead, under the signer event
+    // (measured against the live node: `onChainEvent.signerEventBody.metadata`,
+    // `metadataType` 1 = signed key request). Some servers put it at the top
+    // level; both are read.
+    const metadata =
+      record?.metadata ?? record?.onChainEvent?.signerEventBody?.metadata;
+    return appFidFromMetadata(metadata);
   } catch {
     return undefined;
   }
@@ -385,9 +393,22 @@ const run = async () => {
       // An on-chain key whose metadata names no app: the page's honest answer is
       // not a vendor name. Only a placeholder is acceptable here.
       check(
-        /^(app \d+|onchain)$/i.test(said) || said.length === 0,
+        /^(app \d+|onchain|an on-chain key|their own key)$/i.test(said) ||
+          said.length === 0,
         `${where} — the key names no app, so the page names none`,
         `page said ${JSON.stringify(said)}`,
+      );
+      continue;
+    }
+
+    if (appFid === fid) {
+      // The account asked for the key itself. There is no app to name, and the
+      // failure this catches is the one measured on live: the page naming the
+      // AUTHOR's own profile (fid 7237's "Thomas") as if it were a client.
+      check(
+        /^(their own key|own)$/i.test(said),
+        `${where} — the account asked for its own key, so no app is named`,
+        `app fid ${appFid} is the author; page said ${JSON.stringify(said)}`,
       );
       continue;
     }
