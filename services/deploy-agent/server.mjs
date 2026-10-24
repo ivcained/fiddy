@@ -93,7 +93,11 @@ function pick(facts) {
 
 function runSteps(job, steps, env) {
   job.state = 'running'
-  (async () => {
+  // `void` is load-bearing, not decoration: without it automatic semicolon
+  // insertion reads the next line as a CALL on the string assigned above —
+  // `'running'(async () => {…})()` — and every job dies at birth with
+  // `TypeError: "running" is not a function`.
+  void (async () => {
     for (const [cmd, args] of steps) {
       job.step = `${cmd.split('/').pop()} ${args.join(' ')}`.trim()
       const code = await new Promise((resolve) => {
