@@ -43,6 +43,7 @@ Usage: fiddy <command> [options]
   provision   Provision compute for your node
               --aws                       create an AWS EC2 instance (needs aws CLI)
               --ssh user@host             use any server you already have
+  up          Everything, one command: doctor → node up → client up
   node        Manage your read node
               up [--network N] [--local] [--force]
                                           N = snapchain (default) | hypersnap
@@ -77,6 +78,13 @@ EOF
 cmd="${1:-}"; shift || true
 case "$cmd" in
   provision) source "$FIDDY_REPO/cli/provision.sh"; provision_main "$@" ;;
+  up)
+    # One-shot: check the machine, bring the node up, then the client.
+    # Any flag (e.g. --local, --force, --tunnel) passes through to both.
+    source "$FIDDY_REPO/cli/doctor.sh"; doctor_main
+    source "$FIDDY_REPO/cli/node.sh";    node_main up "$@"
+    source "$FIDDY_REPO/cli/client.sh";  client_main up "$@"
+    ;;
   node)      source "$FIDDY_REPO/cli/node.sh";      node_main "$@" ;;
   client)    source "$FIDDY_REPO/cli/client.sh";    client_main "$@" ;;
   doctor)    source "$FIDDY_REPO/cli/doctor.sh";    doctor_main "$@" ;;
