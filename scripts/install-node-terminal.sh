@@ -39,7 +39,6 @@ SNIPPET_DIR="/etc/nginx/snippets/fiddy-terminals"
 NODE_DIR="/etc/fiddy/nodes"
 STATE_DIR="/etc/fiddy/terminals"
 PORT_BASE=7701
-JSON=0
 
 log() { printf '▸ %s\n' "$*"; }
 ok()  { printf '✓ %s\n' "$*"; }
@@ -54,7 +53,7 @@ while [ $# -gt 0 ]; do
     --key) KEY="$2"; shift 2 ;;
     --node-port) NODE_PORT="$2"; shift 2 ;;
     --host) SITE_HOST="$2"; SITE_CONF="/etc/nginx/sites-available/$2"; shift 2 ;;
-    --json) JSON=1; shift ;;
+    --json) shift ;;   # the verdict JSON is always printed; kept for the agent's argv
     -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -199,6 +198,28 @@ print("include added")
 PY
 fi
 
+# …and a path under /term/ or /node/ that no snippet claims is a REFUSAL. The
+# site's catch-all otherwise answers a rotated or guessed token with the app shell
+# (200, ~15 kB of HTML) — measured 2026-10-24, and it made this script's own
+# "wrong token" read-back read as success. Kept as its own step so a host that
+# already has the include (any node deployed before this change) still gets it.
+if ! grep -q "location \^~ /term/ { return 404; }" "$SITE_CONF"; then
+  log "adding the unknown-token guards to $SITE_CONF"
+  SITE_CONF="$SITE_CONF" python3 - <<'PY'
+import os, pathlib, sys
+path = pathlib.Path(os.environ["SITE_CONF"])
+text = path.read_text()
+anchor = "    include /etc/nginx/snippets/fiddy-terminals/*.conf;"
+if text.count(anchor) != 1:
+    sys.exit("the terminals include is not in the site config — run this script once without the guards, then again")
+guards = ("    # A /term/ or /node/ path no node owns is a 404, never the app shell.\n"
+          "    location ^~ /term/ { return 404; }\n"
+          "    location ^~ /node/ { return 404; }\n")
+path.write_text(text.replace(anchor, guards + anchor, 1))
+print("guards added")
+PY
+fi
+
 # --- 6. apply ---------------------------------------------------------------
 systemctl daemon-reload
 systemctl enable --now "fiddy-term-${FID}.service" >/dev/null 2>&1 || true
@@ -220,25 +241,40 @@ NO_TOKEN_CODE="$(curl -s -o /dev/null -m 10 -k -w '%{http_code}' \
 # The terminal is an SSH session; prove the SSH half independently of ttyd.
 SSH_PROBE="$(ssh -i "$NODE_DIR/fid-${FID}.pem" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
   -o ConnectTimeout=10 "$SSH_TARGET" 'echo ssh-ok; hostname' 2>&1 || true)"
+SSH_FIRST="$(printf '%s' "$SSH_PROBE" | head -1 | tr -d '\r')"
+if [ "$SSH_FIRST" = "ssh-ok" ]; then SSH_OK=true; else SSH_OK=false; fi
+WRONG_TOKEN_OK=true
+if [ "$NO_TOKEN_CODE" = "200" ]; then WRONG_TOKEN_OK=false; fi
 
 printf 'state=%s local=%s term=%s node=%s no_token=%s ssh=%s\n' \
-  "$UNIT_STATE" "$LOCAL_CODE" "$TERM_CODE" "$NODE_CODE" "$NO_TOKEN_CODE" \
-  "$(printf '%s' "$SSH_PROBE" | head -1)"
+  "$UNIT_STATE" "$LOCAL_CODE" "$TERM_CODE" "$NODE_CODE" "$NO_TOKEN_CODE" "$SSH_FIRST"
 
-python3 - <<PY
-import json
+# The verdict, printed from the environment rather than interpolated into a
+# python literal: the SSH probe's own output is multi-line ("ssh-ok\n<hostname>"),
+# which used to break the literal and make a WORKING terminal report a traceback
+# and a non-zero exit (measured 2026-10-24 — the agent then logs a failed job for
+# a terminal that is up).
+FID="$FID" PORT="$PORT" SITE_HOST="$SITE_HOST" TOKEN="$TOKEN" \
+UNIT_STATE="$UNIT_STATE" LOCAL_CODE="$LOCAL_CODE" TERM_CODE="$TERM_CODE" \
+NODE_CODE="$NODE_CODE" NO_TOKEN_CODE="$NO_TOKEN_CODE" SSH_OK="$SSH_OK" \
+SSH_FIRST="$SSH_FIRST" WRONG_TOKEN_OK="$WRONG_TOKEN_OK" python3 - <<'PY'
+import datetime, json, os
+e = os.environ
 print("FIDDY_TERMINAL_JSON " + json.dumps({
-  "fid": ${FID},
-  "terminalUrl": "https://${SITE_HOST}/term/${TOKEN}/",
-  "endpointUrl": "https://${SITE_HOST}/node/${TOKEN}/",
-  "port": ${PORT},
-  "unit": "fiddy-term-${FID}.service",
-  "unitState": "${UNIT_STATE}",
-  "localHttp": "${LOCAL_CODE}",
-  "terminalHttp": "${TERM_CODE}",
-  "nodeApiHttp": "${NODE_CODE}",
-  "wrongTokenHttp": "${NO_TOKEN_CODE}",
-  "sshReachable": "${SSH_PROBE}" .startswith("ssh-ok"),
+  "fid": int(e["FID"]),
+  "terminalUrl": f"https://{e['SITE_HOST']}/term/{e['TOKEN']}/",
+  "endpointUrl": f"https://{e['SITE_HOST']}/node/{e['TOKEN']}/",
+  "port": int(e["PORT"]),
+  "unit": f"fiddy-term-{e['FID']}.service",
+  "unitState": e["UNIT_STATE"],
+  "localHttp": e["LOCAL_CODE"],
+  "terminalHttp": e["TERM_CODE"],
+  "nodeApiHttp": e["NODE_CODE"],
+  "wrongTokenHttp": e["NO_TOKEN_CODE"],
+  "wrongTokenRefused": e["WRONG_TOKEN_OK"] == "true",
+  "sshReachable": e["SSH_OK"] == "true",
+  "sshFirstLine": e["SSH_FIRST"],
+  "checkedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }))
 PY
 
