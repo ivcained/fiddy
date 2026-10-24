@@ -193,7 +193,13 @@ the write's name until the last write it is carrying has been answered.
    `SeedPhraseWarningModal` behind it. That card's own probe
    (`scripts/verify-post-for-you.mjs`, rewritten for it) pins both halves,
    and `docs/CLIENT-PARITY.md` has the details.
-3. **A wallet-signed approval.** The card mentioned "QR scan / deep link … or
+3. **On a copy of Fiddy you run yourself**, the sheet used to dead-end: that
+   address had no service to answer it. Card `t_745ed5be` closed that half (the
+   instance's own service, `server/instance/connect.mjs`, with the instance's own
+   account asking), and with it the sign-in half (the reader's own node names the
+   FID the SIWF signature belongs to). See
+   `docs/CLIENT-SELF-HOSTED-CONNECT.md`.
+4. **A wallet-signed approval.** The card mentioned "QR scan / deep link … or
    connected wallet EIP-712". The phone approval is the implemented, live one
    (measured above); an EIP-712 signature from a custody wallet is *not*
    implemented, and would matter only for accounts whose custody key is held in a
