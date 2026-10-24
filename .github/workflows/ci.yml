@@ -27,6 +27,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  shell:
+    name: shell gates (fast bootstrap)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # The fast bootstrap is shell: its plumbing is tested for real (a tarball
+      # is built, served and streamed back through the CLI's own function) and
+      # every script is shellchecked. No cloud account needed.
+      - name: shellcheck the scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck zstd
+          shellcheck -S warning -x scripts/node-snapshot.sh scripts/fast-bootstrap-verify.sh \
+            scripts/fast-bootstrap-refresh.sh scripts/aws-deploy.sh cli/lib/fast-bootstrap.sh
+      - name: fast bootstrap gates
+        run: bash tests/fast-bootstrap.test.sh
+
   verify:
     name: ${{ matrix.gate }} (farcaster-web)
     runs-on: ubuntu-latest

@@ -1,0 +1,26 @@
+{
+  "_readme": "Pinned fast-bootstrap artifacts for a Snapchain mainnet read node. Written by scripts/node-snapshot.sh (publish) and refreshed weekly by scripts/fast-bootstrap-refresh.sh. Read by scripts/aws-deploy.sh and cli/provision.sh (the AMI) and by cli/node.sh (the mirror). Empty values mean 'nothing pinned yet': every consumer falls back to Farcaster's upstream snapshot chunks.",
+  "version": 1,
+  "maxAgeDays": 14,
+  "trust": "A convenience, never a trust root. The snapshot/mirror only saves the slow part of the download: the node re-validates everything it reads from gossip and keeps syncing from the network tip. Anyone can ignore it and bootstrap from Farcaster's public bucket instead (that is the default when this file is empty).",
+  "aws": {
+    "amiId": "",
+    "snapshotId": "",
+    "region": "us-east-1",
+    "createdAt": "",
+    "volumeGb": 0,
+    "volumeId": "",
+    "sourceInstance": "",
+    "storageGb": 0,
+    "usedGb": 0,
+    "nodeVersion": "",
+    "heights": {}
+  },
+  "mirror": {
+    "url": "",
+    "bytes": 0,
+    "sha256": "",
+    "createdAt": "",
+    "layout": ".rocks (RocksDB) + .onchain-config, tar + zstd, extracted into ~/snapchain"
+  }
+}
