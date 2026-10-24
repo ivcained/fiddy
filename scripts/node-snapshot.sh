@@ -48,6 +48,8 @@ KEEP=2
 PUBLIC=1
 MAX_WAIT_SNAPSHOT_S="${FB_MAX_WAIT_SNAPSHOT_S:-7200}"
 MIRROR_MODE=auto   # auto | on | off
+SHARE_WITH="${FIDDY_AMI_SHARE_WITH:-}"
+ami_snapshot_hint=""
 RCLONE_CONF_REMOTE="fiddy"
 
 log()  { printf '▸ %s\n' "$*"; }
@@ -60,9 +62,12 @@ usage() {
   cat <<'EOF'
 node-snapshot.sh — publish the pre-synced node state everyone bootstraps from.
 
-  publish [options]      take the snapshot, publish it, update the pin
+  publish [options]      take the snapshot + AMI, publish both, update the pin
+  register-ami           register (and publish) an AMI from an existing public
+                         snapshot — the step publish runs internally, exposed
+                         because that is how a launchable artifact is made
   status  [options]      what is running, what is pinned, what it costs
-  prune-old [--keep N]   delete older fiddy snapshots (default: keep 2)
+  prune-old [--keep N]   deregister + delete older fiddy artifacts (keep 2)
 
 options common to publish/status:
   --ssh user@host        the node's host (default: $FIDDY_TARGET)
@@ -257,6 +262,123 @@ fb_snapshot_size_gb() { # fb_snapshot_size_gb <id>
   aws_cli ec2 describe-snapshots --snapshot-ids "$1" --query 'Snapshots[0].VolumeSize' --output text 2>/dev/null || echo 0
 }
 
+# EC2 will not let you point a launch at a bare snapshot ("snapshotId cannot be
+# modified on root device"): the root device of an AMI is fixed at registration
+# time. So the published artifact is an AMI registered FROM the public snapshot,
+# itself made public, and the pin carries its id. The snapshot stays pinned too:
+# it is what the AMI is made of, and it is what `prune-old` cleans up behind it.
+fb_register_ami() { # fb_register_ami <snapshot-id> <volume-gb> <date-tag> → FB_AMI_ID
+  local snap="$1" vol_gb="$2" date_tag="$3" boot=""
+  # Inherit the boot mode of the Ubuntu images this snapshot came from; guessing
+  # wrong produces an instance that never boots.
+  boot="$(aws_cli ec2 describe-images --owners 099720109477 \
+    --filters 'Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*' \
+    --query 'sort_by(Images,&CreationDate)[-1].BootMode' --output text 2>/dev/null || true)"
+  case "$boot" in
+    uefi-preferred|uefi|legacy-bios) ;;
+    *) boot="uefi-preferred" ;;
+  esac
+  # AMI names are unique per account: reuse an existing one built from this very
+  # snapshot (a re-publish), and clear a stale one built from an older snapshot.
+  local existing existing_snap
+  existing="$(aws_cli ec2 describe-images --owners self \
+    --filters "Name=name,Values=fiddy-fast-bootstrap-$date_tag" \
+    --query 'Images[0].ImageId' --output text 2>/dev/null || true)"
+  if [ -n "$existing" ] && [ "$existing" != "None" ]; then
+    existing_snap="$(aws_cli ec2 describe-images --image-ids "$existing" \
+      --query 'Images[0].BlockDeviceMappings[0].Ebs.SnapshotId' --output text 2>/dev/null || true)"
+    if [ "$existing_snap" = "$snap" ]; then
+      FB_AMI_ID="$existing"
+      ok "AMI $FB_AMI_ID already registered from $snap (reusing it)"
+      return 0
+    fi
+    warn "AMI name fiddy-fast-bootstrap-$date_tag is taken by $existing (from $existing_snap); deregistering it"
+    aws_cli ec2 deregister-image --image-id "$existing" >/dev/null 2>&1 || true
+  fi
+  FB_AMI_ID="$(aws_cli ec2 register-image \
+    --name "fiddy-fast-bootstrap-$date_tag" \
+    --description "fiddy fast bootstrap: synced Snapchain mainnet read node ($date_tag)" \
+    --architecture x86_64 --root-device-name /dev/sda1 --virtualization-type hvm \
+    --boot-mode "$boot" --ena-support --sriov-net-support simple \
+    --block-device-mappings "DeviceName=/dev/sda1,Ebs={SnapshotId=$snap,VolumeSize=$vol_gb,VolumeType=gp3}" \
+    --tag-specifications "ResourceType=image,Tags=[{Key=project,Value=fiddy},{Key=Name,Value=fiddy-fast-bootstrap},{Key=fiddy:snapshot,Value=$snap},{Key=fiddy:created,Value=$date_tag}]" \
+    --query 'ImageId' --output text)"
+  [ -n "$FB_AMI_ID" ] && [ "$FB_AMI_ID" != "None" ] \
+    || die "register-image returned nothing for snapshot $snap"
+  ok "AMI $FB_AMI_ID registered from $snap (boot mode $boot)"
+}
+
+# Publishing an AMI has two independent switches in front of it:
+#   * the account setting `imageBlockPublicAccess` (ON by default: "block-new-
+#     sharing"), which no IAM permission can override from a script
+#   * per-account sharing, which always works
+# so this reports what actually happened instead of assuming it worked. The
+# snapshot is published separately and stays the universal artifact: any account
+# can build a volume from a public snapshot even when it cannot launch our AMI.
+fb_publish_ami() { # fb_publish_ami <ami-id> [share-with-csv]
+  local ami="$1" share="${2:-}" perm out rc a adds="" had_e=0
+  FB_AMI_PUBLIC=0
+  if [ -n "$share" ]; then
+    for a in $(printf '%s' "$share" | tr ',' ' '); do adds="$adds{UserId=$a},"; done
+    adds="${adds%,}"
+    if aws_cli ec2 modify-image-attribute --image-id "$ami" --launch-permission "Add=[$adds]" >/dev/null 2>&1; then
+      ok "AMI $ami shared with: $share"
+    else
+      warn "could not share AMI $ami with $share"
+    fi
+  fi
+  case "$-" in *e*) had_e=1 ;; esac
+  set +e
+  out="$(aws_cli ec2 modify-image-attribute --image-id "$ami" --launch-permission "Add=[{Group=all}]" 2>&1)"
+  rc=$?
+  [ "$had_e" = 1 ] && set -e || set +e
+  if [ "$rc" != 0 ]; then
+    case "$out" in
+      *BlockPublicAccess*|*"block public access"*|*OperationNotPermitted*)
+        warn "this account blocks public AMI sharing (imageBlockPublicAccess = block-new-sharing):"
+        warn "  $out"
+        dim "the SNAPSHOT is still published and public, which is the artifact any account can use:"
+        dim "  aws ec2 create-volume --snapshot-id ${ami_snapshot_hint:-<snapshot-id>} --availability-zone <az>   (then attach it)"
+        dim "and aws-deploy.sh does that automatically when the AMI is not launchable."
+        dim "to make the AMI itself public you have two options, both deliberate:"
+        dim "  1. share it with specific accounts:  publish --share-with 123456789012,210987654321"
+        dim "  2. allow public AMIs account-wide:  aws ec2 disable-image-block-public-access --image-block-public-access-state unblocked"
+        return 0 ;;
+      *) die "could not share AMI $ami: $out" ;;
+    esac
+  fi
+  perm="$(aws_cli ec2 describe-image-attribute --image-id "$ami" \
+    --attribute launchPermission --query 'LaunchPermissions' --output json)"
+  case "$perm" in
+    *'"Group": "all"'*|*'"Group":"all"'*)
+      FB_AMI_PUBLIC=1
+      ok "AMI $ami is PUBLIC (any account can launch it)" ;;
+    *) warn "AMI $ami is not public: $perm" ;;
+  esac
+}
+
+fb_wait_ami() { # fb_wait_ami <ami-id> — registration is async
+  local ami="$1" waited=0 state
+  while [ "$waited" -lt 600 ]; do
+    state="$(aws_cli ec2 describe-images --image-ids "$ami" --query 'Images[0].State' --output text 2>/dev/null || true)"
+    [ "$state" = "available" ] && { ok "AMI $ami is available"; return 0; }
+    sleep 10; waited=$((waited + 10))
+  done
+  warn "AMI $ami did not reach 'available' in 10 min (state: ${state:-unknown})"
+  return 1
+}
+
+fb_volume_size_gb() { # fb_volume_size_gb <volume-id>
+  aws_cli ec2 describe-volumes --volume-ids "$1" --query 'Volumes[0].Size' --output text 2>/dev/null || echo 0
+}
+
+fb_snapshot_stored_gb() { # fb_snapshot_stored_gb <id> — real incremental bytes when AWS reports them
+  local bytes
+  bytes="$(aws_cli ec2 describe-snapshots --snapshot-ids "$1" --query 'Snapshots[0].FullSnapshotSizeInBytes' --output text 2>/dev/null || true)"
+  case "$bytes" in ''|*[!0-9]*) echo 0; return 0 ;; esac
+  echo $(( bytes / 1073741824 ))
+}
+
 # --- mirror (Path B) ------------------------------------------------------
 
 FB_MIRROR_DEST=""; FB_MIRROR_PUBLIC_URL=""; FB_MIRROR_ACTUAL_BYTES=0; FB_MIRROR_SHA=""
@@ -358,15 +480,16 @@ fb_mirror_publish() { # fb_mirror_publish <date-tag>
 
 # --- pin ------------------------------------------------------------------
 
-fb_write_pin() { # fb_write_pin <snapshotId> <date> <sizeGb> <heights-json>
-  local snap="$1" date_tag="$2" size_gb="$3" heights="${4:-{}}"
+fb_write_pin() { # fb_write_pin <snapshotId> <date> <storedGb> <heights-json> <amiId> <volumeGb>
+  local snap="$1" date_tag="$2" size_gb="$3" heights="${4:-{}}" ami_id="${5:-}" vol_gb="${6:-0}"
   local tmp; tmp="$(mktemp)"
   if command -v python3 >/dev/null 2>&1; then
     python3 - "$PIN_FILE" "$tmp" "$snap" "$date_tag" "$size_gb" "$heights" "$REGION" "$VOLUME_ID" \
-      "${FB_N_DATA_GB:-0}" "${FB_N_VERSION:-}" "$FB_MIRROR_PUBLIC_URL" "${FB_MIRROR_ACTUAL_BYTES:-0}" "${FB_MIRROR_SHA:-}" <<'PY'
+      "${FB_N_DATA_GB:-0}" "${FB_N_VERSION:-}" "$FB_MIRROR_PUBLIC_URL" "${FB_MIRROR_ACTUAL_BYTES:-0}" "${FB_MIRROR_SHA:-}" \
+      "$ami_id" "$vol_gb" <<'PY'
 import json, sys
 (pin_path, out, snap, date_tag, size_gb, heights, region, volume_id,
- data_gb, version, murl, mbytes, msha) = sys.argv[1:14]
+ data_gb, version, murl, mbytes, msha, ami_id, vol_gb) = sys.argv[1:16]
 try:
     with open(pin_path) as fh:
         doc = json.load(fh)
@@ -376,13 +499,15 @@ prev = doc.get("aws") or {}
 doc.setdefault("version", 1)
 doc.setdefault("maxAgeDays", 14)
 doc["aws"] = {
+    "amiId": ami_id or prev.get("amiId", ""),
     "snapshotId": snap,
     "region": region,
     "createdAt": date_tag,
-    "volumeGb": int(data_gb or 0) or int(prev.get("volumeGb") or 0),
+    "volumeGb": int(vol_gb or 0) or int(prev.get("volumeGb") or 0),
     "volumeId": volume_id,
     "sourceInstance": prev.get("sourceInstance", ""),
-    "sizeGb": float(size_gb or 0),
+    "storageGb": float(size_gb or 0),
+    "usedGb": int(data_gb or 0),
     "nodeVersion": version,
     "heights": json.loads(heights or "{}"),
 }
@@ -401,10 +526,11 @@ PY
   elif command -v jq >/dev/null 2>&1; then
     jq --arg snap "$snap" --arg date "$date_tag" --arg region "$REGION" --arg vol "$VOLUME_ID" \
        --arg ver "$FB_N_VERSION" --arg url "$FB_MIRROR_PUBLIC_URL" --arg sha "$FB_MIRROR_SHA" \
+       --arg ami "$ami_id" --argjson volgb "${vol_gb:-0}" --argjson used "${FB_N_DATA_GB:-0}" \
        --argjson size "${size_gb:-0}" --argjson bytes "${FB_MIRROR_ACTUAL_BYTES:-0}" \
        --argjson heights "$heights" \
-      '.aws.snapshotId=$snap | .aws.region=$region | .aws.createdAt=$date | .aws.volumeId=$vol
-       | .aws.sizeGb=$size | .aws.nodeVersion=$ver | .aws.heights=$heights
+      '.aws.amiId=$ami | .aws.snapshotId=$snap | .aws.region=$region | .aws.createdAt=$date | .aws.volumeId=$vol
+       | .aws.volumeGb=$volgb | .aws.storageGb=$size | .aws.usedGb=$used | .aws.nodeVersion=$ver | .aws.heights=$heights
        | (if $url != "" then .mirror={url:$url, bytes:$bytes, sha256:$sha, createdAt:$date,
              layout:".rocks (RocksDB) + .onchain-config, tar + zstd, extracted into ~/snapchain"} else . end)' \
       "$PIN_FILE" > "$tmp" || die "could not update the pin with jq"
@@ -441,6 +567,7 @@ cmd_publish() {
       --mirror) MIRROR_MODE=on; shift ;;
       --no-mirror) MIRROR_MODE=off; shift ;;
       --no-public) PUBLIC=0; shift ;;
+      --share-with) SHARE_WITH="${2:-}"; shift 2 ;;
       --no-write-pin) WRITE_PIN=0; shift ;;
       --json) JSON_OUT="${2:-}"; shift 2 ;;
       --dry-run) DRY_RUN=1; shift ;;
@@ -507,6 +634,20 @@ cmd_publish() {
     fb_make_public "$snap_id"
   fi
 
+  # The launchable artifact: an AMI registered from that (public) snapshot.
+  local vol_gb
+  vol_gb="$(fb_volume_size_gb "$VOLUME_ID")"
+  case "$vol_gb" in ''|*[!0-9]*) vol_gb=0 ;; esac
+  fb_register_ami "$snap_id" "$vol_gb" "$date_short"
+  local ami_id="$FB_AMI_ID"
+  local ami_public="false"
+  if [ "$PUBLIC" = 1 ]; then
+    ami_snapshot_hint="$snap_id"
+    fb_publish_ami "$ami_id" "$SHARE_WITH"
+    [ "$FB_AMI_PUBLIC" = 1 ] && ami_public="true"
+    fb_wait_ami "$ami_id" || true
+  fi
+
   local mirror_state="skipped (no bucket configured)"
   if [ "$MIRROR_MODE" = on ] || { [ "$MIRROR_MODE" = auto ] && fb_mirror_configured; }; then
     if fb_mirror_configured; then
@@ -521,19 +662,29 @@ cmd_publish() {
     fb_resume
   fi
 
-  local size_gb heights
+  local size_gb heights stored_gb vol_gb
   size_gb="$(fb_snapshot_size_gb "$snap_id")"
+  stored_gb="$(fb_snapshot_stored_gb "$snap_id")"
+  vol_gb="$(fb_volume_size_gb "$VOLUME_ID")"
+  case "$vol_gb" in ''|*[!0-9]*) vol_gb=0 ;; esac
   heights="${FB_N_SHARDS:-{}}"
 
   if [ "$WRITE_PIN" = 1 ]; then
-    fb_write_pin "$snap_id" "$date_tag" "${FB_N_DATA_GB:-0}" "$heights"
+    fb_write_pin "$snap_id" "$date_tag" "$stored_gb" "$heights" "$ami_id" "$vol_gb"
   fi
 
   echo
-  ok "published: snapshot $snap_id (public: $PUBLIC), synced state as of $date_tag"
-  dim "consumers: scripts/aws-deploy.sh (uses the snapshot) | fiddy node up (uses the mirror)"
-  dim "monthly cost at list: \$$(( ${size_gb:-0} * 5 / 100 )) for the snapshot storage (${size_gb:-0} GB used, \$0.05/GB-mo)"
+  ok "published: snapshot $snap_id + AMI $ami_id (snapshot public: $PUBLIC, AMI public: $ami_public), synced state as of $date_tag"
+  dim "consumers: scripts/aws-deploy.sh and fiddy provision --aws | fiddy node up (mirror)"
+  dim "  the AMI is launched directly where it is shared; elsewhere aws-deploy.sh builds a volume from the" 
+  dim "  public snapshot and attaches it, so the copy is usable from any account either way."
+  if [ "${stored_gb:-0}" -gt 0 ] 2>/dev/null; then
+    dim "monthly cost at list: \$$(( stored_gb * 5 / 100 )) of snapshot storage (${stored_gb} GB of incremental blocks, \$0.05/GB-mo)"
+  else
+    dim "monthly cost at list: \$0.05/GB-mo of snapshot storage for the blocks that changed (AWS did not report a size)"
+  fi
   fb_json_out "$JSON_OUT" \
+    "\"amiId\": \"$ami_id\"" \
     "\"snapshotId\": \"$snap_id\"" \
     "\"region\": \"$REGION\"" \
     "\"createdAt\": \"$date_tag\"" \
@@ -578,11 +729,52 @@ cmd_status() {
     --output table 2>/dev/null || warn "could not list snapshots (missing ec2:DescribeSnapshots?)"
   if [ -n "$pinned_snap" ]; then
     local vg
-    vg="$(fb_snapshot_size_gb "$pinned_snap" 2>/dev/null || echo 0)"
+    vg="$(fb_snapshot_stored_gb "$pinned_snap" 2>/dev/null || echo 0)"
     case "$vg" in ''|*[!0-9]*) vg=0 ;; esac
-    [ "$vg" -gt 0 ] 2>/dev/null && dim "pinned snapshot ${pinned_snap}: \$$(( vg * 5 / 100 ))/mo at list"
+    [ "$vg" -gt 0 ] 2>/dev/null && dim "pinned snapshot ${pinned_snap}: \$$(( vg * 5 / 100 ))/mo of storage at list (${vg} GB incremental)"
+    local pinned_ami; pinned_ami="$(fb_pin_get .aws.amiId "$PIN_FILE")"
+    [ -n "$pinned_ami" ] && dim "pinned AMI ${pinned_ami}"
   fi
+  aws_cli ec2 describe-images --owners self \
+    --filters 'Name=tag:project,Values=fiddy' \
+    --query 'reverse(sort_by(Images,&CreationDate))[].{Id:ImageId,Name:Name,Snap:BlockDeviceMappings[0].Ebs.SnapshotId,State:State}' \
+    --output table 2>/dev/null || true
   return 0
+}
+
+# --- register-ami ---------------------------------------------------------
+
+cmd_register_ami() {
+  local snap="" vol_gb="" public=1 date_tag
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --snapshot) snap="${2:-}"; shift 2 ;;
+      --volume-gb) vol_gb="${2:-}"; shift 2 ;;
+      --date) date_tag="${2:-}"; shift 2 ;;
+      --no-public) public=0; shift ;;
+      --) shift; break ;;
+      *)
+        local extra
+        extra="$(parse_common "$@" 2>/dev/null)" || die "unknown option: $1"
+        [ -n "$extra" ] && die "unknown option: $extra"; shift ;;
+    esac
+  done
+  [ -n "$snap" ] || snap="$(fb_pin_get .aws.snapshotId "$PIN_FILE")"
+  [ -n "$snap" ] || die "no snapshot: pass --snapshot snap-xxxxxxxx (or pin one first)"
+  date_tag="${date_tag:-$(date -u +%Y-%m-%d)}"
+  if [ -z "$vol_gb" ]; then
+    vol_gb="$(fb_pin_get .aws.volumeGb "$PIN_FILE")"
+  fi
+  if [ -z "$vol_gb" ] || [ "$vol_gb" = "0" ]; then
+    vol_gb="$(fb_snapshot_size_gb "$snap")"
+  fi
+  case "$vol_gb" in ''|*[!0-9]*) die "could not determine the volume size for $snap (pass --volume-gb)" ;; esac
+  fb_register_ami "$snap" "$vol_gb" "$date_tag"
+  if [ "$public" = 1 ]; then
+    fb_publish_ami "$FB_AMI_ID"
+    fb_wait_ami "$FB_AMI_ID" || true
+  fi
+  printf '%s\n' "$FB_AMI_ID"
 }
 
 # --- prune-old ------------------------------------------------------------
@@ -608,11 +800,22 @@ cmd_prune() {
     i=$((i + 1))
     if [ "$i" -le "$keep" ]; then
       dim "keep  $id"
-    else
-      log "delete $id (older than the newest $keep)"
+      continue
+    fi
+    # An AMI pins its snapshot: deregister it first or the snapshot delete fails.
+    local amis
+    amis="$(aws_cli ec2 describe-images --owners self \
+      --filters "Name=tag:fiddy:snapshot,Values=$id" \
+      --query 'Images[].ImageId' --output text 2>/dev/null || true)"
+    for ami in $amis; do
+      log "deregister $ami (it is built from $id)"
       if [ "$DRY_RUN" = 1 ]; then dim "(dry run)"; else
-        aws_cli ec2 delete-snapshot --snapshot-id "$id" >/dev/null && ok "deleted $id"
+        aws_cli ec2 deregister-image --image-id "$ami" >/dev/null && ok "deregistered $ami"
       fi
+    done
+    log "delete $id (older than the newest $keep)"
+    if [ "$DRY_RUN" = 1 ]; then dim "(dry run)"; else
+      aws_cli ec2 delete-snapshot --snapshot-id "$id" >/dev/null && ok "deleted $id"
     fi
   done
   return 0
@@ -624,6 +827,7 @@ cmd="${1:-}"
 shift || true
 case "$cmd" in
   publish) cmd_publish "$@" ;;
+  register-ami) cmd_register_ami "$@" ;;
   status)  cmd_status "$@" ;;
   prune-old|prune) cmd_prune "$@" ;;
   ""|-h|--help|help) usage ;;

@@ -57,32 +57,58 @@ else
     -o "$PIN_FILE" 2>/dev/null || PIN_FILE=""
 fi
 
-SNAPSHOT_ID=""; SNAP_DATE=""; SNAP_AGE=""; SNAP_MAX_AGE="14"
+SNAPSHOT_ID=""; SNAP_AMI=""; SNAP_VOL_GB="0"; SNAP_DATE=""; SNAP_AGE=""; SNAP_MAX_AGE="14"
 if [ -n "$PIN_FILE" ] && command -v fb_pin_get >/dev/null 2>&1; then
   SNAPSHOT_ID="$(fb_pin_get .aws.snapshotId "$PIN_FILE")"
+  # The fast artifact is an AMI registered from that snapshot: EC2 will not
+  # accept a snapshot id for the root device of a launch.
+  SNAP_AMI="$(fb_pin_get .aws.amiId "$PIN_FILE")"
+  SNAP_VOL_GB="$(fb_pin_get .aws.volumeGb "$PIN_FILE")"; SNAP_VOL_GB="${SNAP_VOL_GB:-0}"
   SNAP_DATE="$(fb_pin_get .aws.createdAt "$PIN_FILE")"
   SNAP_AGE="$(fb_age_days "$SNAP_DATE")"
   SNAP_MAX_AGE="$(fb_pin_get .maxAgeDays "$PIN_FILE")"; SNAP_MAX_AGE="${SNAP_MAX_AGE:-14}"
 fi
-[ "${FIDDY_AWS_FAST_BOOTSTRAP:-1}" = 1 ] || { SNAPSHOT_ID=""; SNAP_DATE=""; SNAP_AGE=""; }
+[ "${FIDDY_AWS_FAST_BOOTSTRAP:-1}" = 1 ] || { SNAPSHOT_ID=""; SNAP_AMI=""; SNAP_DATE=""; SNAP_AGE=""; }
+
+# Which artifact can THIS account actually use? Publishing is not the same as
+# being launchable: AMI public sharing is blocked by default in many accounts,
+# while a public snapshot always works (build a volume from it). So: use the AMI
+# when it is launchable here, otherwise fall back to the snapshot as a volume.
+FAST_MODE=""
+if [ -n "$SNAP_AMI" ] && command -v fb_ami_usable >/dev/null 2>&1 && fb_ami_usable "$SNAP_AMI" "${AWS_ARGS[@]}"; then
+  FAST_MODE="ami"
+elif [ -n "$SNAPSHOT_ID" ] && command -v fb_snapshot_usable >/dev/null 2>&1 && fb_snapshot_usable "$SNAPSHOT_ID" "${AWS_ARGS[@]}"; then
+  FAST_MODE="volume"
+fi
 
 MY_IP="$(curl -fsS --max-time 10 https://checkip.amazonaws.com | tr -d '[:space:]')"
 echo "▸ region: $REGION · type: $ITYPE · disk: ${VOL_GB}GB gp3 · your IP: $MY_IP"
-if [ -n "$SNAPSHOT_ID" ]; then
-  echo "▸ pre-synced state: snapshot $SNAPSHOT_ID (synced as of ${SNAP_DATE:-unknown}${SNAP_AGE:+, $SNAP_AGE day(s) old})"
-  echo "  the box boots from that state: no bootstrap download, just the catch-up on recent blocks."
-  if [ -n "$SNAP_AGE" ] && [ "$SNAP_AGE" -gt "$SNAP_MAX_AGE" ] 2>/dev/null; then
-    echo "  ! that pin is older than ${SNAP_MAX_AGE} days, so the catch-up is longer than usual."
-    echo "    refresh it: scripts/fast-bootstrap-refresh.sh --ssh user@host --volume vol-xxxx --push"
-  fi
-  SNAP_STATE="$(aws_cli --region "$REGION" ec2 describe-snapshots --snapshot-ids "$SNAPSHOT_ID" --query 'Snapshots[0].State' --output text 2>/dev/null || echo '?')"
-  if [ "$SNAP_STATE" != "completed" ]; then
-    echo "  ! snapshot $SNAPSHOT_ID is '$SNAP_STATE', not completed — falling back to the cold bootstrap."
-    SNAPSHOT_ID=""
-  fi
-else
-  echo "▸ no pre-synced copy pinned: this box downloads ~470 GB of upstream chunks (overnight on HDD-class disks)."
+case "$FAST_MODE" in
+  ami)
+    echo "▸ pre-synced state: AMI $SNAP_AMI from snapshot $SNAPSHOT_ID (synced as of ${SNAP_DATE:-unknown}${SNAP_AGE:+, $SNAP_AGE day(s) old})"
+    echo "  the box boots from that state: no bootstrap download, just the catch-up on recent blocks."
+    ;;
+  volume)
+    echo "▸ pre-synced state: public snapshot $SNAPSHOT_ID (synced as of ${SNAP_DATE:-unknown}${SNAP_AGE:+, $SNAP_AGE day(s) old})"
+    echo "  this account cannot launch someone else's AMI, so the copy is attached as a data disk:"
+    echo "  a volume is created FROM the snapshot (that is what a public snapshot is for), mounted, and"
+    echo "  ~/snapchain is pointed at the node data it carries. Same result: no bootstrap download."
+    ;;
+  "")
+    if [ -n "$SNAP_AMI" ] || [ -n "$SNAPSHOT_ID" ]; then
+      echo "▸ a pre-synced copy is pinned ($SNAPSHOT_ID) but this account cannot use it"
+      echo "  (no launch permission on the AMI, no create-volume permission on the snapshot)."
+    fi
+    echo "▸ cold bootstrap: this box downloads ~470 GB of upstream chunks (overnight on HDD-class disks)."
+    ;;
+esac
+# A volume is never smaller than the snapshot it came from.
+if [ -n "$FAST_MODE" ] && [ "${SNAP_VOL_GB:-0}" -gt "$VOL_GB" ] 2>/dev/null; then VOL_GB="$SNAP_VOL_GB"; fi
+if [ -n "$SNAP_AGE" ] && [ "$SNAP_AGE" -gt "$SNAP_MAX_AGE" ] 2>/dev/null; then
+  echo "  ! that pin is older than ${SNAP_MAX_AGE} days, so the catch-up is longer than usual."
+  echo "    refresh it: scripts/fast-bootstrap-refresh.sh --ssh user@host --volume vol-xxxx --push"
 fi
+[ "${FIDDY_AWS_FAST_BOOTSTRAP:-1}" = 1 ] ||   echo "▸ FIDDY_AWS_FAST_BOOTSTRAP=0: ignoring any pinned copy, bootstrapping from Farcaster's chunks."
 
 AMI="$(aws_cli ec2 describe-images --region "$REGION" --owners 099720109477 \
   --filters 'Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*' 'Name=state,Values=available' \
@@ -114,19 +140,83 @@ if [ -z "$SG" ] || [ "$SG" = "None" ]; then
   done
 fi
 
+DATA_VOL=""; DATA_VOL_NODASH=""; ROOT_GB="$VOL_GB"
+if [ "$FAST_MODE" = volume ]; then
+  # The volume has to live in the AZ the instance will land in, and that is where
+  # the account's default subnet is (not simply the first available AZ).
+  AZ="$(aws_cli ec2 describe-subnets --filters 'Name=default-for-az,Values=true' --query 'Subnets[0].AvailabilityZone' --output text 2>/dev/null || true)"
+  [ -n "$AZ" ] && [ "$AZ" != "None" ] || AZ="$(aws_cli ec2 describe-availability-zones --query 'AvailabilityZones[?State==`available`]|[0].ZoneName' --output text)"
+  echo "▸ building the data volume from snapshot $SNAPSHOT_ID in $AZ (${VOL_GB}GB gp3)"
+  DATA_VOL="$(aws_cli ec2 create-volume --snapshot-id "$SNAPSHOT_ID" --availability-zone "$AZ" \
+    --volume-type gp3 --size "$VOL_GB" \
+    --tag-specifications "ResourceType=volume,Tags=[{Key=Name,Value=$NAME-data},{Key=project,Value=fiddy},{Key=fiddy:snapshot,Value=$SNAPSHOT_ID}]" \
+    --query 'VolumeId' --output text)" || { echo "create-volume failed"; exit 1; }
+  echo "  volume $DATA_VOL created; waiting for it to be available (the data is copied lazily)"
+  aws_cli ec2 wait volume-available --volume-ids "$DATA_VOL" || { echo "volume $DATA_VOL never became available"; exit 1; }
+  DATA_VOL_NODASH="$(printf '%s' "$DATA_VOL" | tr -d '-')"
+  ROOT_GB=30   # the node's own data lives on the attached volume
+fi
+
 UD="$(mktemp)"
 BRING_UP=""
-[ -n "$SNAPSHOT_ID" ] && BRING_UP='
+[ -n "$SNAP_AMI" ] && BRING_UP='
 # The pre-synced volume already holds a stopped node: start it again.
 if [ -d /home/ubuntu/snapchain ]; then
   cd /home/ubuntu/snapchain && docker compose up -d snapchain statsd >>/var/log/fiddy-boot.log 2>&1 || true
 fi'
+# A snapshot carries whatever SSH keys its source box trusted, and cloud-init on
+# the new instance also injects the launch key pair. Appending is not good
+# enough: the inherited keys must be GONE from a box someone else booted, so a
+# oneshot service that runs after cloud-init rewrites the file deterministically.
 KEY_REPLACE=""
 [ -n "$PUBKEY" ] && KEY_REPLACE="
+cat > /usr/local/sbin/fiddy-firstboot-keys.sh <<'EOS'
+#!/bin/bash
 install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
 printf '%s\n' '$PUBKEY' > /home/ubuntu/.ssh/authorized_keys
 chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
-chmod 600 /home/ubuntu/.ssh/authorized_keys"
+chmod 600 /home/ubuntu/.ssh/authorized_keys
+EOS
+chmod 750 /usr/local/sbin/fiddy-firstboot-keys.sh
+cat > /etc/systemd/system/fiddy-firstboot-keys.service <<'EOS'
+[Unit]
+Description=fiddy: replace SSH keys inherited from the pre-synced snapshot
+After=cloud-init.service cloud-config.service cloud-final.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fiddy-firstboot-keys.sh
+[Install]
+WantedBy=multi-user.target
+EOS
+systemctl enable --now fiddy-firstboot-keys.service >/dev/null 2>&1 || true"
+
+# The data-volume mode (see below): mount the volume built from the pinned
+# snapshot and make ~/snapchain point at the node data inside it. The volume was
+# copied from a root disk, so its filesystem UUID can collide with this
+# instance's own root: retune it before mounting, and mount by device path.
+VOLUME_BRINGUP=""
+if [ "$FAST_MODE" = volume ]; then
+  VOLUME_BRINGUP="
+DEV=\$(lsblk -o NAME,SERIAL -n -p 2>/dev/null | awk -v s='$DATA_VOL_NODASH' '\$2 == s {print \$1; exit}')
+[ -z \"\$DEV\" ] && [ -b /dev/xvdf ] && DEV=/dev/xvdf
+[ -z \"\$DEV\" ] && [ -b /dev/sdf ] && DEV=/dev/sdf
+if [ -n \"\$DEV\" ]; then
+  tune2fs -U random \"\$DEV\" >>/var/log/fiddy-boot.log 2>&1
+  mkdir -p /mnt/fiddy-node
+  mount \"\$DEV\" /mnt/fiddy-node >>/var/log/fiddy-boot.log 2>&1
+  echo \"\$DEV /mnt/fiddy-node ext4 defaults,nofail 0 2\" >> /etc/fstab
+  if [ -d /mnt/fiddy-node/home/ubuntu/snapchain ]; then
+    rm -rf /home/ubuntu/snapchain
+    ln -s /mnt/fiddy-node/home/ubuntu/snapchain /home/ubuntu/snapchain
+    echo 'fiddy: ~/snapchain -> the pre-synced volume' >> /var/log/fiddy-boot.log
+    cd /home/ubuntu/snapchain && docker compose up -d snapchain statsd >>/var/log/fiddy-boot.log 2>&1
+  else
+    echo 'fiddy: the volume has no node data at home/ubuntu/snapchain' >> /var/log/fiddy-boot.log
+  fi
+else
+  echo 'fiddy: could not find the attached data volume' >> /var/log/fiddy-boot.log
+fi"
+fi
 cat > "$UD" <<EOF
 #!/bin/bash
 curl -fsSL https://get.docker.com | bash
@@ -140,18 +230,21 @@ chmod +x /opt/fiddy/bin/fiddy
 ln -sf /opt/fiddy/bin/fiddy /usr/local/bin/fiddy
 $KEY_REPLACE
 $BRING_UP
+$VOLUME_BRINGUP
 EOF
 
 IID="$(aws_cli ec2 describe-instances --region "$REGION" --filters "Name=tag:Name,Values=$NAME" "Name=instance-state-name,Values=pending,running" --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null || true)"
-BDA="DeviceName=/dev/sda1,Ebs={VolumeSize=$VOL_GB,VolumeType=gp3}"
-if [ -n "$SNAPSHOT_ID" ]; then
-  BDA="DeviceName=/dev/sda1,Ebs={SnapshotId=$SNAPSHOT_ID,VolumeSize=$VOL_GB,VolumeType=gp3,DeleteOnTermination=true}"
+BDA_ARGS=("DeviceName=/dev/sda1,Ebs={VolumeSize=$ROOT_GB,VolumeType=gp3,DeleteOnTermination=true}")
+if [ -n "$DATA_VOL" ]; then
+  BDA_ARGS=("${BDA_ARGS[@]}" "DeviceName=/dev/sdf,Ebs={VolumeId=$DATA_VOL,DeleteOnTermination=true}")
 fi
+LAUNCH_AMI="$AMI"
+[ "$FAST_MODE" = ami ] && LAUNCH_AMI="$SNAP_AMI"
 if [ -z "$IID" ] || [ "$IID" = "None" ]; then
   echo "▸ launching the VM (billing starts now, ~\$285/mo until you terminate)"
-  IID="$(aws_cli ec2 run-instances --region "$REGION" --image-id "$AMI" --instance-type "$ITYPE" \
+  IID="$(aws_cli ec2 run-instances --region "$REGION" --image-id "$LAUNCH_AMI" --instance-type "$ITYPE" \
     --key-name "$NAME" --security-group-ids "$SG" --user-data "file://$UD" \
-    --block-device-mappings "$BDA" \
+    --block-device-mappings "${BDA_ARGS[@]}" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$NAME},{Key=project,Value=fiddy}]" \
     --query 'Instances[0].InstanceId' --output text)"
 else
@@ -183,13 +276,22 @@ Next — install the node (from any machine with the fiddy repo cloned):
   fiddy client up
 
 EOF2
-if [ -n "$SNAPSHOT_ID" ]; then
+if [ "$FAST_MODE" = ami ]; then
 cat <<EOF2
-This box booted from the pre-synced snapshot (as of ${SNAP_DATE:-unknown}), so
-there is no bootstrap download to wait out: the copied database loads and the
-node syncs the blocks it missed. Check it with: fiddy node status
+This box booted from the pre-synced AMI ($SNAP_AMI, as of ${SNAP_DATE:-unknown}), so there is
+no bootstrap download to wait out: the copied database loads and the node syncs
+the blocks it missed. Check it with: fiddy node status
 Prefer the full download on your own box? FIDDY_AWS_FAST_BOOTSTRAP=0 shares
 nothing, and the node bootstraps from Farcaster's public chunks instead.
+EOF2
+elif [ "$FAST_MODE" = volume ]; then
+cat <<EOF2
+This box carries the pre-synced copy on its attached volume ($DATA_VOL, built from
+snapshot $SNAPSHOT_ID, synced as of ${SNAP_DATE:-unknown}), with ~/snapchain pointing at it. First boot
+mounts it and starts the node, so there is no bootstrap download to wait out.
+Check it with: fiddy node status   (and: df -h ~/snapchain should show the new volume)
+This volume is yours now: it costs the same as any 2 TB gp3 disk (~\$164/mo), and it
+is deleted with the instance unless you switch DeleteOnTermination off.
 EOF2
 else
 cat <<EOF2

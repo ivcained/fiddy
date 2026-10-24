@@ -41,16 +41,22 @@ command -v aws >/dev/null || { echo "aws CLI required"; exit 1; }
 aws_cli sts get-caller-identity >/dev/null || { echo "aws not authenticated"; exit 1; }
 
 WORK="$(mktemp -d)"
-CREATED_INSTANCES=""; CREATED_SNAPSHOTS=""; CREATED_KEYPAIRS=""; CREATED_SGS=""
+CREATED_INSTANCES=""; CREATED_SNAPSHOTS=""; CREATED_KEYPAIRS=""; CREATED_SGS=""; CREATED_AMIS=""; CREATED_VOLUMES=""
 cleanup() {
   for i in $CREATED_INSTANCES; do
     log "terminate $i"; aws_cli ec2 terminate-instances --instance-ids "$i" >/dev/null 2>&1 || true
+  done
+  for a in $CREATED_AMIS; do
+    log "deregister $a"; aws_cli ec2 deregister-image --image-id "$a" >/dev/null 2>&1 || true
   done
   for s in $CREATED_SNAPSHOTS; do
     log "delete snapshot $s"; aws_cli ec2 delete-snapshot --snapshot-id "$s" >/dev/null 2>&1 || true
   done
   for k in $CREATED_KEYPAIRS; do
     log "delete key pair $k"; aws_cli ec2 delete-key-pair --key-name "$k" >/dev/null 2>&1 || true
+  done
+  for v in $CREATED_VOLUMES; do
+    log "delete volume $v"; aws_cli ec2 delete-volume --volume-id "$v" >/dev/null 2>&1 || true
   done
   for g in $CREATED_SGS; do
     log "delete security group $g"
@@ -112,21 +118,48 @@ case "$PERM" in
   *) bad "snapshot $SNAP is not public: $PERM" ;;
 esac
 
-# --- 2. a pin that looks exactly like the real one -------------------------
+# --- 2. the launchable artifact: an AMI from that snapshot -----------------
+# This drives the publisher's own registration path. A bare snapshot cannot be
+# launched ("snapshotId cannot be modified on root device"), which is exactly
+# why the pin carries an AMI.
+log "registering an AMI from $SNAP (scripts/node-snapshot.sh register-ami)"
+AMI_OUT="$(bash "$REPO/scripts/node-snapshot.sh" register-ami --snapshot "$SNAP" \
+  --volume-gb "$VOL_GB" --date "$(date -u +%Y-%m-%d)" 2>&1)"
+AMI_PIN="$(printf '%s\n' "$AMI_OUT" | grep -oE '^ami-[0-9a-f]+$' | tail -1)"
+if [ -n "$AMI_PIN" ]; then
+  CREATED_AMIS="$CREATED_AMIS $AMI_PIN"
+  ok "register-ami produced $AMI_PIN"
+else
+  bad "register-ami produced no AMI id"; printf '%s\n' "$AMI_OUT" | tail -5
+fi
+AMI_STATE="$(aws_cli ec2 describe-images --image-ids "$AMI_PIN" --query 'Images[0].State' --output text 2>/dev/null || echo missing)"
+AMI_PERM="$(aws_cli ec2 describe-image-attribute --image-id "$AMI_PIN" --attribute launchPermission --query 'LaunchPermissions' --output json 2>/dev/null || echo '[]')"
+[ "$AMI_STATE" = "available" ] && ok "the AMI is available" || bad "AMI state is $AMI_STATE"
+if fb_ami_usable "$AMI_PIN" --region "$REGION"; then
+  ok "the AMI is launchable by this account"
+else
+  bad "the AMI is not launchable by this account (permissions: $AMI_PERM)"
+fi
+case "$AMI_PERM" in
+  *'"Group": "all"'*|*'"Group":"all"'*) ok "the AMI is public as well" ;;
+  *) ok "the AMI is not public (account policy: imageBlockPublicAccess) - the public snapshot covers other accounts" ;;
+esac
+
+# --- 3. a pin that looks exactly like the real one -------------------------
 PIN="$WORK/fast-bootstrap.json"
 DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cat > "$PIN" <<EOF
 {
   "version": 1,
   "maxAgeDays": 14,
-  "aws": { "snapshotId": "$SNAP", "region": "$REGION", "createdAt": "$DATE",
-           "volumeGb": $VOL_GB, "volumeId": "$SRC_VOL", "sizeGb": $VOL_GB,
-           "nodeVersion": "selftest", "heights": {} }
+  "aws": { "amiId": "$AMI_PIN", "snapshotId": "$SNAP", "region": "$REGION",
+           "createdAt": "$DATE", "volumeGb": $VOL_GB, "volumeId": "$SRC_VOL",
+           "storageGb": $VOL_GB, "usedGb": 1, "nodeVersion": "selftest", "heights": {} }
 }
 EOF
 log "pin: $(fb_describe "$PIN")"
 
-# --- 3. the real deploy script, against that pin ---------------------------
+# --- 4. the real deploy script, against that pin ---------------------------
 log "running scripts/aws-deploy.sh with the pin (this is the code under test)"
 DEPLOY_CWD="$WORK/deploy"; mkdir -p "$DEPLOY_CWD"
 (
@@ -137,10 +170,10 @@ DEPLOY_CWD="$WORK/deploy"; mkdir -p "$DEPLOY_CWD"
   bash "$REPO/scripts/aws-deploy.sh"
 ) > "$WORK/deploy.log" 2>&1 || { bad "aws-deploy.sh exited non-zero"; tail -25 "$WORK/deploy.log"; }
 
-if grep -q "pre-synced state: snapshot $SNAP" "$WORK/deploy.log"; then
+if grep -q "pre-synced state: AMI $AMI_PIN" "$WORK/deploy.log"; then
   ok "the deploy script picked the pin up and said so"
 else
-  bad "the deploy script never mentioned the pinned snapshot"; sed -n '1,20p' "$WORK/deploy.log"
+  bad "the deploy script never mentioned the pinned AMI"; sed -n '1,20p' "$WORK/deploy.log"
 fi
 if grep -q "synced as of $DATE" "$WORK/deploy.log"; then
   ok "the pin's date is printed (honest age)"
@@ -163,9 +196,15 @@ else
   SRC_SNAPSHOT="$(aws_cli ec2 describe-volumes --volume-ids "$ROOT_VOL" \
     --query 'Volumes[0].SnapshotId' --output text)"
   if [ "$SRC_SNAPSHOT" = "$SNAP" ]; then
-    ok "the new root volume was created FROM $SNAP (not from the AMI)"
+    ok "the new root volume came from $SNAP (the pinned AMI's own snapshot)"
   else
     bad "root volume snapshot is $SRC_SNAPSHOT, expected $SNAP"
+  fi
+  DEP_IMAGE="$(aws_cli ec2 describe-instances --instance-ids "$DEP_IID" --query 'Reservations[0].Instances[0].ImageId' --output text)"
+  if [ "$DEP_IMAGE" = "$AMI_PIN" ]; then
+    ok "the instance launched the pinned AMI ($AMI_PIN), not a stock Ubuntu one"
+  else
+    bad "instance image is $DEP_IMAGE, expected $AMI_PIN"
   fi
 
   DEP_IP="$(aws_cli ec2 describe-instances --instance-ids "$DEP_IID" \
@@ -189,12 +228,93 @@ else
     fi
     KEYS="$("${DEP_SSH[@]}" 'wc -l < /home/ubuntu/.ssh/authorized_keys' 2>/dev/null | tr -d '[:space:]')"
     case "$KEYS" in
-      1) ok "exactly one key is authorised (the source box's key was replaced)" ;;
-      *) bad "authorized_keys holds ${KEYS:-?} keys; the first boot should replace them" ;;
+      1) ok "exactly one key is authorised (the snapshot's inherited keys were replaced)" ;;
+      *) bad "authorized_keys holds ${KEYS:-?} keys; the first boot must replace, not append" ;;
     esac
   else
     bad "the launcher's key could not reach the box"
   fi
+fi
+
+# --- 5. the same copy, for an account that cannot launch our AMI -----------
+# This is the third-party case: the snapshot is public, the AMI is not launchable
+# there (many accounts block public AMI sharing by default), so aws-deploy.sh has
+# to build a volume FROM the snapshot, attach it, and hand the node the data it
+# carries. Pinning no AMI at all is exactly how that account would see the pin.
+VOL_NAME="$NAME-vol"
+PIN_VOL="$WORK/fast-bootstrap-volume.json"
+cat > "$PIN_VOL" <<EOF
+{
+  "version": 1,
+  "maxAgeDays": 14,
+  "aws": { "amiId": "", "snapshotId": "$SNAP", "region": "$REGION",
+           "createdAt": "$DATE", "volumeGb": $VOL_GB, "volumeId": "$SRC_VOL",
+           "storageGb": $VOL_GB, "usedGb": 1, "nodeVersion": "selftest", "heights": {} }
+}
+EOF
+log "volume mode: deploying from the public snapshot alone (no AMI in the pin)"
+VOL_CWD="$WORK/deploy-vol"; mkdir -p "$VOL_CWD"
+(
+  cd "$VOL_CWD" || exit 1
+  AWS_PROFILE="${AWS_PROFILE:-}" FIDDY_AWS_REGION="$REGION" FIDDY_AWS_NAME="$VOL_NAME" \
+  FIDDY_AWS_INSTANCE_TYPE="$ITYPE" FIDDY_AWS_VOLUME_GB="$VOL_GB" \
+  FIDDY_HOME="$WORK/home-vol" FIDDY_FAST_BOOTSTRAP_PIN="$PIN_VOL" \
+  bash "$REPO/scripts/aws-deploy.sh"
+) > "$WORK/deploy-vol.log" 2>&1 || { bad "aws-deploy.sh (volume mode) exited non-zero"; tail -25 "$WORK/deploy-vol.log"; }
+CREATED_SGS="$CREATED_SGS $(aws_cli ec2 describe-security-groups --filters "Name=group-name,Values=$VOL_NAME" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"
+CREATED_KEYPAIRS="$CREATED_KEYPAIRS $VOL_NAME"
+VOL_IID="$(grep -oE -- '--instance-ids i-[0-9a-f]+' "$WORK/deploy-vol.log" | awk '{print $2}' | tail -1)"
+if grep -q "attached as a data disk" "$WORK/deploy-vol.log"; then
+  ok "volume mode: the deploy script explained the attach path"
+else
+  bad "volume mode: the deploy script did not take the snapshot-as-volume path"; sed -n '1,12p' "$WORK/deploy-vol.log"
+fi
+if [ -n "$VOL_IID" ]; then
+  CREATED_INSTANCES="$CREATED_INSTANCES $VOL_IID"
+  VOLS="$(aws_cli ec2 describe-instances --instance-ids "$VOL_IID" \
+    --query 'Reservations[0].Instances[0].BlockDeviceMappings[].{D:DeviceName,V:Ebs.VolumeId}' --output text)"
+  DATA_VOL=""
+  for v in $(aws_cli ec2 describe-instances --instance-ids "$VOL_IID" \
+      --query 'Reservations[0].Instances[0].BlockDeviceMappings[].Ebs.VolumeId' --output text); do
+    CREATED_VOLUMES="$CREATED_VOLUMES $v"
+    src="$(aws_cli ec2 describe-volumes --volume-ids "$v" --query 'Volumes[0].SnapshotId' --output text)"
+    [ "$src" = "$SNAP" ] && DATA_VOL="$v"
+  done
+  if [ -n "$DATA_VOL" ]; then
+    ok "volume mode: a volume built from $SNAP is attached ($DATA_VOL)"
+  else
+    bad "volume mode: no attached volume came from $SNAP (volumes used: $VOLS)"
+  fi
+
+  VOL_IP="$(aws_cli ec2 describe-instances --instance-ids "$VOL_IID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
+  VOL_KEY="$VOL_CWD/$VOL_NAME.pem"
+  [ -f "$VOL_KEY" ] || VOL_KEY="$WORK/home-vol/$VOL_NAME.pem"
+  VOL_SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "$VOL_KEY" "ubuntu@$VOL_IP")
+  upv=0
+  for _ in $(seq 1 24); do "${VOL_SSH[@]}" 'echo up' >/dev/null 2>&1 && { upv=1; break; }; sleep 5; done
+  if [ "$upv" = 1 ]; then
+    if "${VOL_SSH[@]}" 'cat /mnt/fiddy-node/home/ubuntu/.fiddy-selftest' 2>/dev/null | grep -q fiddy-selftest-marker; then
+      ok "volume mode: the pre-synced filesystem is mounted at /mnt/fiddy-node"
+    else
+      bad "volume mode: the mounted volume does not show the copied filesystem"
+      "${VOL_SSH[@]}" 'cat /var/log/fiddy-boot.log | tail -20' 2>/dev/null | sed 's/^/    /'
+    fi
+    if [ "$("${VOL_SSH[@]}" 'readlink -f /home/ubuntu/snapchain' 2>/dev/null)" = "/mnt/fiddy-node/home/ubuntu/snapchain" ]; then
+      ok "volume mode: ~/snapchain points at the volume (fiddy sees 2 TB of synced state)"
+    else
+      bad "volume mode: ~/snapchain does not point at the pre-synced volume ($("${VOL_SSH[@]}" 'readlink -f /home/ubuntu/snapchain' 2>/dev/null))"
+    fi
+    FREE="$("${VOL_SSH[@]}" 'df -Pk ~/snapchain 2>/dev/null | awk "NR==2 {print int(\$2/1048576)}"' 2>/dev/null | tr -d '[:space:]')"
+    if [ "${FREE:-0}" -gt 1000 ] 2>/dev/null; then
+      ok "volume mode: the node's data dir reports ${FREE} GB (the attached volume, not the 30 GB root)"
+    else
+      bad "volume mode: the data dir reports ${FREE:-?} GB, expected the attached volume"
+    fi
+  else
+    bad "volume mode: the launcher's key could not reach the box"
+  fi
+else
+  bad "volume mode: could not find the launched instance in the deploy output"
 fi
 
 printf '\n%d passed, %d failed (everything created is deleted now)\n' "$PASS" "$FAIL"

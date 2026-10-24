@@ -76,7 +76,16 @@ while [ $# -gt 0 ]; do
 done
 
 SNAP="${SNAPSHOT_ID_OVERRIDE:-$(fb_pin_get .aws.snapshotId "$PIN_FILE")}"
+AMI_PINNED="$(fb_pin_get .aws.amiId "$PIN_FILE")"
 [ -n "$SNAP" ] || { fb_log "nothing pinned in $PIN_FILE (and no --snapshot)"; exit 1; }
+# EC2 refuses to point a launch at a bare snapshot ("snapshotId cannot be
+# modified on root device"): the launchable artifact is the AMI registered from
+# it. Make that failure obvious here instead of at run-instances.
+if [ -z "$AMI_PINNED" ]; then
+  fb_log "no AMI pinned next to $SNAP: register one first"
+  fb_log "  scripts/node-snapshot.sh register-ami --snapshot $SNAP"
+  exit 1
+fi
 PIN_DATE="$(fb_pin_get .aws.createdAt "$PIN_FILE")"
 PIN_AGE="$(fb_age_days "$PIN_DATE")"
 
@@ -91,21 +100,40 @@ esac
 SNAP_STATE="$(aws_cli ec2 describe-snapshots --snapshot-ids "$SNAP" --query 'Snapshots[0].State' --output text)"
 SNAP_GB="$(aws_cli ec2 describe-snapshots --snapshot-ids "$SNAP" --query 'Snapshots[0].VolumeSize' --output text)"
 [ "$SNAP_STATE" = "completed" ] || { fb_log "snapshot state is $SNAP_STATE, not completed"; exit 1; }
-fb_dim "volume size ${SNAP_GB} GB · list cost \$$(( SNAP_GB * 5 / 100 ))/mo"
+
+# Registration and sharing propagate for a few seconds, so poll for "launchable
+# by THIS account" rather than for a state string. Note that launchable-here is
+# the honest bar: public AMI sharing is blocked by default in many accounts (and
+# on ours), while the snapshot stays public for everyone else.
+waited=0
+until fb_ami_usable "$AMI_PINNED" --region "$REGION" ${AWS_PROFILE_ARG[@]+"${AWS_PROFILE_ARG[@]}"}; do
+  if [ "$waited" -ge 180 ]; then
+    fb_log "AMI $AMI_PINNED is not launchable by this account after ${waited}s"
+    fb_log "  state: $(aws_cli ec2 describe-images --image-ids "$AMI_PINNED" --query 'Images[0].State' --output text 2>/dev/null)"
+    exit 1
+  fi
+  fb_dim "${waited}s: waiting for AMI $AMI_PINNED to become launchable"
+  sleep 10; waited=$((waited + 10))
+done
+AMI_PERM="$(aws_cli ec2 describe-image-attribute --image-id "$AMI_PINNED" --attribute launchPermission --query 'LaunchPermissions' --output json 2>/dev/null || echo '[]')"
+case "$AMI_PERM" in
+  *'"Group": "all"'*|*'"Group":"all"'*) fb_ok "AMI is available and public (any account can launch it)" ;;
+  *) fb_ok "AMI is available and launchable by this account (not public; the snapshot is what other accounts use)" ;;
+esac
+VOL_GB_MAX="$(fb_pin_get .aws.volumeGb "$PIN_FILE")"
+case "$VOL_GB_MAX" in ''|*[!0-9]*) VOL_GB_MAX=0 ;; esac
+[ "$VOL_GB_MAX" -gt "$SNAP_GB" ] 2>/dev/null && SNAP_GB="$VOL_GB_MAX"
+[ "$VOL_GB" -lt "$SNAP_GB" ] 2>/dev/null && VOL_GB="$SNAP_GB"
+fb_dim "AMI ${AMI_PINNED} (from snapshot ${SNAP}, root volume ${VOL_GB} GB)"
 
 if [ "${FB_DRY:-0}" = 1 ]; then
-  fb_log "dry run: would launch $ITYPE with /dev/sda1 from $SNAP, wait up to ${TIMEOUT_MIN}m, run fiddy node verify, then tear it down"
+  fb_log "dry run: would launch $ITYPE from AMI $AMI_PINNED (snapshot $SNAP), wait up to ${TIMEOUT_MIN}m, run fiddy node verify, then tear it down"
   exit 0
 fi
 
 MY_IP="$(curl -fsS --max-time 10 https://checkip.amazonaws.com | tr -d '[:space:]')"
 [ -n "$MY_IP" ] || { fb_log "could not read this machine's public IP"; exit 1; }
 fb_dim "your IP: $MY_IP (only this IP may reach SSH and :3381)"
-
-AMI="$(aws_cli ec2 describe-images --owners 099720109477 \
-  --filters 'Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*' 'Name=state,Values=available' \
-  --query 'sort_by(Images,&CreationDate)[-1].ImageId' --output text)"
-[ -n "$AMI" ] && [ "$AMI" != "None" ] || { fb_log "no Ubuntu 24.04 AMI in $REGION"; exit 1; }
 
 # --- key pair -------------------------------------------------------------
 TMPDIR_FB="$(mktemp -d)"
@@ -157,10 +185,10 @@ if [ -z "$SG" ] || [ "$SG" = "None" ]; then
   done
 fi
 
-fb_log "launching a fresh $ITYPE, root device from $SNAP (this is the whole point: no bootstrap download)"
-IID="$(aws_cli ec2 run-instances --image-id "$AMI" --instance-type "$ITYPE" \
+fb_log "launching a fresh $ITYPE from the pinned AMI (the whole point: no bootstrap download)"
+IID="$(aws_cli ec2 run-instances --image-id "$AMI_PINNED" --instance-type "$ITYPE" \
   --key-name "$NAME" --security-group-ids "$SG" --user-data "file://$UD" \
-  --block-device-mappings "DeviceName=/dev/sda1,Ebs={SnapshotId=$SNAP,VolumeSize=$VOL_GB,VolumeType=gp3,DeleteOnTermination=true}" \
+  --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$VOL_GB,VolumeType=gp3,DeleteOnTermination=true}" \
   --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$NAME},{Key=project,Value=fiddy},{Key=fiddy:verify,Value=snapshot}]" \
   --query 'Instances[0].InstanceId' --output text)"
 [ -n "$IID" ] && [ "$IID" != "None" ] || { fb_log "run-instances failed"; exit 1; }

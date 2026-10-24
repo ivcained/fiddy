@@ -118,7 +118,7 @@ cat > "$PIN" <<'JSON'
 {
   "version": 1,
   "maxAgeDays": 14,
-  "aws": { "snapshotId": "snap-0123456789abcdef0", "region": "us-east-1",
+  "aws": { "amiId": "ami-0123456789abcdef0", "snapshotId": "snap-0123456789abcdef0", "region": "us-east-1",
            "createdAt": "2026-10-24T02:30:00Z", "volumeGb": 2050, "sizeGb": 600,
            "nodeVersion": "0.14.3", "heights": { "maxHeight": 1234, "blockDelay": 3 } },
   "mirror": { "url": "https://mirror.example.com/fast-bootstrap/node.tar.zst",
@@ -126,6 +126,7 @@ cat > "$PIN" <<'JSON'
 }
 JSON
 check "snapshot id read"   "snap-0123456789abcdef0" "$(fb_pin_get .aws.snapshotId "$PIN")"
+check "ami id read"        "ami-0123456789abcdef0"  "$(fb_pin_get .aws.amiId "$PIN")"
 check "region read"        "us-east-1"              "$(fb_pin_get .aws.region "$PIN")"
 check "mirror url read"    "https://mirror.example.com/fast-bootstrap/node.tar.zst" "$(fb_pin_get .mirror.url "$PIN")"
 check "mirror bytes read"  "502511173632"           "$(fb_pin_get .mirror.bytes "$PIN")"

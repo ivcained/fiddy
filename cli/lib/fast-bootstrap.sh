@@ -25,6 +25,7 @@
 FB_PIN_DEFAULT_NAME="fast-bootstrap.json"
 FB_ZSTD_LEVEL="${FB_ZSTD_LEVEL:-3}"
 
+# shellcheck disable=SC2120  # the repo-root argument is optional and is passed by callers in other files
 fb_pin_path() { # fb_pin_path [repo-root] → path to the pin file
   local repo="${1:-${FIDDY_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}}"
   if [ -n "${FIDDY_FAST_BOOTSTRAP_PIN:-}" ]; then
@@ -263,4 +264,47 @@ fb_fast_path_decision() { # fb_fast_path_decision <url> <reachable 0|1> <data-pr
   [ "$free_gb" -ge "$need_gb" ] 2>/dev/null || { echo skip:no-space; return 0; }
   echo use
   return 0
+}
+
+
+# --- can THIS account actually launch the published artifacts? -------------
+# Sharing has account-level switches in front of it (AMI block public access is
+# ON by default on new accounts; snapshot block public access is a separate
+# switch), so "we published it" is not the same as "you can use it". These two
+# ask AWS instead of assuming. They take the aws argument list so callers can
+# pass --region/--profile.
+fb_ami_usable() { # fb_ami_usable <ami-id> <aws-args...> → 0 when launchable here
+  local ami="$1"; shift
+  local json owner me state
+  state="$(aws "$@" ec2 describe-images --image-ids "$ami" --query 'Images[0].State' --output text 2>/dev/null || echo missing)"
+  [ "$state" = "available" ] || return 1
+  owner="$(aws "$@" ec2 describe-images --image-ids "$ami" --query 'Images[0].OwnerId' --output text 2>/dev/null || true)"
+  me="$(aws "$@" sts get-caller-identity --query Account --output text 2>/dev/null || true)"
+  [ "$owner" = "$me" ] && return 0
+  json="$(aws "$@" ec2 describe-image-attribute --image-id "$ami" --attribute launchPermission --query 'LaunchPermissions' --output json 2>/dev/null || echo '[]')"
+  case "$json" in
+    *'"Group": "all"'*|*'"Group":"all"'*) return 0 ;;
+  esac
+  case "$json" in
+    *"\"UserId\": \"$me\""*|*"\"UserId\":\"$me\""*) return 0 ;;
+  esac
+  return 1
+}
+
+fb_snapshot_usable() { # fb_snapshot_usable <snapshot-id> <aws-args...> → 0 when a volume can be made from it
+  local snap="$1"; shift
+  local state owner me json
+  state="$(aws "$@" ec2 describe-snapshots --snapshot-ids "$snap" --query 'Snapshots[0].State' --output text 2>/dev/null || echo missing)"
+  [ "$state" = "completed" ] || return 1
+  owner="$(aws "$@" ec2 describe-snapshots --snapshot-ids "$snap" --query 'Snapshots[0].OwnerId' --output text 2>/dev/null || true)"
+  me="$(aws "$@" sts get-caller-identity --query Account --output text 2>/dev/null || true)"
+  [ "$owner" = "$me" ] && return 0
+  json="$(aws "$@" ec2 describe-snapshot-attribute --snapshot-id "$snap" --attribute createVolumePermission --query 'CreateVolumePermissions' --output json 2>/dev/null || echo '[]')"
+  case "$json" in
+    *'"Group": "all"'*|*'"Group":"all"'*) return 0 ;;
+  esac
+  case "$json" in
+    *"\"UserId\": \"$me\""*|*"\"UserId\":\"$me\""*) return 0 ;;
+  esac
+  return 1
 }

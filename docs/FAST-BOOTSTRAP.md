@@ -10,7 +10,8 @@ fiddy keeps **one** copy of a fully synced node and hands it out:
 
 | Who | What they get | How |
 | --- | --- | --- |
-| AWS | an EBS snapshot of the node's volume, made **public** | `scripts/aws-deploy.sh` / `fiddy provision --aws` create the root volume **from** it |
+| AWS, same account (or shared) | an **AMI registered from** an EBS snapshot of the node's volume | `scripts/aws-deploy.sh` / `fiddy provision --aws` launch that AMI |
+| AWS, anyone else | the **public snapshot** itself: a volume built from it | the deploy scripts attach it as a data disk, mount it, and point `~/snapchain` at it |
 | Everyone else | a `tar`+`zstd` tarball in object storage (R2 by default: no egress fees) | `fiddy node up` streams it into the data dir before installing anything |
 
 Both are pinned in `config/fast-bootstrap.json` with the date they were taken.
@@ -26,10 +27,38 @@ Both are pinned in `config/fast-bootstrap.json` with the date they were taken.
 > public chunks instead, which is exactly what happens when nothing is pinned
 > (`FIDDY_AWS_FAST_BOOTSTRAP=0` on AWS, or an empty `config/fast-bootstrap.json`).
 
+### The two AWS artifacts, and why there are two
+
+EC2 will not point a launch at a bare snapshot ("snapshotId cannot be modified on
+root device"), so a launchable copy has to be an **AMI registered from** that
+snapshot. `publish` registers one and tries to make it public, which surfaces the
+account-level reality:
+
+* `imageBlockPublicAccess` is **`block-new-sharing` by default** and cannot be
+  overridden with IAM permissions. On an account with that setting, an AMI cannot
+  be made public; `publish` says so, prints both ways forward, and carries on.
+* `snapshotBlockPublicAccess` is a **separate** switch, and snapshots are the
+  universally usable artifact: **any account can create a volume from a public
+  snapshot.** That is why the pin carries both ids, and why `aws-deploy.sh`
+  checks what *this* account can actually use (`fb_ami_usable` /
+  `fb_snapshot_usable`) instead of assuming:
+
+  | | AMI launchable here | snapshot usable here | what the box does |
+  | --- | --- | --- | --- |
+  | our account | yes | yes | boots the AMI: the DB is already on the root disk |
+  | shared account | yes (with `--share-with`) | yes | same |
+  | any other account | no | yes | creates a volume from the snapshot, attaches it, mounts it, `~/snapchain` -> the node data on it, starts the node |
+  | nothing pinned | - | - | the cold bootstrap, exactly as before |
+
+  To make the AMI itself public you have two deliberate options, both printed by
+  `publish`: share with specific accounts (`publish --share-with 123456789012`) or
+  allow public AMIs account-wide (`aws ec2 disable-image-block-public-access
+  --image-block-public-access-state unblocked`, an account-wide security change).
+
 Two practical consequences worth saying out loud:
 
-* A public EBS snapshot is readable by anyone who knows its id: launch it, and
-  you see a copy of the volume. It holds **public Farcaster data plus the
+* A public EBS snapshot is readable by anyone who knows its id: build a volume
+  from it, and you see a copy of the volume. It holds **public Farcaster data plus the
   source box's OS** — no private keys (a read node has none by design), and the
   launcher's first boot **replaces** `.ssh/authorized_keys` with your own key, so
   an instance you boot never trusts ours. Keep any node box that gets snapshotted
@@ -45,10 +74,11 @@ Two practical consequences worth saying out loud:
   "version": 1,
   "maxAgeDays": 14,
   "aws": {
-    "snapshotId": "snap-…",        "region": "us-east-1",
-    "createdAt": "2026-10-24T…Z",  "volumeGb": 2048, "volumeId": "vol-…",
-    "sizeGb": 600,                 "nodeVersion": "0.14.3",
-    "heights": { "maxHeight": 1234, "blockDelay": 3 }
+    "amiId": "ami-…",              "snapshotId": "snap-…",
+    "region": "us-east-1",         "createdAt": "2026-10-24T…Z",
+    "volumeGb": 2050,              "volumeId": "vol-…",
+    "storageGb": 600,              "usedGb": 600,
+    "nodeVersion": "0.14.3",       "heights": { "maxHeight": 1234, "blockDelay": 3 }
   },
   "mirror": {
     "url": "https://mirror.example.com/fast-bootstrap/node-2026-10-24.tar.zst",
@@ -81,10 +111,16 @@ scripts/node-snapshot.sh publish --ssh ubuntu@<node-ip> --volume vol-xxxxxxxx \
 3. creates the EBS snapshot of the volume, waits for `completed`, then
    `modify-snapshot-attribute … --group-names all` and **verifies** the
    permission actually landed.
-4. optionally streams `tar … | zstd -T0 | rclone rcat` of `.rocks` +
+4. **registers an AMI from that snapshot** (`register-image`) and makes it
+   public too. This is not decoration: EC2 refuses to point a launch at a bare
+   snapshot ("snapshotId cannot be modified on root device"), so the AMI is the
+   launchable artifact and the snapshot is what it is made of. `register-ami` is
+   exposed as its own subcommand for the case where you own the snapshot and
+   only need the AMI.
+5. optionally streams `tar … | zstd -T0 | rclone rcat` of `.rocks` +
    `.onchain-config` to object storage, computing a sha256 and reading the
    uploaded object's size back.
-5. writes the pin, then **restarts the node** so it keeps syncing.
+6. writes the pin, then **restarts the node** so it keeps syncing.
 
 Nothing in it is special to our box: point it at any synced node running the
 standard installer and it produces the same artifact. That is what makes it a
@@ -92,7 +128,7 @@ reproduction of the copy rather than a magic artifact we once made.
 
 Cost, printed by `node-snapshot.sh status`: EBS snapshot storage is
 ~$0.05/GB-month for the blocks actually used (~600 GB of a 2 TB volume), so
-~$30/month at list. The R2 mirror is ~$0.015/GB-month (~$8/month) with no
+~$30/month at list. The AMI itself adds nothing (it is its snapshot). The R2 mirror is ~$0.015/GB-month (~$8/month) with no
 egress fee, which is why non-AWS hosts use it.
 
 ## Refreshing (`scripts/fast-bootstrap-refresh.sh`)
@@ -108,6 +144,8 @@ scripts/fast-bootstrap-refresh.sh --ssh ubuntu@<node-ip> --volume vol-xxxxxxxx \
 * `--verify` runs `scripts/fast-bootstrap-verify.sh`, which **boots a fresh box
   from the new snapshot** and measures it (see below). A pin that fails
   verification should never be advertised; the refresh exits non-zero instead.
+* `prune-old --keep N` deregisters the AMIs first and then deletes the snapshots
+  they were built from (a snapshot an AMI points at cannot be deleted).
 * `--check-age` is the cheap monitor form: exit 1 when the pin is older than
   `maxAgeDays`.
 * `--cron-line` prints the weekly crontab line **and** a launchd plist.
@@ -124,9 +162,10 @@ scripts/fast-bootstrap-refresh.sh --ssh ubuntu@<node-ip> --volume vol-xxxxxxxx \
 scripts/fast-bootstrap-verify.sh            # reads the pin
 ```
 
-It: confirms the snapshot is public and `completed`; launches an instance whose
-root device is created **from** the snapshot (same AMI family, same device name);
-waits for `http://<ip>:3381/v1/info`; reports **boot → answer** in minutes and
+It: confirms the snapshot is public and `completed` and that the pinned AMI is
+public and `available` (launch permissions propagate for a few seconds after
+publication, so it retries); launches an instance from that AMI with a root
+volume at least as large as the snapshot's; waits for `http://<ip>:3381/v1/info`; reports **boot → answer** in minutes and
 seconds and the shard heights/`blockDelay` it saw; then runs the CLI's own
 acceptance checks (`fiddy node verify 3`) against that box; then tears the box
 down unless `--keep` was passed. A 15-minute run of an `m5.xlarge` costs cents;
@@ -136,7 +175,9 @@ The number it prints is the only number any surface is allowed to quote.
 
 ## What the fresh box does on first boot
 
-* **AWS**: user-data installs Docker (idempotent), replaces
+* **AWS**: the pinned AMI boots (its root device is the public snapshot, so the
+  UBUNTU family and boot mode are inherited at registration); user-data installs
+  Docker (idempotent), replaces
   `~ubuntu/.ssh/authorized_keys` with the launcher's key, and starts the node's
   containers from `~/snapchain` (the snapshot was taken with them stopped). The
   node finds a non-empty `.rocks`, so it **skips the snapshot download entirely**
