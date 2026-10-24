@@ -176,10 +176,10 @@ bin/fiddy node up</span></pre>
 
   <div class="card" id="managedCard">
     <h2><span class="n">✦</span>Zero clicks — we run it for you</h2>
-    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, $480/mo.</strong>
+    <p class="dim" style="font-size:14.5px"><strong style="color:var(--ink)">Managed by Fiddy, $320/mo.</strong>
     Pay from your Farcaster wallet; we provision and babysit a node on our cloud and hand you the endpoint.
     Cancel anytime. Your node holds no keys and only public data — casts are always signed on your device.</p>
-    <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $480 USDC &amp; deploy</button>
+    <p style="margin-top:14px"><button class="btn" id="payBtn">Pay $320 USDC &amp; deploy</button>
     <span id="payStatus" style="margin-left:12px;font-size:13.5px" class="dim"></span></p>
     <div id="subView" hidden style="margin-top:14px;font:14px/1.7 var(--mono)"></div>
     <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
@@ -277,7 +277,7 @@ async function poll(ip) {
 // Farcaster-verified wallet (fid 191554). USDC on Base, 6 decimals.
 const PAY_TO = '0xde4dcfca310b6a7ade321b6981363e2d7e0323d9';
 const USDC_BASE = 'eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const AMOUNT = '480000000'; // $480.00 USDC
+const AMOUNT = '320000000'; // $320.00 USDC
 
 $('payBtn').addEventListener('click', async () => {
   const status = $('payStatus');
@@ -332,7 +332,7 @@ async function showSubscription(fid) {
       ` ${state} · subscribed ${since} · ${d.daysLeft} days left · renews ${renews}` +
       (d.daysLeft <= 5 ? ' — time to renew' : '')));
     view.hidden = false;
-    $('payBtn').textContent = d.daysLeft <= 5 ? 'Renew — $480 USDC' : 'Renew early';
+    $('payBtn').textContent = d.daysLeft <= 5 ? 'Renew — $320 USDC' : 'Renew early';
   } catch { /* status is a nicety; never break the pay flow */ }
 }
 
