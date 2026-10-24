@@ -82,6 +82,7 @@ import { trackError } from '~/utils/errorUtils';
 
 import { AppKeyCard } from './Component/AppKeyCard';
 import { ClientFilterCard } from './Component/ClientFilterCard';
+import { LinkedAccountsCard } from './Component/LinkedAccountsCard';
 import { NodeChoiceCard } from './Component/NodeChoiceCard';
 import { NodeComposer } from './Component/NodeComposer';
 import { NodeFeed } from './Component/NodeFeed';
@@ -703,6 +704,11 @@ const SettingsNodePage = memo(() => {
             {/* The order, and what happens when the first server on it stops
                 answering: the reader's list, with the last check on each. */}
             <ProviderListCard fid={fid ?? undefined} />
+
+            {/* Which accounts are linked to this Farcaster account, read from
+                the index that mirrors that account state — the read the report
+                on this page was about. Read-only, and it says so. */}
+            <LinkedAccountsCard />
 
             {/* Node Status Card */}
             <NodeStatusCard

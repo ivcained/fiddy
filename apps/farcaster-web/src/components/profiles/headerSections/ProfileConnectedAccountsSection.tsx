@@ -1,18 +1,38 @@
 import { AnalyticsEvent } from 'farcaster-analytics';
 import { ApiUser } from 'farcaster-client-data';
-import { useConnectedAccounts, useGetXAuthLink } from 'farcaster-client-hooks';
+import { useConnectedAccounts } from 'farcaster-client-hooks';
 import React from 'react';
 
-import { ExternalLink } from '~/components/links/ExternalLink';
-import { ProfileManageConnectedAccountsModal } from '~/components/profiles/ProfileManageConnectedAccountsModal';
+import { LinkedAccountRow } from '~/components/accounts/LinkedAccountRow';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useCurrentUser } from '~/hooks/data/useCurrentUser';
-import { useExternalNavigate } from '~/hooks/navigation/useExternalNavigate';
 
 type ProfileConnectedAccountsSectionProps = {
   user: ApiUser;
 };
 
+/**
+ * The accounts linked to a Farcaster account, on the profile header.
+ *
+ * WHERE THE ROWS COME FROM, AND WHY THEY ARE READ-ONLY
+ *
+ * A linked X (or GitHub, Discord, LinkedIn) account is account state rather than
+ * a protocol message, so a read node keeps none of it: the read is answered by
+ * the index that mirrors it (`~/snapchain/providers/neynarMap`, the route
+ * classified in `~/snapchain/nodeApi/hostedRoutes`).
+ *
+ * MEASURED on the live release before this change (2026-10-24): the read was
+ * refused, and the refusal — “the accounts linked to your Farcaster account are
+ * Warpcast account state” — took the WHOLE profile page down, because this
+ * section throws inside the page's error boundary. Every row here used to be a
+ * dead control too: linking an account is the holding service's own sign-in and
+ * unlinking happens where the link is held, so pressing either did nothing at
+ * all. A control that cannot work is worse than no control, so the row says what
+ * IS linked and points at the account itself.
+ *
+ * Nothing linked is nothing shown: an empty chip reading “Connect” would be both
+ * a claim this client cannot stand behind and an action it cannot take.
+ */
 const ProfileConnectedAccountsSection: React.FC<
   ProfileConnectedAccountsSectionProps
 > = ({ user }) => {
@@ -21,7 +41,7 @@ const ProfileConnectedAccountsSection: React.FC<
   return (
     <React.Suspense fallback={<div className="h-[28px]" />}>
       {currentUserFid === user.fid ? (
-        <ConnectedAccountsSelf user={user} />
+        <ViewerConnectedAccounts />
       ) : (
         <ConnectedAccounts user={user} />
       )}
@@ -31,120 +51,48 @@ const ProfileConnectedAccountsSection: React.FC<
 
 ProfileConnectedAccountsSection.displayName = 'ProfileConnectedAccountsSection';
 
-const ConnectedAccountsSelf: React.FC<ProfileConnectedAccountsSectionProps> = ({
-  user: _,
-}) => {
+/** The viewer's own row(s): what the index mirrors for the signed-in account. */
+const ViewerConnectedAccounts: React.FC = () => {
   const { trackEvent } = useAnalytics();
-
-  const [
-    manageConnectedAccountsModalVisible,
-    setManageConnectedAccountsModalVisible,
-  ] = React.useState(false);
-
   const { data } = useConnectedAccounts();
 
-  const getXAuthLink = useGetXAuthLink();
-
-  const connectedAccounts = React.useMemo(() => {
-    return data!.pages.flatMap((o) => o.result.accounts);
-  }, [data]);
-
-  const connectedXAccount = React.useMemo(() => {
-    return connectedAccounts.find(({ platform }) => platform === 'x');
-  }, [connectedAccounts]);
-
-  const externalNavigate = useExternalNavigate();
-
-  const onConnectClick = React.useCallback(
-    async (e: React.SyntheticEvent) => {
-      e.preventDefault();
-
-      trackEvent(AnalyticsEvent.SendUserToXToAuth, {
-        via: 'user profile',
-      });
-
-      const { result } = await getXAuthLink();
-
-      externalNavigate({ to: result.url, openInNewTab: true });
-    },
-    [getXAuthLink, externalNavigate, trackEvent],
+  const connectedAccounts = React.useMemo(
+    () => data!.pages.flatMap((o) => o.result.accounts),
+    [data],
   );
 
-  const onAlreadyConnectedClick = React.useCallback(
-    (e: React.SyntheticEvent) => {
-      e.preventDefault();
-
-      if (typeof connectedXAccount === 'undefined') {
-        return;
-      }
-
-      setManageConnectedAccountsModalVisible(true);
-    },
-    [connectedXAccount],
-  );
-
-  const content = React.useMemo(() => {
-    if (typeof connectedXAccount === 'undefined') {
-      return (
-        <div
-          className="flex w-max flex-row items-center space-x-1 rounded-full border px-[6px] py-[3px] text-sm text-muted bg-elevated border-default hover:cursor-pointer"
-          onClick={onConnectClick}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 14 14"
-            fill="none"
-            className="text-muted"
-          >
-            <path
-              d="M10.6489 1.33008H12.5761L8.34476 6.14791L13.2883 12.6834H9.40887L6.37154 8.71184L2.89432 12.6834H0.967186L5.44987 7.53042L0.71582 1.33008H4.69158L7.43565 4.95812L10.6489 1.33008ZM9.97444 11.5523H11.0427L4.1302 2.41933H2.9823L9.97444 11.5523Z"
-              className="fill-current"
-            />
-          </svg>
-          <div>Connect</div>
-        </div>
-      );
-    }
-
-    return (
-      <div
-        className="flex w-max flex-row items-center space-x-1 rounded-full px-[6px] py-[3px] text-sm text-muted bg-elevated hover:cursor-pointer"
-        onClick={onAlreadyConnectedClick}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 14 14"
-          fill="none"
-          className="text-muted"
-        >
-          <path
-            d="M10.6489 1.33008H12.5761L8.34476 6.14791L13.2883 12.6834H9.40887L6.37154 8.71184L2.89432 12.6834H0.967186L5.44987 7.53042L0.71582 1.33008H4.69158L7.43565 4.95812L10.6489 1.33008ZM9.97444 11.5523H11.0427L4.1302 2.41933H2.9823L9.97444 11.5523Z"
-            className="fill-current"
-          />
-        </svg>
-        <div>{connectedXAccount.username}</div>
-      </div>
-    );
-  }, [connectedXAccount, onAlreadyConnectedClick, onConnectClick]);
+  if (connectedAccounts.length === 0) {
+    return null;
+  }
 
   return (
     <>
-      {content}
-      {manageConnectedAccountsModalVisible && (
-        <ProfileManageConnectedAccountsModal
-          onClose={() => {
-            setManageConnectedAccountsModalVisible(false);
+      {connectedAccounts.map((account) => (
+        <LinkedAccountRow
+          key={account.connectedAccountId}
+          account={account}
+          onPress={() => {
+            // The fork's own event, and only for the platform it is about.
+            if (account.platform === 'x') {
+              trackEvent(AnalyticsEvent.PressUserProfileXAccount, {});
+            }
           }}
         />
-      )}
+      ))}
     </>
   );
 };
 
-ConnectedAccountsSelf.displayName = 'ConnectedAccountsSelf';
+ViewerConnectedAccounts.displayName = 'ViewerConnectedAccounts';
 
+/**
+ * Someone else's row(s): the links the profile read itself carried.
+ *
+ * This is the fork's own field (`ApiUser.connectedAccounts`), which the index
+ * fills for the accounts it mirrors (`apiUserFromNeynar`), so what a reader sees
+ * on another account is what the index says about THAT account rather than a row
+ * derived from the viewer's own.
+ */
 const ConnectedAccounts: React.FC<ProfileConnectedAccountsSectionProps> = ({
   user,
 }) => {
@@ -154,48 +102,25 @@ const ConnectedAccounts: React.FC<ProfileConnectedAccountsSectionProps> = ({
     return user.connectedAccounts || [];
   }, [user.connectedAccounts]);
 
-  const connectedXAccount = React.useMemo(() => {
-    return connectedAccounts.find(({ platform }) => platform === 'x');
-  }, [connectedAccounts]);
+  if (connectedAccounts.length === 0) {
+    return null;
+  }
 
-  const onAlreadyConnectedClick = React.useCallback(() => {
-    if (typeof connectedXAccount === 'undefined') {
-      return;
-    }
-
-    trackEvent(AnalyticsEvent.PressUserProfileXAccount, {});
-  }, [connectedXAccount, trackEvent]);
-
-  const content = React.useMemo(() => {
-    if (typeof connectedXAccount === 'undefined') {
-      return null;
-    }
-
-    return (
-      <ExternalLink
-        className="flex w-max select-none flex-row items-center space-x-1 py-[3px] text-sm text-muted hover:cursor-pointer"
-        onClick={onAlreadyConnectedClick}
-        href={`https://x.com/${connectedXAccount.username}`}
-        title={`https://x.com/${connectedXAccount.username}`}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 14 14"
-          fill="none"
-          className="text-muted"
-        >
-          <path
-            d="M10.6489 1.33008H12.5761L8.34476 6.14791L13.2883 12.6834H9.40887L6.37154 8.71184L2.89432 12.6834H0.967186L5.44987 7.53042L0.71582 1.33008H4.69158L7.43565 4.95812L10.6489 1.33008ZM9.97444 11.5523H11.0427L4.1302 2.41933H2.9823L9.97444 11.5523Z"
-            className="fill-current"
-          />
-        </svg>
-        <div>{connectedXAccount.username}</div>
-      </ExternalLink>
-    );
-  }, [connectedXAccount, onAlreadyConnectedClick]);
-
-  return content;
+  return (
+    <>
+      {connectedAccounts.map((account) => (
+        <LinkedAccountRow
+          key={account.connectedAccountId}
+          account={account}
+          onPress={() => {
+            if (account.platform === 'x') {
+              trackEvent(AnalyticsEvent.PressUserProfileXAccount, {});
+            }
+          }}
+        />
+      ))}
+    </>
+  );
 };
 
 ConnectedAccounts.displayName = 'ConnectedAccounts';

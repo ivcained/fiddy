@@ -275,6 +275,9 @@ export const NEYNAR_READ_PATHS: readonly string[] = [
   '/v2/profile-casts',
   '/v2/thread-casts',
   '/v2/verifications',
+  // The accounts linked to a Farcaster account: an index mirrors that account
+  // state, and a read node keeps no link to an X, GitHub or Discord account.
+  '/v2/connected-accounts',
   // The app catalog: Neynar publishes an index of the apps registered with it,
   // which is where the mini-app surfaces read from.
   '/v1/top-mini-apps',
