@@ -173,4 +173,31 @@ describe('providerPillView', () => {
     );
     expect(view.title).toContain('6.5s');
   });
+
+  it('carries the measured freshness sentence when a node is hours behind', () => {
+    // MEASURED (2026-10-24 16:27 UTC, https://haatz.quilibrium.com): the node
+    // answered while shards 1 and 2 were 4h 39m and 13m 15s behind. That
+    // sentence is what the reader gets when their feed is served from it, and
+    // the pill has to hold it verbatim — the number comes from the node.
+    const relay = publicNodeProvider('https://haatz.quilibrium.com');
+    const view = providerPillView(
+      snapshot({
+        order: [relay, farcasterPublicProvider()],
+        activeId: relay.id,
+        explanation:
+          'Our public node stopped keeping up with the network — but nothing else on your list is answering either, so nothing moved.',
+        health: {
+          [relay.id]: health(
+            relay.id,
+            'stale',
+            'It answered, but the newest blocks on shards 1 and 2 are 4h 39m and 13m 15s old.',
+          ),
+        },
+      }),
+    );
+    expect(view.title).toContain(
+      'It answered, but the newest blocks on shards 1 and 2 are 4h 39m and 13m 15s old.',
+    );
+    expect(view.title).toContain('is still the one answering');
+  });
 });

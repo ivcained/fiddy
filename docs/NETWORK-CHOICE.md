@@ -245,6 +245,20 @@ of theirs running, and `--network snapchain` (default) points it at their node.
   apart, 2026-10-24 16:27 UTC, which printed `STATUS stale` and *"It answered, but
   the newest blocks on shards 1 and 2 are 4h 39m and 13m 15s old."* — the reads are
   in [evidence/client-freshness-2026-10-24.json](evidence/client-freshness-2026-10-24.json).
+  The two sentences also reach the screen, proven twice:
+  - in the DOM, by `apps/farcaster-web/src/snapchain/providers/__tests__/pill.test.ts`
+    (the pill's hover title) and
+    `apps/farcaster-web/src/pages/settingsNode/Component/ProviderListCard.test.tsx`
+    (the row a reader opens to find out why their feed is quiet), both holding the
+    measured sentence verbatim;
+  - in a real browser, by `apps/farcaster-web/scripts/verify-freshness-copy.mjs`
+    (recipe in its header): a signed-in client with the public node's `/v1/info`
+    answered from the 16:27 UTC body prints a row reading `1. Our public node reads
+    + posts **behind the network** in use … It answered, but the newest blocks on
+    shards 1 and 2 are 4h 39m and 13m 15s old.` — **4/4** checks, and **3/3** with
+    the healthy body, where the same row says the node is answering normally and
+    never calls it behind. Machine output:
+    [evidence/client-freshness-2026-10-24-browser.txt](evidence/client-freshness-2026-10-24-browser.txt).
 - CLI, after the corrections: `fiddy node up --network hypersnap` prints the
   record above (registry version and set count, the three missing rotations, the
   issue's state, how to read the public node's freshness numbers) and exits 1
