@@ -68,10 +68,11 @@ FIDDY_AWS_SG_ID=sg-0smoke00000001
 FIDDY_AWS_KEY_NAME=fiddy-node
 FIDDY_AWS_IP=203.0.113.7
 FIDDY_AWS_REGION=us-east-1
-FIDDY_SSH_KEY=${join(root, 'fiddy-node.pem')}
-FIDDY_NODE_HTTP=http://203.0.113.7:3381
 FACTS
-echo "stub fiddy: \$*"
+# The real CLI records the key path IT wrote, which is derived from FIDDY_HOME —
+# so a job home of "undefined/.fiddy/…" shows up here as a relative path.
+echo "FIDDY_SSH_KEY=\${FIDDY_HOME}/fiddy-node.pem" >> "\${FIDDY_HOME}/config"
+echo "stub fiddy: \$* (job home \$FIDDY_HOME)"
 `
   const terminal = `#!/usr/bin/env bash
 set -euo pipefail
@@ -81,7 +82,11 @@ echo 'FIDDY_TERMINAL_JSON {"fid":${FID},"terminalUrl":"https://fiddy.fun/term/de
   await writeFile(join(repo, 'bin', 'fiddy'), cli)
   await writeFile(join(repo, 'scripts', 'install-node-terminal.sh'), terminal)
   await chmod(join(repo, 'bin', 'fiddy'), 0o755)
-  await chmod(join(repo, 'scripts', 'install-node-terminal.sh'), 0o755)
+  // Deliberately NOT executable: the deployed checkout's mode bit is not the
+  // agent's to control (it was committed 644 once and the terminal install died
+  // with EACCES after the node was already running and billing). The agent runs
+  // repo scripts through bash, so a 644 script must still install.
+  await chmod(join(repo, 'scripts', 'install-node-terminal.sh'), 0o644)
 
   const port = await freePort()
   const child = spawn(process.execPath, [SERVER], {
@@ -158,7 +163,10 @@ echo 'FIDDY_TERMINAL_JSON {"fid":${FID},"terminalUrl":"https://fiddy.fun/term/de
     ok('the provision step really ran', (job?.logTail ?? '').includes('stub fiddy: provision --aws'))
     ok('the node-up step really ran', (job?.logTail ?? '').includes('stub fiddy: node up'))
     ok('the terminal install is chained behind the provision', (job?.logTail ?? '').includes('stub terminal install: --fid'))
+    ok('a 644 script still installs (the agent runs repo scripts through bash)', (job?.logTail ?? '').includes('stub terminal install: --fid'), 'the install never ran: EACCES?')
     ok('the instance id is read back from facts, not scraped', job?.facts?.instanceId === 'i-0smoke0000000001', JSON.stringify(job?.facts))
+    ok('the job home comes from HOME, not the string "undefined"', (job?.logTail ?? '').includes(`job home ${home}/.fiddy/jobs/`), `keyPath ${job?.facts?.keyPath}`)
+    ok('the node key path is absolute', typeof job?.facts?.keyPath === 'string' && job.facts.keyPath.startsWith('/'), String(job?.facts?.keyPath))
     ok('the terminal verdict is parsed', job?.terminal?.terminalUrl === 'https://fiddy.fun/term/deadbeef/', JSON.stringify(job?.terminal))
   } finally {
     child.kill('SIGKILL')

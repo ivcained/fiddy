@@ -24,10 +24,17 @@ import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 
 const PORT = process.env.PORT || 3225
 const TOKEN = process.env.DEPLOY_AGENT_TOKEN
 const REPO = process.env.FIDDY_REPO || new URL('../..', import.meta.url).pathname
+// A systemd unit need not set HOME (ours is EnvironmentFile-only), and a job's
+// home is derived from it — unset, every job wrote its config and its node key
+// to a literal `undefined/.fiddy/jobs/<id>/` relative to the service's cwd.
+// A key that only resolves from one cwd is a key you lose; fall back to the
+// passwd database rather than trusting the environment to be complete.
+const HOME = process.env.HOME || homedir()
 const JOBS = new Map()
 const MAX_LOG = 64 * 1024
 // Two at a time: a provision spends real money on AWS, so a third parallel run
@@ -98,10 +105,10 @@ function runSteps(job, steps, env) {
   // `'running'(async () => {…})()` — and every job dies at birth with
   // `TypeError: "running" is not a function`.
   void (async () => {
-    for (const [cmd, args] of steps) {
-      job.step = `${cmd.split('/').pop()} ${args.join(' ')}`.trim()
+    for (const step of steps) {
+      job.step = step.label
       const code = await new Promise((resolve) => {
-        const p = spawn(cmd, args, { env })
+        const p = spawn(step.cmd, step.args, { env })
         p.stdout.on('data', (d) => job.append(d))
         p.stderr.on('data', (d) => job.append(d))
         p.on('error', (e) => { job.append(`\nspawn error: ${e.message}\n`); resolve(1) })
@@ -121,12 +128,29 @@ function runSteps(job, steps, env) {
   })
 }
 
+// A repo script is run through bash, never as a bare executable: the mode bit
+// is not something the agent controls (committed 644 once, the terminal install
+// died with EACCES *after* the node it belonged to was already running and
+// billing). bash does not care about the bit, and the label still names the real
+// script so a job's log reads the same as ever.
+function repoScript(script, args) {
+  return {
+    cmd: 'bash',
+    args: [`${REPO}/${script}`, ...args],
+    label: `${script.split('/').pop()} ${args.join(' ')}`.trim(),
+  }
+}
+
+function cli(args) {
+  return { cmd: `${REPO}/bin/fiddy`, args, label: `fiddy ${args.join(' ')}`.trim() }
+}
+
 // kind=aws: create our instance, install the node on it, then hand the miniapp a
 // terminal. `fiddy node up` returns once the install is running and the API is
 // either answering or honestly reported as still bootstrapping — it must not
 // hold the job open for the multi-hour snapshot download.
 function startProvision(job, body) {
-  const env = { ...process.env, FIDDY_HOME: `${process.env.HOME}/.fiddy/jobs/${job.id}` }
+  const env = { ...process.env, HOME, FIDDY_HOME: `${HOME}/.fiddy/jobs/${job.id}` }
   const steps = []
   if (body.kind === 'aws') {
     // Region/type/size come from the agent's own environment (operator config),
@@ -134,18 +158,18 @@ function startProvision(job, body) {
     for (const key of ['FIDDY_AWS_REGION', 'FIDDY_AWS_INSTANCE_TYPE', 'FIDDY_AWS_VOLUME_GB']) {
       if (process.env[key]) env[key] = process.env[key]
     }
-    steps.push([`${REPO}/bin/fiddy`, ['provision', '--aws']])
+    steps.push(cli(['provision', '--aws']))
   } else {
-    steps.push([`${REPO}/bin/fiddy`, ['provision', '--ssh', body.sshTarget]])
+    steps.push(cli(['provision', '--ssh', body.sshTarget]))
   }
-  steps.push([`${REPO}/bin/fiddy`, ['node', 'up']])
+  steps.push(cli(['node', 'up']))
   runSteps(job, steps, env)
 }
 
 // The terminal install is a second process because it needs the target and key
 // path the provision steps just recorded.
 async function startTerminal(job, body) {
-  const env = { ...process.env, FIDDY_HOME: `${process.env.HOME}/.fiddy/jobs/${job.id}` }
+  const env = { ...process.env, HOME, FIDDY_HOME: `${HOME}/.fiddy/jobs/${job.id}` }
   const facts = pick(await readFacts(env.FIDDY_HOME))
   job.facts = { ...job.facts, ...facts }
   if (!facts.target || !facts.keyPath) {
@@ -153,15 +177,15 @@ async function startTerminal(job, body) {
     job.append('\n✗ terminal requested but the provision recorded no target/key\n')
     return
   }
-  runSteps(job, [[`${REPO}/scripts/install-node-terminal.sh`, [
+  runSteps(job, [repoScript('scripts/install-node-terminal.sh', [
     '--fid', String(body.fid), '--token', body.token,
     '--ssh', facts.target, '--key', facts.keyPath, '--json',
-  ]]], env)
+  ])], env)
 }
 
 function startTeardown(job, body) {
   const region = body.region || process.env.FIDDY_AWS_REGION || 'us-east-1'
-  runSteps(job, [[`${REPO}/scripts/aws-teardown.sh`, [body.instanceId, '--region', region, '--json']]], { ...process.env })
+  runSteps(job, [repoScript('scripts/aws-teardown.sh', [body.instanceId, '--region', region, '--json'])], { ...process.env, HOME })
 }
 
 function jobsPayload(job) {
