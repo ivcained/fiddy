@@ -1,19 +1,27 @@
 /**
- * Phone chrome: the Fiddy four, on a bottom tab bar.
+ * Phone chrome: the Fiddy five, on a bottom tab bar.
  *
  * The design's mobile variant moves the agent out of the nav and into a tab,
  * and keeps the node pill up in the top bar (MobileHeader already carries it).
  * Everything the fork exposed elsewhere stays reachable through MobileHeader's
- * menu — this bar is the four surfaces the client is actually about.
+ * menu — this bar is the surfaces the client is actually about.
+ *
+ * The fifth one is YOU: an avatar, opening the account menu. It is not a fourth
+ * destination — it is the door the card "sign out is unfindable" asked for, so
+ * that the way out of the account is one tap from any surface on a phone
+ * (Settings keeps its own entry, and its own item in this bar, untouched).
  */
 
 import { GearIcon } from '@primer/octicons-react';
 import { Bot, HomeIcon, Wallet } from 'lucide-react';
-import { FC, memo, ReactNode } from 'react';
+import { FC, memo, ReactNode, useState } from 'react';
 // eslint-disable-next-line no-restricted-imports
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 
+import { AvatarImage } from '~/components/avatar/AvatarImage';
+import { FiddyAccountMenu } from '~/components/fiddy/FiddyAccountMenu';
 import { routes } from '~/constants/routes';
+import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import { hydratePath } from '~/utils/navUtils';
 
 type Tab = {
@@ -24,6 +32,12 @@ type Tab = {
 
 const FiddyMobileTabBar: FC = memo(() => {
   const location = useLocation();
+  const currentUser = useCurrentUser();
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+
+  const closeAccountMenu = () => {
+    setIsAccountMenuOpen(false);
+  };
 
   const tabs: Tab[] = [
     {
@@ -87,6 +101,30 @@ const FiddyMobileTabBar: FC = memo(() => {
           </RouterLink>
         );
       })}
+      <button
+        type="button"
+        className="fiddy-tab"
+        data-fiddy="mobile-account-tab"
+        aria-haspopup="menu"
+        aria-expanded={isAccountMenuOpen}
+        aria-label="Your account"
+        title="You"
+        onClick={() => {
+          setIsAccountMenuOpen((prev) => !prev);
+        }}
+      >
+        <AvatarImage
+          imgUrl={currentUser.pfp?.url}
+          imgAlt={currentUser.displayName || currentUser.username || ''}
+          size="sm1"
+        />
+        <span>You</span>
+      </button>
+      <FiddyAccountMenu
+        className="fiddy-account-menu-tabbar"
+        isOpen={isAccountMenuOpen}
+        onClose={closeAccountMenu}
+      />
     </nav>
   );
 });

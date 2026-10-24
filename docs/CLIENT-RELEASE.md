@@ -185,6 +185,34 @@ and its `$1.00` floor, and that **no send is offered** while the balance route
 refuses — the signed-out refusal step 8 cannot see. `52/52` at 390px and 1440px
 is the green state.
 
+**The sign-out surfaces** are the same kind of gap in a different shape: a
+signed-in shell cannot be produced from outside this repository — a Farcaster
+session needs the person's own phone, and a worker may not mint one — so this
+one is gated on a dev server, at the revision being released and before the
+cut-over:
+
+```
+HTTPS=true VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
+  PROBE_VITE_CACHE_DIR=/tmp/<name> \
+  npx vite --config scripts/probe.vite.config.mjs --port <free port> --strictPort
+SIGN_OUT_SERVER=https://localhost:<port> node scripts/verify-sign-out.mjs
+```
+
+It signs in through the stubbed SIWF relay (the same real-SIWE fixture
+`verify-account-switching.mjs` uses, said again at the one FID it names), and
+then, on every signed-in surface — home, agent, wallet, settings, your own setup
+— at 390px and 1440px, it opens the account menu the way a person does (a real
+mouse click on the avatar, at phone width on the "You" tab of the bottom bar),
+and asserts that **"Sign out" is on screen without scrolling** and fully inside
+the viewport, that pressing it **asks first** and that cancelling the dialog
+signs nobody out. On the last surface it signs out for real and asserts the
+landing is on screen at `/` with the session gone. `98/98` in ~2.5 minutes is
+the green state. What the release is then responsible for is smaller and is
+checked after the cut-over: the revision in `/release.json`, and the strings
+that make these surfaces exist inside the **served** bundle
+(`account-menu-sign-out`, `fiddy-account-menu-tabbar`) — in the `.js`, never in
+the `.js.map` beside it.
+
 nginx is **not** touched by the script. The client needs four locations that
 exist now and are checked in step 6:
 

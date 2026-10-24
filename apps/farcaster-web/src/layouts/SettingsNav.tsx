@@ -135,14 +135,14 @@ const SettingsNav: FC = memo(() => {
         to="#"
         params={{}}
         searchParams={{}}
-        title="Log out"
+        title="Sign out"
         onClick={(e) => {
           e.preventDefault();
           setIsLogoutModalVisible(true);
         }}
         icon={<SignOutIcon />}
       >
-        <SettingsNavLinkLabel>Log out</SettingsNavLinkLabel>
+        <SettingsNavLinkLabel>Sign out</SettingsNavLinkLabel>
       </SettingsNavLink>
       {isThemeSettingsVisible && (
         <ThemeSettings
