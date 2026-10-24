@@ -46,7 +46,14 @@ import {
   type NodeSigner,
   revokeAppKey,
 } from 'farcaster-node-client';
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { mnemonicToAccount } from 'viem/accounts';
 
 import { BorderedMainContent } from '~/components/BorderedMainContent';
@@ -69,6 +76,12 @@ import {
   loadActiveClientPreferences,
 } from '~/snapchain/clientFilterPreferences';
 import {
+  networkName,
+  networkOffers,
+  type NetworkRoute,
+  readNetwork,
+} from '~/snapchain/networks';
+import {
   chooseNode,
   type NodeChoice,
   resetNodeChoice,
@@ -87,6 +100,7 @@ import { trackError } from '~/utils/errorUtils';
 
 import { AppKeyCard } from './Component/AppKeyCard';
 import { ClientFilterCard } from './Component/ClientFilterCard';
+import { NetworkChoiceCard } from './Component/NetworkChoiceCard';
 import { NodeChoiceCard } from './Component/NodeChoiceCard';
 import { NodeComposer } from './Component/NodeComposer';
 import { NodeFeed } from './Component/NodeFeed';
@@ -646,6 +660,36 @@ const SettingsNodePage = memo(() => {
     [fid],
   );
 
+  // Which NETWORK this client is reading — a different question from which
+  // Which NETWORK this client is reading — a different question from which
+  // server, and one the client must answer from provenance, never by guessing
+  // (a node carries no network name in /v1/info; see ~/snapchain/networks).
+  const networkReading = useMemo(
+    () =>
+      readNetwork({
+        choiceUrl: nodeChoice?.url ?? null,
+        choiceKind: nodeChoice?.kind ?? null,
+      }),
+    [nodeChoice],
+  );
+
+  // And both networks with the address each would be read from here, so the
+  // chooser offers only what this client can actually read.
+  const networkChoices = useMemo(
+    () => networkOffers({ choiceUrl: nodeChoice?.url ?? null }),
+    [nodeChoice],
+  );
+
+  // Picking a network is picking its server: the same stored choice the card
+  // above writes, which is what makes the switch real rather than a label.
+  const handleChooseNetwork = useCallback(
+    (route: NetworkRoute) =>
+      fid
+        ? chooseNode(fid, { kind: route.kind, url: route.url })
+        : Promise.resolve(),
+    [fid],
+  );
+
   // Name (or un-name) another client. A label the reader types wins over what
   // the app calls itself, and saving it through the store is what makes every
   // cast from that app read the new name on the next page.
@@ -720,6 +764,12 @@ const SettingsNodePage = memo(() => {
             {/* Where Fiddy reads from: the reader's choice, and the first
                 thing on this screen because everything below it reads through
                 whichever server it names. */}
+            <NetworkChoiceCard
+              reading={networkReading}
+              offers={networkChoices}
+              onChooseRoute={handleChooseNetwork}
+            />
+
             <NodeChoiceCard
               choice={nodeChoice}
               onChoose={handleChooseNode}
@@ -735,6 +785,7 @@ const SettingsNodePage = memo(() => {
               health={nodeHealth}
               loading={healthLoading}
               onRefresh={refreshHealth}
+              network={networkName(networkReading.network)}
             />
 
             {/* Posting key: the primary way to let Fiddy post for you — one

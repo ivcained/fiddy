@@ -22,6 +22,7 @@
  *     and quietly failing later.
  */
 
+import type { FiddyNetwork } from './networks';
 import { isNodeExplicitlyConfigured, resolveNodeBaseUrl } from './nodeEnv';
 import {
   clearNodeChoice,
@@ -49,11 +50,21 @@ export const PUBLIC_READ_NODES: readonly {
   url: string;
   name: string;
   note: string;
+  /**
+   * Which network this address speaks — measured when the node was added, and
+   * the only way this client can name a network without being told: a node's
+   * `/v1/info` carries no network name (see `~/snapchain/networks`).
+   */
+  network: FiddyNetwork;
 }[] = [
   {
     url: 'https://haatz.quilibrium.com',
-    name: 'The public Fiddy reads from today',
+    name: 'The public Hypersnap node',
     note: 'Open to everyone, no account, answers in about a second from here.',
+    // Hypersnap's own documentation names this host as their public node, and
+    // the reader-facing picker says which network it is rather than leaving the
+    // address to look like a Farcaster one.
+    network: 'hypersnap',
   },
 ];
 
