@@ -273,7 +273,8 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   <div class="kicker">Command 2</div>
   <h2><span class="n">2</span>fiddy client up</h2>
   <p class="dim">Boots the Fiddy web client pointed at <em>your</em> node for reads and writes. If your node's API
-  is locked to your IP (the AWS default), add <code class="inline">--tunnel</code> and the CLI opens an SSH tunnel for the session.</p>
+  is locked to your IP (the AWS default), add <code class="inline">--tunnel</code> and the CLI opens an SSH tunnel for the session.
+  Nothing to install first: the CLI brings Docker, Node 22 and pnpm itself when they're missing.</p>
   <pre><span class="k">fiddy client up --tunnel</span></pre>
 
   <p class="dim" style="margin-top:20px"><strong>Signing in = giving the client its own key.</strong> Import the seed phrase of an
