@@ -210,6 +210,20 @@ describe('the key this instance mints', () => {
     expect(bare.appFid).toBeNull();
     expect(bare.appKeyRaw).toBeNull();
     expect(bare.clientApi).toBe('https://api.farcaster.xyz');
+    // With no account of its own, what it asks instead: the project's signer by
+    // default, anything the operator names, or nobody at all (an empty value is
+    // a deliberate refusal, not an unset one).
+    expect(bare.remoteSigner).toBe(
+      'https://fiddy.fun/api/fiddy/signer-request',
+    );
+    expect(
+      readInstanceConfig({ FIDDY_SIGNER_REQUEST_URL: '' }).remoteSigner,
+    ).toBeNull();
+    expect(
+      readInstanceConfig({
+        FIDDY_SIGNER_REQUEST_URL: 'http://127.0.0.1:5199/sign/',
+      }).remoteSigner,
+    ).toBe('http://127.0.0.1:5199/sign');
   });
 });
 
@@ -237,6 +251,118 @@ describe('the instance connect service', () => {
     const read = await service.read({ handle: undefined });
     expect(read.status).toBe(200);
     expect(read.body.state).toBe('none');
+  });
+
+  it('borrows the project’s signature when it has no account of its own, unchanged', async () => {
+    const api = createClientApiStub();
+    const askerFid = 3356372;
+    const borrowed = {
+      requestFid: askerFid,
+      // A signature this test does not have to produce: what matters is that it
+      // crosses untouched and is what Farcaster is told.
+      signature: `0x${'ab'.repeat(65)}`,
+      deadline: 1_800_000_060,
+    };
+    const asked: { key?: string }[] = [];
+    const signerUrl = 'https://fiddy.fun/api/fiddy/signer-request';
+    const logs: string[] = [];
+
+    const fetchImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === signerUrl) {
+        asked.push(JSON.parse(String(init?.body ?? '{}')) as { key?: string });
+        return new Response(JSON.stringify({ ok: true, ...borrowed }), {
+          status: 200,
+        });
+      }
+      return api.fetchImpl(input as string, init);
+    }) as unknown as typeof fetch;
+
+    const service = createInstanceConnectService({
+      config: {
+        appFid: null,
+        appKeyRaw: null,
+        clientApi: 'https://api.farcaster.xyz',
+        nodeUrl: null,
+        remoteSigner: signerUrl,
+      },
+      store: createMemoryStore(),
+      fetchImpl,
+      log: (message: string) => logs.push(message),
+    });
+
+    const begun = await service.begin({ handle: undefined, host: HOST });
+    expect(begun.status).toBe(200);
+    expect(begun.body.state).toBe('waiting');
+    expect(begun.body.postingKey).toBeNull();
+
+    // It asked for a signature over the key IT minted, and for nothing else.
+    expect(asked).toHaveLength(1);
+    expect(api.created).toHaveLength(1);
+    expect(asked[0]?.key).toBe((api.created[0] as { key?: string }).key);
+
+    // What Farcaster is told is the borrowed signature and the borrowed deadline,
+    // verbatim: the request Farcaster checks is the one that was signed.
+    expect(api.created[0]).toMatchObject({
+      requestFid: askerFid,
+      signature: borrowed.signature,
+      deadline: borrowed.deadline,
+    });
+    // And the log says who asked, so an operator reading it is not misled.
+    expect(
+      logs.some(
+        (line) => line.includes('asked Farcaster') && line.includes(signerUrl),
+      ),
+    ).toBe(true);
+  });
+
+  it('reports the project’s refusal rather than leaving a dead button', async () => {
+    const api = createClientApiStub();
+    const signerUrl = 'https://fiddy.fun/api/fiddy/signer-request';
+    const refusal =
+      'This deployment has no Farcaster account of its own to ask with (missing FIDDY_CONNECT_APP_FID).';
+
+    const fetchImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === signerUrl) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            code: 'SIGNER_REQUEST_NOT_CONFIGURED',
+            message: refusal,
+          }),
+          {
+            status: 503,
+          },
+        );
+      }
+      return api.fetchImpl(input as string, init);
+    }) as unknown as typeof fetch;
+
+    const service = createInstanceConnectService({
+      config: {
+        appFid: null,
+        appKeyRaw: null,
+        clientApi: 'https://api.farcaster.xyz',
+        nodeUrl: null,
+        remoteSigner: signerUrl,
+      },
+      store: createMemoryStore(),
+      fetchImpl,
+    });
+
+    const begun = await service.begin({ handle: undefined, host: HOST });
+    expect(begun.status).toBe(502);
+    expect(begun.body.code).toBe('CONNECT_SIGNER_REFUSED');
+    expect(String(begun.body.message)).toContain(refusal);
+    // Nothing was asked of Farcaster, so there is no half-made request anywhere.
+    expect(api.created).toHaveLength(0);
   });
 
   it('asks Farcaster with a request signed by the instance’s own account', async () => {

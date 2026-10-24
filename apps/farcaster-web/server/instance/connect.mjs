@@ -45,9 +45,9 @@
  *   an account other than the one the request was bound to.
  * - It never stores a recovery phrase or a custody key. The one it is configured
  *   with is the instance's own app account, read from the environment.
- * - It never pretends an unconfigured instance can approve anything: without an
- *   app account of its own there is no request to make, and it says so in a
- *   sentence naming exactly what to set.
+ * - It never pretends it can approve anything when it cannot: if neither the
+ *   instance itself nor the project's signer can ask, it says so in a sentence
+ *   naming exactly what to set.
  *
  * The wire shape is the hosted service's, including the parts that are about
  * identity rather than keys: `attempt` (this tab's own label, echoed back so a
@@ -62,6 +62,13 @@
  *                            screen shows ("… requests to add a key")
  *   FIDDY_INSTANCE_APP_KEY   that FID's custody key, as a 0x private key or a
  *                            twelve-word phrase, kept on this machine
+ *   FIDDY_SIGNER_REQUEST_URL what to ask when this instance has NO Farcaster
+ *                            account of its own: a service that lends one for a
+ *                            key somebody else minted (default fiddy.fun's
+ *                            `/api/fiddy/signer-request`; set it to an empty
+ *                            string to refuse to ask anybody). Asking is what
+ *                            puts a name on the approval screen, and only the
+ *                            person's own phone can complete it.
  *   FIDDY_FC_CLIENT_API      override for Farcaster's client API (default
  *                            https://api.farcaster.xyz; a probe points it at a
  *                            local stub)
@@ -151,7 +158,7 @@ export const generatePostingKey = () => {
 };
 
 const INSTANCE_NOT_SET_UP =
-  'This copy of Fiddy has no Farcaster account of its own to ask for a posting key. Set FIDDY_INSTANCE_APP_FID and FIDDY_INSTANCE_APP_KEY where it runs - or add a key from Advanced, your setup.';
+  'This copy of Fiddy has no Farcaster account of its own to ask with, and it has been told not to ask anybody else (FIDDY_SIGNER_REQUEST_URL is empty). Set FIDDY_INSTANCE_APP_FID and FIDDY_INSTANCE_APP_KEY, or leave FIDDY_SIGNER_REQUEST_URL alone so the project signs the request instead - or add a key from Advanced, your setup.';
 
 // WHY NOTHING FROM THE WORKSPACE IS IMPORTED HERE, AND WHY THAT IS NOT A
 // LIMITATION: this module runs inside the server that serves the client —
@@ -194,6 +201,13 @@ export const readInstanceConfig = (env = {}) => {
       /\/+$/,
       '',
     ),
+    // Who to ask when this instance has no account of its own. An empty string is
+    // a deliberate "ask nobody", not an unset one.
+    remoteSigner:
+      env.FIDDY_SIGNER_REQUEST_URL === undefined
+        ? 'https://fiddy.fun/api/fiddy/signer-request'
+        : (env.FIDDY_SIGNER_REQUEST_URL ?? '').trim().replace(/\/+$/, '') ||
+          null,
     nodeUrl: env.SNAPCHAIN_HTTP_URL ?? env.VITE_SNAPCHAIN_HTTP_URL ?? null,
   };
 };
@@ -409,6 +423,9 @@ export const createInstanceConnectService = ({
   log = () => {},
 }) => {
   const configured = Boolean(config.appFid && config.appKeyRaw);
+  // Never undefined: a caller that never set this is asking nobody, which is the
+  // behaviour this service had before it could borrow a signature at all.
+  const remoteSigner = config.remoteSigner ?? null;
   let custodyPromise;
 
   const custody = () => {
@@ -524,9 +541,11 @@ export const createInstanceConnectService = ({
       };
     }
 
-    if (configured && approvedFid === config.appFid) {
-      // The instance's own account approved its own request: that is a key for
-      // the wrong person, and it is refused exactly as the hosted service does.
+    const askingFid = Number(record.request?.requestFid ?? config.appFid ?? 0);
+    if (askingFid > 0 && approvedFid === askingFid) {
+      // The account that ASKED approved its own request (whether that was this
+      // instance or a service lending one): that is a key for the wrong person,
+      // and it is refused exactly as the hosted service does.
       return {
         ...record,
         state: 'wrong_account',
@@ -559,13 +578,78 @@ export const createInstanceConnectService = ({
   };
 
   /**
+   * The signature, from the project's own service, for a key this instance minted.
+   *
+   * This instance has no Farcaster account of its own, and the protocol needs
+   * *somebody* to sign the request — so it asks the service that publishes one
+   * (`fiddy.fun/api/fiddy/signer-request`, overridable). What comes back names
+   * that account as the asker; the approval still happens on the person's own
+   * phone, and the key stays here. A refusal is reported as one, with the two
+   * ways forward named rather than a dead button.
+   */
+  const askTheProject = async (publicKeyHex) => {
+    let response;
+    try {
+      response = await fetchImpl(remoteSigner, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ key: publicKeyHex }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      log(`could not reach the signer service: ${error?.message ?? error}`);
+      return {
+        error: {
+          status: 502,
+          body: {
+            code: 'CONNECT_UNREACHABLE',
+            message: `This copy of Fiddy could not reach the service that would ask for a posting key on its behalf (${remoteSigner}). Set FIDDY_INSTANCE_APP_FID and FIDDY_INSTANCE_APP_KEY to ask with an account of its own, or try again.`,
+          },
+        },
+      };
+    }
+
+    const payload = await response.json().catch(() => null);
+    const requestFid = Number(payload?.requestFid);
+    const { signature, deadline } = payload ?? {};
+
+    if (
+      !response.ok ||
+      !Number.isInteger(requestFid) ||
+      requestFid <= 0 ||
+      typeof signature !== 'string' ||
+      !Number.isFinite(Number(deadline))
+    ) {
+      return {
+        error: {
+          status: 502,
+          body: {
+            code: 'CONNECT_SIGNER_REFUSED',
+            message:
+              typeof payload?.message === 'string'
+                ? `The service that would ask on this copy of Fiddy's behalf refused: ${payload.message}`
+                : `The service that would ask on this copy of Fiddy's behalf answered ${response.status}. Set FIDDY_INSTANCE_APP_FID and FIDDY_INSTANCE_APP_KEY to ask with an account of its own, or add a key from Advanced, your setup.`,
+          },
+        },
+      };
+    }
+
+    return {
+      requestFid,
+      signature,
+      deadline: Number(deadline),
+      via: `the project's signer (${remoteSigner})`,
+    };
+  };
+
+  /**
    * Start — or re-hand — one request.
    *
    * @param {{ handle?: string | undefined, attempt?: unknown, forFid?: unknown, proof?: unknown, host?: unknown }} asked
    * @returns {Promise<ServiceAnswer>}
    */
   const begin = async ({ handle, attempt, forFid, proof, host }) => {
-    if (!configured) {
+    if (!configured && remoteSigner === null) {
       return {
         status: 501,
         body: { code: 'CONNECT_UNAVAILABLE', message: INSTANCE_NOT_SET_UP },
@@ -608,31 +692,45 @@ export const createInstanceConnectService = ({
       boundAddress = checked.address;
     }
 
+    // WHO ASKS. The instance's own account first, because that is the instance
+    // speaking for itself; failing that, a service that lends one, because a
+    // self-hoster usually has no spare Farcaster account and the protocol needs
+    // *somebody* to sign the request. Either way the key was minted here and the
+    // approval happens on the person's phone.
     const key = generatePostingKey();
     const publicKeyHex = key.publicKeyHex;
-    const deadline = Math.floor(now() / 1000) + REQUEST_DEADLINE_SECONDS;
 
-    let signature;
-    try {
-      const account = await custody();
-      signature = await account.signTypedData({
-        domain: SIGNED_KEY_REQUEST_DOMAIN,
-        types: { SignedKeyRequest: SIGNED_KEY_REQUEST_TYPE },
-        primaryType: 'SignedKeyRequest',
-        message: {
-          requestFid: BigInt(config.appFid),
-          key: publicKeyHex,
-          deadline: BigInt(deadline),
-        },
-      });
-    } catch (error) {
-      return {
-        status: 500,
-        body: {
-          code: 'CONNECT_APP_ACCOUNT_UNREADABLE',
-          message: `This copy of Fiddy could not read the key of the Farcaster account it asks with (${error?.message ?? error}).`,
-        },
-      };
+    let asking;
+    if (configured) {
+      const deadline = Math.floor(now() / 1000) + REQUEST_DEADLINE_SECONDS;
+      try {
+        const account = await custody();
+        const signature = await account.signTypedData({
+          domain: SIGNED_KEY_REQUEST_DOMAIN,
+          types: { SignedKeyRequest: SIGNED_KEY_REQUEST_TYPE },
+          primaryType: 'SignedKeyRequest',
+          message: {
+            requestFid: BigInt(config.appFid),
+            key: publicKeyHex,
+            deadline: BigInt(deadline),
+          },
+        });
+        asking = { requestFid: config.appFid, signature, deadline, via: 'this instance' };
+      } catch (error) {
+        return {
+          status: 500,
+          body: {
+            code: 'CONNECT_APP_ACCOUNT_UNREADABLE',
+            message: `This copy of Fiddy could not read the key of the Farcaster account it asks with (${error?.message ?? error}).`,
+          },
+        };
+      }
+    } else {
+      const borrowed = await askTheProject(publicKeyHex);
+      if (borrowed.error) {
+        return borrowed.error;
+      }
+      asking = borrowed;
     }
 
     let answer;
@@ -642,9 +740,9 @@ export const createInstanceConnectService = ({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           key: publicKeyHex,
-          requestFid: config.appFid,
-          signature,
-          deadline,
+          requestFid: asking.requestFid,
+          signature: asking.signature,
+          deadline: asking.deadline,
         }),
       });
     } catch {
@@ -684,7 +782,12 @@ export const createInstanceConnectService = ({
       key: { privateKeyHex: key.privateKeyHex, publicKeyHex },
       request: {
         token: request.token,
-        deadline,
+        // The deadline and the account that asked come from whoever signed, so
+        // this records what Farcaster was actually told rather than what this
+        // instance assumed.
+        deadline: asking.deadline,
+        requestFid: asking.requestFid,
+        via: asking.via,
         deeplinkUrl:
           typeof request.deeplinkUrl === 'string' ? request.deeplinkUrl : null,
       },
@@ -693,7 +796,7 @@ export const createInstanceConnectService = ({
     };
     store.set(newHandle, record);
     log(
-      `asked Farcaster for a posting key, on behalf of this instance (FID ${config.appFid})`,
+      `asked Farcaster for a posting key, with FID ${asking.requestFid} as the asker (${asking.via})`,
     );
     return {
       status: 200,

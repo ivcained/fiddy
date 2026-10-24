@@ -313,12 +313,12 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   seconds. Your custody key and your recovery phrase are never asked for, and the app key signs your casts, follows and
   reactions: scoped, capped, and revocable from the UI with a <code class="inline">KEY_REMOVE</code>.</p>
 
-  <p class="dim">Asking on your behalf is the instance's own Farcaster account, so set
-  <code class="inline">FIDDY_INSTANCE_APP_FID</code> and <code class="inline">FIDDY_INSTANCE_APP_KEY</code> (a spare
-  account of yours) before <code class="inline">fiddy client up</code>: see
-  <a href="https://github.com/ivcained/fiddy/blob/main/docs/CLIENT-SELF-HOSTED-CONNECT.md">docs/CLIENT-SELF-HOSTED-CONNECT.md</a>.
-  Without one, the client says so in place instead of leaving you at a dead button. Test accounts and developers can
-  still import a recovery phrase: that path lives under <strong>Advanced</strong>, collapsed behind a disclosure.</p>
+  <p class="dim">It works as it is: Fiddy's own signer asks for the key, and the approval is the same. To have
+  <em>your</em> instance ask instead, export <code class="inline">FIDDY_INSTANCE_APP_FID</code> and
+  <code class="inline">FIDDY_INSTANCE_APP_KEY</code> (a spare account of yours) before
+  <code class="inline">fiddy client up</code>. Either way it costs you nothing, and either way you can still add a key
+  by hand from <strong>Advanced</strong>, where the recovery-phrase path lives for test accounts and developers. Details:
+  <a href="https://github.com/ivcained/fiddy/blob/main/docs/CLIENT-SELF-HOSTED-CONNECT.md">docs/CLIENT-SELF-HOSTED-CONNECT.md</a>.</p>
 
   <div class="pane note warn" id="safety">
     <div class="t">Seed phrases: powerful, handle like rm -rf</div>

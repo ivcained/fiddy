@@ -80,9 +80,9 @@ between the networks it can actually read, in **Advanced → your node**.
 approve there, and **your own node** confirms which account signed. The client
 ends up with its own ed25519 app key, registered by a gasless `KEY_ADD` message:
 no ETH, no Optimism transaction, live in about a second. The account that *asks*
-on the instance's behalf is configured with `FIDDY_INSTANCE_APP_FID` and
-`FIDDY_INSTANCE_APP_KEY` (a spare account of yours); without one the client says
-so in place, at the point where you are stuck, rather than leaving a dead button.
+on the instance's behalf is Fiddy's own signer, so this works with nothing
+configured; export `FIDDY_INSTANCE_APP_FID` and `FIDDY_INSTANCE_APP_KEY` (a spare
+account of yours) to have your instance ask with its own instead.
 Test accounts and developers can still import a recovery phrase from the
 **Advanced** screen: the seed never leaves your browser, and it only ever
 authorizes the app key. See

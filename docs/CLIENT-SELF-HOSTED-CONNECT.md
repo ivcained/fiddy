@@ -36,7 +36,8 @@ self-hosted instance:
 
 | thing | where | why there |
 | --- | --- | --- |
-| the instance's own Farcaster account (`FIDDY_INSTANCE_APP_FID` + `FIDDY_INSTANCE_APP_KEY`) | the machine running the instance, in its environment | it is what *asks* for a key on the person's behalf, and Farcaster's API checks the request signature against that FID's custody address. It is configuration, like a server's own identity — never the person's key |
+| the instance's own Farcaster account (`FIDDY_INSTANCE_APP_FID` + `FIDDY_INSTANCE_APP_KEY`) | the machine running the instance, in its environment | it is what *asks* for a key on the person's behalf, and Farcaster's API checks the request signature against that FID's custody address. It is configuration, like a server's own identity — never the person's key (and optional: see §6) |
+| the signature the project lends when the instance has no account of its own | over the wire from `FIDDY_SIGNER_REQUEST_URL` (default `https://fiddy.fun/api/fiddy/signer-request`) | the protocol needs an account to ask with and a self-hoster usually has none: the reply is a signature over the key **this instance minted**, plus the FID of whoever lent it. Nothing else crosses; no key, no token, no state |
 | the posting key this approval produces | minted by the instance's server, handed to the person's browser, stored where every other device key is (`~/snapchain/appKeyStorage`) | the client signs its own writes through the node it is already pointed at: one code path (the one Advanced uses), and it keeps working when the service restarts |
 | the person's account, custody key, recovery phrase | their Farcaster app, untouched | the point of the whole design. No phrase is requested, stored or asked for anywhere in this flow |
 | the caller's handle | an **HttpOnly** cookie on the instance's own origin | the same shape fiddy.fun uses; no script can read it |
@@ -94,6 +95,12 @@ client), and the reason this feature has the shape it has:
    zero-configuration variant; not having one is a configuration state, and it is
    reported as one (§6).
 
+WHO SIGNS THE REQUEST does not change what the request is (see §6): the instance's
+own account if it has one, otherwise the project's signer, which signs a
+`SignedKeyRequest` over the key *this* instance minted and returns the signature.
+Either way Farcaster receives the same three fields, and either way the key is
+minted here and delivered to the browser below.
+
 On fiddy.fun the key never leaves the service. **On a self-hosted instance the
 key is handed to the browser** — deliberately, and the trade is written down
 where it happens (`server/instance/connect.mjs`, `statusBody`): it is signed
@@ -132,22 +139,37 @@ and it is delivered only to a caller holding the HttpOnly handle cookie.
   account's approval, and this repo's rule is that a probe never posts to
   mainnet.
 
-## 6. What a self-hoster has to do, and what an unconfigured instance says
+## 6. Who asks: nothing to configure, or an account of your own
 
-Put the instance's own Farcaster account in its environment and restart it:
+**The approval works with nothing set up.** The protocol needs somebody to sign
+the request, and a self-hoster usually has no spare Farcaster account, so an
+instance with no account of its own asks the project's signer
+(`https://fiddy.fun/api/fiddy/signer-request`; the control plane's
+`docs/fiddy/SIGNER-REQUEST.md`) for a signature over the key **it** minted. The
+key stays on this machine, the approval is unchanged, and the only difference is
+whose name the phone shows. Farcaster's API pays for the on-chain addition, the
+signature is bounded per caller and per day, and nothing else crosses the wire.
+
+To ask with an account of your own instead (nothing else about the flow changes):
 
 ```
 FIDDY_INSTANCE_APP_FID=3356372
 FIDDY_INSTANCE_APP_KEY=0x…            # that FID's custody key, or its twelve words
 ```
 
-`fiddy client up` needs no change: the dev server (and `--build`'s preview
-server) mounts the service on the same origin as the client. With no account
-configured, pressing Connect answers, in one sentence, exactly what is missing
-and how to set it (`CONNECT_UNAVAILABLE`, 501 → the sheet's own fallback, which
-still walks the reader to Advanced).
+...or to refuse to ask anybody at all (no account of your own, no project
+signer), set `FIDDY_SIGNER_REQUEST_URL=` to an empty value, which is a deliberate
+refusal rather than an unset one. Then pressing Connect answers, in one sentence,
+exactly what is missing and how to set it (`CONNECT_UNAVAILABLE`, 501 → the
+sheet's own fallback, which still walks the reader to Advanced).
 
-**Open decision, not a bug:** whose FID should a self-hosted instance ask with.
-Options: the self-hoster's spare account (documented above), a dedicated
-"fiddy-instance" account the project publishes for this, or a hosted
-sponsorship offer. Today it is the first, and the refusal names it.
+`fiddy client up` needs no change: the dev server (and `--build`'s preview
+server) mounts the service on the same origin as the client. When the project's
+signer cannot be reached or refuses, the sheet says which of the two it was and
+names both ways forward (`CONNECT_UNREACHABLE`, `CONNECT_SIGNER_REFUSED`) rather
+than leaving a dead button.
+
+**Decided (this was an open question).** Whose FID a self-hosted instance asks
+with: the instance's own if it has one, the project's signer otherwise. A reader
+following the tutorial gets a working approval with no setup, and an operator who
+wants their own account's name on the approval sets two values.

@@ -209,8 +209,9 @@ client_up() {
   if [ -n "${FIDDY_INSTANCE_APP_FID:-}" ]; then
     ok "this copy of Fiddy asks with its own account (FID ${FIDDY_INSTANCE_APP_FID}) — approvals happen on your phone"
   else
-    log "posting-key approvals: export FIDDY_INSTANCE_APP_FID and FIDDY_INSTANCE_APP_KEY to approve on your phone"
-    log "instead of typing a recovery phrase — docs/CLIENT-SELF-HOSTED-CONNECT.md"
+    ok "posting-key approvals happen on your phone: Fiddy's own signer asks for this copy"
+    log "to ask with an account of your own instead, export FIDDY_INSTANCE_APP_FID and"
+    log "FIDDY_INSTANCE_APP_KEY before this command — docs/CLIENT-SELF-HOSTED-CONNECT.md"
   fi
   ok "wrote $web_env (network: $network, node: $node_url)"
 
