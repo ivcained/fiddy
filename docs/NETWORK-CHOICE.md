@@ -141,3 +141,18 @@ of theirs running, and `--network snapchain` (default) points it at their node.
   builds the packages fresh); the new tests are
   `src/snapchain/__tests__/networks.test.ts` and
   `src/pages/settingsNode/Component/NetworkChoiceCard.test.tsx`.
+- Client, in a browser: `apps/farcaster-web/scripts/verify-network-choice.mjs`
+  (its own README block names the recipe), which signs in through the stubbed
+  SIWF relay and drives Advanced → your node for real. Two configurations, both
+  green:
+  - a build with no node of its own (`VITE_FIDDY_NETWORK=hypersnap`): **12/12** —
+    the card names Hypersnap, Snapchain is shown as unavailable with the reason
+    and **no** button, Hypersnap is offered at `https://haatz.quilibrium.com`,
+    pressing it asked the real node and reported `Hypersnap answered in 1552 ms ·
+    v0.13.5`, the node picker agreed ("in use: a public server"), and the reading
+    survived a reload with "Your setup" naming Hypersnap.
+  - a build that runs its own node (`VITE_SNAPCHAIN_HTTP_URL=<node
+    address>` + `VITE_FIDDY_NETWORK=snapchain`): **11/11** — both networks offered,
+    each at its own address; pressing Snapchain saved the reader's own node and
+    the picker said "in use: your own"; the address did not answer, and the card
+    said exactly that rather than implying a working setup.
