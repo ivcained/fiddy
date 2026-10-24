@@ -23,6 +23,13 @@ interface NodeStatusCardProps {
   } | null;
   loading: boolean;
   onRefresh: () => Promise<void>;
+  /**
+   * Which network this client is reading, in the reader's words ("Hypersnap",
+   * "Snapchain", or "Not recorded"). A node's own status says nothing about
+   * which network it is — `/v1/info` carries no network name — so this is the
+   * only place the reader can learn it, and it must not be left blank.
+   */
+  network?: string;
 }
 
 const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
@@ -39,7 +46,7 @@ const Code = ({ children }: { children: React.ReactNode }) => (
 );
 
 const NodeStatusCard = memo<NodeStatusCardProps>(
-  ({ health, loading, onRefresh }) => {
+  ({ health, loading, onRefresh, network }) => {
     if (!health) {
       return (
         <div className="solid-glass-pane rounded-lg border p-4 border-default">
@@ -79,6 +86,13 @@ const NodeStatusCard = memo<NodeStatusCardProps>(
               {health.ok ? 'Connected' : 'Unreachable'}
             </span>
           </div>
+
+          {network && (
+            <Row
+              label="Network"
+              value={<span data-fiddy="node-network">{network}</span>}
+            />
+          )}
 
           <Row
             label={showingRelay ? 'Path' : 'Its address'}

@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
-# fiddy — three commands to your own Farcaster client on your own Snapchain node.
+# fiddy — three commands to your own Farcaster client on your own read node.
 #
 #   fiddy provision   # (0) provision compute (AWS, or register any server over SSH)
-#   fiddy node up     # (1) install + sync a Snapchain read node on that compute
+#   fiddy node up     # (1) install + sync a read node on that compute
+#                     #     --network snapchain (default) | hypersnap
 #   fiddy client up   # (2) run the Fiddy client pointed at your node
+#                     #     --network snapchain (default) | hypersnap
+#
+# Two networks, same idea. Snapchain is Farcaster's own network — the one every
+# account, cast and follow lives on; pick this. Hypersnap is an independent
+# parallel network built by the Quilibrium community — same kind of social data,
+# different plumbing and different economics; it is for explorers, not where your
+# Farcaster account lives. Only one of the two needs a node of your own: fiddy
+# client up --network hypersnap reads the public Hypersnap node as it is.
 #
 # No API keys from anyone. You furnish the compute; the node syncs the network.
 set -euo pipefail
@@ -23,6 +32,7 @@ FIDDY_REPO="$(cd -P "$(dirname "$FIDDY_SRC")/.." && pwd)"
 export FIDDY_HOME FIDDY_REPO
 
 source "$FIDDY_REPO/cli/lib/common.sh"
+source "$FIDDY_REPO/cli/networks.sh"
 
 usage() {
   cat <<'EOF'
@@ -33,13 +43,22 @@ Usage: fiddy <command> [options]
   provision   Provision compute for your node
               --aws                       create an AWS EC2 instance (needs aws CLI)
               --ssh user@host             use any server you already have
-  node        Manage your Snapchain read node
-              up [--local] [--force]      install + start + wait for the API
+  node        Manage your read node
+              up [--network N] [--local] [--force]
+                                          N = snapchain (default) | hypersnap
+                                          install + start + wait for the API.
+                                          hypersnap prints what is known and
+                                          stops: its published install does not
+                                          produce a node that follows the chain.
               status                      sync status and health
               logs                        tail node logs
               start | stop | upgrade      lifecycle without the log tail
   client      Run the Fiddy client
-              up [--tunnel] [--build]     dev server, SSH tunnel, or prod build
+              up [--network N] [--tunnel] [--build]
+                                          N = snapchain (default) | hypersnap
+                                          dev server, SSH tunnel, or prod build.
+                                          hypersnap needs no node: it reads the
+                                          public Hypersnap node.
               check                       where the client's reads go today
   doctor      Check local prerequisites
   install     Put `fiddy` on PATH permanently (symlink into /usr/local/bin)
@@ -48,6 +67,8 @@ Usage: fiddy <command> [options]
 A mainnet read node needs 4 vCPU, 16 GB RAM and 1.5 TB free disk (snapshot
 bootstrap needs scratch on top of that). fiddy checks the target first and
 will not fill a machine that cannot host it; --force overrides the check.
+That is the price of a node, not of picking a network: reading Hypersnap costs
+nothing and installs nothing — fiddy client up --network hypersnap.
 
 Docs: https://fiddy.fun/client
 EOF

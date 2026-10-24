@@ -72,6 +72,22 @@ export const resolveNodeBaseUrl = (
 };
 
 /**
+ * The address this build was pointed at, before any relay resolution — the raw
+ * `VITE_SNAPCHAIN_HTTP_URL`, or null when the build names no node at all.
+ *
+ * `resolveNodeBaseUrl` answers where the browser should SEND requests (a
+ * cross-origin node becomes the same-origin relay path). This answers the other
+ * question a surface sometimes has to ask out loud: which address was named?
+ * The box above the reader's own node and the network picker both need it.
+ */
+export const configuredNodeUrl = (
+  env: Record<string, unknown> = import.meta.env,
+): string | null => {
+  const directUrl = env.VITE_SNAPCHAIN_HTTP_URL as string | undefined;
+  return directUrl && directUrl.trim().length > 0 ? directUrl.trim() : null;
+};
+
+/**
  * Did the user (or the deploy) name a node explicitly?
  *
  * This is what separates "you chose to read from your own node and it is not
@@ -81,10 +97,7 @@ export const resolveNodeBaseUrl = (
  */
 export const isNodeExplicitlyConfigured = (
   env: Record<string, unknown> = import.meta.env,
-): boolean => {
-  const directUrl = env.VITE_SNAPCHAIN_HTTP_URL as string | undefined;
-  return Boolean(directUrl && directUrl.trim().length > 0);
-};
+): boolean => configuredNodeUrl(env) !== null;
 
 /**
  * Resolve the target URL for the Vite proxy configuration.

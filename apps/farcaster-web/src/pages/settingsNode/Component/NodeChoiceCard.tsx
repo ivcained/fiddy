@@ -196,11 +196,14 @@ const NodeChoiceCard = memo<NodeChoiceCardProps>(
               />
               <span className="flex-1">
                 <span className="block font-medium text-primary">
-                  Use a public Farcaster node
+                  Use a public node
                 </span>
                 <span className="block text-xs text-muted">
                   Nothing to install, nothing to pay, and it is somebody
-                  else&rsquo;s job to keep it running.
+                  else&rsquo;s job to keep it running. The one Fiddy lists is
+                  the public Hypersnap node &mdash; an independent parallel
+                  network, not the one Farcaster accounts live on. The network
+                  picker above says which one you are reading.
                 </span>
               </span>
             </label>

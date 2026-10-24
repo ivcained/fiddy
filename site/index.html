@@ -167,7 +167,7 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
     </div>
     <div class="qs-cmd">
       <span class="qs-n">1</span>
-      <span><code>fiddy node up</code><small>install + sync a Snapchain read node on it</small></span>
+      <span><code>fiddy node up</code><small>install + sync a read node on it — Snapchain by default; <code class="inline">--network hypersnap</code> for the other network</small></span>
       <button class="qs-copy" data-c="fiddy node up">copy</button>
     </div>
     <div class="qs-cmd">
@@ -191,7 +191,7 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
     <tr><td>FID</td><td>Your account number, minted onchain to your custody address. Everything you do offchain references it.</td></tr>
     <tr><td>Custody address</td><td>The Ethereum key that owns your FID. The master key. It authorizes everything else and touches nothing day-to-day.</td></tr>
     <tr><td>App key (signer)</td><td>An ed25519 key a client uses to sign messages for your FID. Authorized by your custody address. Revocable. This is what "log in to a client" means under the hood.</td></tr>
-    <tr><td>Snapchain</td><td>The peer-to-peer network storing all user data. Validators propose blocks; read nodes follow, store, and serve APIs.</td></tr>
+    <tr><td>Snapchain</td><td>The peer-to-peer network storing all user data &mdash; Farcaster's own. Validators propose blocks; read nodes follow, store, and serve APIs. (Hypersnap is a separate network with the same idea; see <a href="#networks">Snapchain or Hypersnap</a>.)</td></tr>
     <tr><td>Storage rent</td><td>A small onchain payment that buys your FID the right to store data. No rent, no writes. (Your account already has storage if you've used Farcaster.)</td></tr>
   </table>
 </div></section>
@@ -267,6 +267,35 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
     <p>When you <code class="inline">submitMessage</code> to your read node, it validates the message and <strong>gossips it to validators</strong> — a read node has no mempool of its own. A success response means "valid, accepted for relay," <em>not</em> "in a block." Confirm inclusion by watching for a <code class="inline">MERGE_MESSAGE</code> event or querying the message back. Under heavy network load a gossiped message can drop and need resubmitting; the client can fall back to submitting at a validator endpoint, and this tutorial shows you the trade-off when it matters.</p>
   </div>
   <p class="dim">Full sync takes hours; the API answers immediately and catches up in the background.</p>
+</div></section>
+
+<section id="networks"><div class="wrap">
+  <div class="kicker">Two networks, same idea</div>
+  <h2>Snapchain or Hypersnap &mdash; you pick</h2>
+  <p class="dim">Two networks, same idea. <strong>Snapchain</strong> is Farcaster&rsquo;s own network &mdash; the one
+  every account, cast and follow lives on; pick this. <strong>Hypersnap</strong> is an independent parallel network
+  built by the Quilibrium community &mdash; same kind of social data, different plumbing and different economics;
+  it&rsquo;s for explorers, not where your Farcaster account lives.</p>
+
+  <pre><span class="k">fiddy node up --network snapchain</span>    <span class="c"># Farcaster's own network. The default — nothing to type</span>
+<span class="k">fiddy client up --network hypersnap</span>  <span class="c"># read the public Hypersnap node — nothing to install, nothing of yours runs</span></pre>
+
+  <p class="dim" style="font-size:14px">One of the two needs a server of your own, and one does not. Reading <strong>Hypersnap</strong> needs
+  no server at all: it reads the public Hypersnap node at <code class="inline">haatz.quilibrium.com</code>, which answers
+  today. Running your <em>own</em> Hypersnap node is the part that isn&rsquo;t ready: the software is real and installable,
+  but the copy it installs keeps an out-of-date list of who is allowed to decide blocks, so it stops following the
+  network after a while while still reporting itself healthy &mdash; and the fix today is to take that list from
+  Snapchain&rsquo;s own repository. Upstream&rsquo;s issue for it is still open. So
+  <code class="inline">fiddy node up --network hypersnap</code> prints exactly what is known and stops, rather than
+  installing something that will quietly fall behind.</p>
+
+  <div class="pane note">
+    <div class="t">Which network is Fiddy reading? It says so.</div>
+    <p>A node does not announce which network it is &mdash; the same status page comes back on both &mdash; so the
+    client never guesses. It shows the network in <strong>Advanced &rarr; your node</strong>, where you can switch
+    between the networks you can actually read: the public Hypersnap node, and your own node when you run one.
+    A network with nothing behind it is listed with the reason, never as a button that fails after you press it.</p>
+  </div>
 </div></section>
 
 <section id="step2"><div class="wrap">
