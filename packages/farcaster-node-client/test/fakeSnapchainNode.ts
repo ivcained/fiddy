@@ -79,6 +79,13 @@ export interface FakeSignerRecord {
   fid: number;
   source: 'SIGNER_SOURCE_ONCHAIN' | 'SIGNER_SOURCE_OFFCHAIN';
   requestFid?: number;
+  /**
+   * ABI-encoded `SignedKeyRequestMetadata`, as the node stores it on an on-chain
+   * signer event. When set, the response nests it under
+   * `onChainEvent.signerEventBody` exactly as a real node does.
+   */
+  metadata?: string;
+  metadataType?: number;
   scopes?: string[];
   ttl?: number;
   nonce?: number;
@@ -1022,6 +1029,22 @@ export const startFakeNode = async (
             ? {}
             : { requestFid: record.requestFid }),
           ...(record.nonce === undefined ? {} : { nonce: record.nonce }),
+          // An on-chain key carries its signed key request inside the signer
+          // event rather than at the top level — the shape a live node answers
+          // with (verified against mainnet, 2026-10-24).
+          ...(record.metadata === undefined
+            ? {}
+            : {
+                onChainEvent: {
+                  type: 'EVENT_TYPE_SIGNER',
+                  signerEventBody: {
+                    key: record.key,
+                    eventType: 'SIGNER_EVENT_TYPE_ADD',
+                    metadata: record.metadata,
+                    metadataType: record.metadataType ?? 1,
+                  },
+                },
+              }),
         },
       });
       return;

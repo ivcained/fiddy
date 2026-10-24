@@ -41,6 +41,10 @@ export default [
         // sources, `clearInterval` to stop a wait the page itself owns.
         atob: 'readonly',
         Blob: 'readonly',
+        // Node's own, not the page's: a probe that decodes an on-chain signed
+        // key request reads ABI bytes out of base64/hex, which Buffer does and
+        // no module is imported for.
+        Buffer: 'readonly',
         cancelAnimationFrame: 'readonly',
         clearInterval: 'readonly',
         console: 'readonly',

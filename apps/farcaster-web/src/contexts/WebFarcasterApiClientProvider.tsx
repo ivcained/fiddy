@@ -36,6 +36,7 @@ import {
   noteProviderReadResult,
   useProviderWatch,
 } from '~/snapchain/providers';
+import { useClientFilterPreferences } from '~/snapchain/useClientFilterPreferences';
 import { useNodeChoice } from '~/snapchain/useNodeChoice';
 import { Analytics } from '~/utils/analyticsUtils';
 import { getPersistedDeviceId } from '~/utils/deviceIdUtils';
@@ -78,6 +79,12 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
     // store — the reads adapter, the writes client and the status pill can
     // never disagree about where answers came from.
     const nodeChoice = useNodeChoice(signedInFid);
+
+    // The reader's client filter and their own names for other apps. Same
+    // shape and same reason as the node choice above: the read seam below asks
+    // the store synchronously on every request, so a filter changed on the
+    // settings screen applies to the next page instead of waiting for a reload.
+    useClientFilterPreferences(signedInFid);
 
     // The reader's servers, and which one is live right now.
     //

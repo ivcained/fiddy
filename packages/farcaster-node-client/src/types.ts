@@ -78,6 +78,15 @@ export interface NodeSignerSourceRef {
   requestFid?: number;
   /** Per-FID nonce the key was added with (off-chain only). */
   nonce?: number;
+  /**
+   * Raw `SignedKeyRequestMetadata` as the node stored it (base64, or 0x-hex on
+   * some servers): the ABI-encoded record of which app FID requested this key.
+   * Present for most on-chain signers, which is how a cast's client is resolved
+   * (`clientAttribution.ts`).
+   */
+  metadata?: string;
+  /** `1` = `SignedKeyRequestMetadata`. */
+  metadataType?: number;
 }
 
 export interface NodeSigner extends NodeSignerSourceRef {
