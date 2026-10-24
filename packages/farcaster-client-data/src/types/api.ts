@@ -2158,7 +2158,21 @@ export type ApiCastCollectibleArtifactResolution = 'sm' | 'md' | 'lg';
 
 export type ApiCastCollectibleArtifactVariant = 'full' | 'thumbnail';
 
-export type ApiCastClient = ApiUserMinimal;
+export type ApiCastClient = ApiUserMinimal & {
+  /**
+   * How the attribution was established, when it came from the protocol:
+   * `self` (this client's own app key), `known` (a named app), `own` (the
+   * account requested the key for itself), `unknown` (an app FID with no
+   * profile) or `onchain` (an on-chain key whose metadata names no app).
+   */
+  kind?: 'self' | 'known' | 'own' | 'unknown' | 'onchain';
+  /**
+   * Stable id for the reader's client filter (`self`, `app:9152`, `own`).
+   * Absent when nothing resolved the client, in which case the cast carries no
+   * client at all.
+   */
+  clientId?: string;
+};
 
 export type ApiCastTranslationStatus = 'PENDING' | 'READY';
 

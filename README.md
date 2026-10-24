@@ -33,6 +33,27 @@ fiddy node up     # (1) Snapchain read node on that compute — installs, then b
 fiddy client up   # (2) the Fiddy web client, pointed at your node (SSH-tunneled by default)
 ```
 
+**Two networks, same idea, and you pick** (`--network snapchain|hypersnap`,
+Snapchain by default). Both carry the same kind of social data and do not talk to
+each other: **Snapchain** is Farcaster's own network — the one every account,
+cast and follow lives on; pick this. **Hypersnap** is an independent parallel
+network built by the Quilibrium community — same kind of social data, different
+plumbing and different economics; it's for explorers, not where your Farcaster
+account lives.
+
+```bash
+fiddy node up --network snapchain     # default: a read node on your compute
+fiddy client up --network hypersnap   # read the public Hypersnap node — no node, nothing of yours runs
+```
+
+Reading Hypersnap needs no node at all. Running your *own* Hypersnap node is not
+offered yet: upstream's install works but its copy of the list of who may decide
+blocks is out of date, so a fresh node stops following the network while still
+reporting itself healthy. `fiddy node up --network hypersnap` prints what is
+known, with the upstream issue and the repair, and stops instead of installing
+one. Details, with every measurement:
+[docs/NETWORK-CHOICE.md](docs/NETWORK-CHOICE.md).
+
 **Size your machine for the job.** A mainnet read node needs 4 vCPU, 16 GB RAM
 and **2 TB** of disk: its snapshot bootstrap alone pulls ~468 GB of gzipped
 chunks and needs ~1.66 TB peak to unpack them (`fiddy provision --aws` creates
@@ -50,6 +71,9 @@ bash, not `sh` (macOS's stock `/bin/bash` 3.2 is supported).
 acceptance checks against your node (`/v1/info`, reads, `/v1/signersByFid`);
 `fiddy client check` reports where the client's reads actually go;
 `fiddy client up --tunnel` is the default because node APIs should not be public.
+The client names the network it is reading — a node does not announce one, so
+whoever pointed the client at a node records it — and lets a reader switch
+between the networks it can actually read, in **Advanced → your node**.
 
 **Posting is gasless.** The client issues itself an app key with a `KEY_ADD`
 message signed by your custody address — no ETH, no Optimism transaction,

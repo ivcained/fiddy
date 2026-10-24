@@ -17,6 +17,12 @@
 # layer and says plainly which upstream the app uses today. See
 # docs/CLIENT-NODE-GAP.md for the adapter plan and the route inventory.
 #
+# Two networks are on the menu (`--network snapchain|hypersnap`). Snapchain
+# reads come from a node — yours. Hypersnap needs no node: the public Hypersnap
+# node (haatz.quilibrium.com) serves reads and relays writes, so this command
+# points the client at it and records that (VITE_FIDDY_NETWORK), which is what
+# lets the client NAME the network instead of guessing it.
+#
 # App keys are gasless KEY_ADD messages — no ETH, no Optimism transaction.
 # A seed phrase is only ever used in the browser, only to authorize the
 # client's app key — use a TEST account.
@@ -30,8 +36,14 @@ client_main() {
       cat <<'EOF'
 fiddy client — run the Fiddy client against your node.
 
-  up [--tunnel] [--build]
-      Point the web client at your node and start it.
+  up [--network snapchain|hypersnap] [--tunnel] [--build]
+      Point the web client at a node and start it.
+      --network  Which network to read. snapchain (default): your own node —
+                 Farcaster's own network, where every account, cast and follow
+                 lives. hypersnap: the public Hypersnap node, an independent
+                 parallel network built by the Quilibrium community; nothing of
+                 yours runs, and it is for explorers rather than for the account
+                 you already have.
       --tunnel   Your node API is not public (default): open an SSH tunnel
                  local 3381/3383 → remote 3381/3383 for the session.
       --build    Production build instead of the dev server.
@@ -58,6 +70,16 @@ client_node_layer_state() { # "wired" | "not wired" — detect, don't assume
 client_check() {
   config_load
   local node_url="${FIDDY_NODE_HTTP:-}"
+  step "Network"
+  case "${FIDDY_NODE_NETWORK:-}" in
+    snapchain) ok "Snapchain — Farcaster's own network, the one every account, cast and follow lives on" ;;
+    hypersnap) ok "Hypersnap — the Quilibrium community's parallel network; it is not where a Farcaster account lives" ;;
+    *) warn "not recorded — this node was installed before fiddy knew about networks."
+       log "the client will say \"not recorded\" rather than guess: a node does not announce its network." ;;
+  esac
+  if [ "${FIDDY_NODE_NETWORK:-}" != hypersnap ]; then
+    log "reading Hypersnap needs no node at all: fiddy client up --network hypersnap"
+  fi
   step "Node"
   if [ -z "$node_url" ]; then
     warn "no node URL recorded yet — run: fiddy node up (or fiddy client up --tunnel)"
@@ -78,17 +100,22 @@ client_check() {
 }
 
 client_up() {
-  local tunnel=0 build=0
+  local tunnel=0 build=0 network=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --tunnel) tunnel=1 ;;
       --build)  build=1 ;;
-      *) die "unknown option: $1" ;;
+      --network) shift || true; network="${1:-}" ;;
+      snapchain|hypersnap) network="$1" ;;
+      *) die "unknown option: $1 (try: fiddy client --help)" ;;
     esac
     shift
   done
 
   config_load
+  # Default: the network the node install recorded, else Snapchain.
+  [ -n "$network" ] || network="${FIDDY_NODE_NETWORK:-$FIDDY_DEFAULT_NETWORK}"
+  network_require_known "$network"
 
   # Seamless deps: a fresh box has neither node nor pnpm — install them
   # instead of pointing at docs (the fatline test report: "NodeJS didn't
@@ -122,7 +149,13 @@ client_up() {
   local node_url="${FIDDY_NODE_HTTP:-}"
   local ssh_host=""
 
-  if [ "$tunnel" = 1 ] || [ -z "$node_url" ]; then
+  if [ "$network" = hypersnap ] && [ -z "${FIDDY_NODE_HTTP:-}" ]; then
+    # Hypersnap reads and writes go to the public Hypersnap node: nothing to
+    # install, nothing of yours runs anywhere. Say which node did the work —
+    # this is somebody else's server, and the client's own page repeats it.
+    node_url="https://haatz.quilibrium.com"
+    log "reading Hypersnap from the public Hypersnap node ($node_url) — nothing of yours runs on it"
+  elif [ "$tunnel" = 1 ] || [ -z "$node_url" ]; then
     require_target
     if tunnel_forward_active "$SNAP_HTTP_PORT"; then
       log "127.0.0.1:$SNAP_HTTP_PORT is already forwarded — reusing the open tunnel"
@@ -162,8 +195,13 @@ client_up() {
     [ -f "$FIDDY_REPO/apps/farcaster-web/.env.example" ] && grep -v '^#' "$FIDDY_REPO/apps/farcaster-web/.env.example" | grep '=' || true
     echo "VITE_SNAPCHAIN_HTTP_URL=$node_url"
     [ -n "${FIDDY_NODE_GRPC:-}" ] && echo "VITE_SNAPCHAIN_GRPC_URL=$FIDDY_NODE_GRPC"
+    # Provenance, not an inference: a node does not announce which network it
+    # is, so whoever pointed the client at one records it. The client shows it
+    # on Settings → your node and lets the reader switch between the networks it
+    # can actually read.
+    echo "VITE_FIDDY_NETWORK=$network"
   } > "$web_env"
-  ok "wrote $web_env (node: $node_url)"
+  ok "wrote $web_env (network: $network, node: $node_url)"
 
   if [ "$(client_node_layer_state)" = wired ]; then
     ok "node-backed data layer present — the web app imports farcaster-node-client"

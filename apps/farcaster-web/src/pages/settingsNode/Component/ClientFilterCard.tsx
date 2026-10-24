@@ -27,16 +27,16 @@ interface ClientFilterCardProps {
 }
 
 const MODES: { mode: ClientFilterMode; label: string; hint: string }[] = [
-  { mode: 'all', label: 'All', hint: 'Show casts from every client' },
+  { mode: 'all', label: 'Show all', hint: 'Show casts from every app' },
   {
     mode: 'only',
-    label: 'Only',
-    hint: 'Show casts only from the clients below',
+    label: 'Only these',
+    hint: 'Show casts only from the apps ticked below',
   },
   {
     mode: 'exclude',
-    label: 'Exclude',
-    hint: 'Hide casts from the clients below',
+    label: 'Hide these',
+    hint: 'Hide casts from the apps ticked below',
   },
 ];
 
@@ -90,9 +90,9 @@ const ClientFilterCard = memo<ClientFilterCardProps>(
     return (
       <div className="solid-glass-pane rounded-lg border p-4 border-default">
         <div className="mb-1 flex items-center justify-between">
-          <span className="font-semibold text-primary">Client filter</span>
+          <span className="font-semibold text-primary">Who made a cast</span>
           <span className="text-xs text-muted">
-            view only — nothing is hidden on your setup
+            your feed only — nothing is hidden on your setup
           </span>
         </div>
 
@@ -187,9 +187,11 @@ const ClientFilterCard = memo<ClientFilterCardProps>(
         )}
 
         <div className="mt-3 text-xs text-muted">
-          Who wrote a cast is read from your own setup&rsquo;s own records: the
-          key that signed it reports which app asked for it, and that is how a
-          client gets named here. No account gets a name until you give it one.
+          The app is the one that asked for the key that signed the cast, and it
+          is named from that app&rsquo;s own Farcaster profile. Give it a name
+          of your own and that name is what the cast shows. A conversation is
+          left whole: hiding one side of a reply thread would make it
+          unreadable, not quieter.
         </div>
       </div>
     );

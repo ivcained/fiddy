@@ -1,5 +1,13 @@
 # shellcheck shell=bash
-# fiddy node — command (1): a Snapchain read node on your compute.
+# fiddy node — command (1): a read node on your compute.
+#
+# Two networks are on the menu (`--network snapchain|hypersnap`), and this
+# command only installs the one it can install reproducibly: Snapchain. The
+# Hypersnap path is real (upstream publishes a bootstrap, a compose file and an
+# image) but the install as published does not produce a node that follows the
+# chain, so fiddy prints what is known and stops — see cli/networks.sh and
+# docs/NETWORK-CHOICE.md. Reading Hypersnap needs no node at all:
+# `fiddy client up --network hypersnap`.
 #
 # A read node (read_node = true) follows the chain, stores full state, and
 # serves the HTTP + gRPC APIs. Anyone can run one; no keys, no permission.
@@ -34,14 +42,21 @@ node_main() {
     upgrade) node_upgrade ;;
     -h|--help|"")
       cat <<'EOF'
-fiddy node — manage your Snapchain read node.
+fiddy node — manage your read node.
 
-  up [--local] [--force]
-                 Install Snapchain on the target, start syncing, and wait
+  up [--network snapchain|hypersnap] [--local] [--force]
+                 Install a read node on the target, start syncing, and wait
                  until the HTTP API answers. --local runs on this machine
                  instead of the provisioned target. --force installs on a
                  machine that fails the requirements preflight (it will stop
                  when the disk fills).
+                 --network picks which network the node follows (default
+                 snapchain). snapchain: Farcaster's own network, the one every
+                 account, cast and follow lives on — pick this. hypersnap: an
+                 independent parallel network built by the Quilibrium
+                 community, for explorers. Hypersnap cannot be installed
+                 unattended yet and this command says so instead of pretending
+                 (see: fiddy node up --network hypersnap).
   status         Print sync status from /v1/info.
   verify [fid]   Run the acceptance checks against the node's HTTP API:
                  health, reads served by this node, signer list. Default FID
@@ -60,6 +75,9 @@ fiddy node — manage your Snapchain read node.
 
 Requirements for a mainnet read node: 4 vCPU, 16 GB RAM, 1.5 TB free disk,
 public IP, ports 3381-3383 reachable (gossip uses 3382/udp).
+
+Reading Hypersnap needs no node: fiddy client up --network hypersnap reads the
+public Hypersnap node.
 EOF
       ;;
     *) die "unknown node command: $sub" ;;
@@ -67,18 +85,33 @@ EOF
 }
 
 node_up() {
-  local local_mode=0 force=0
+  local local_mode=0 force=0 network="$FIDDY_DEFAULT_NETWORK"
   while [ $# -gt 0 ]; do
     case "$1" in
       --local) local_mode=1 ;;
       --force) force=1 ;;
-      *) die "unknown option: $1" ;;
+      # Both spellings, because both are what people type:
+      #   fiddy node up --network hypersnap   (this repo's CLI)
+      #   fiddy node snapchain                (the shorthand other CLIs use)
+      --network) shift || true; network="${1:-}" ;;
+      snapchain|hypersnap) network="$1" ;;
+      *) die "unknown option: $1 (try: fiddy node --help)" ;;
     esac
     shift
   done
   [ "${FIDDY_ALLOW_UNDERSIZED:-0}" = 1 ] && force=1
+  network_require_known "$network"
 
-  step "Setting up a Snapchain read node"
+  # A network fiddy will not install: say what is known, and stop. Installing
+  # something that reports itself healthy while falling behind is worse than
+  # refusing, and pretending is not an option.
+  if ! network_install_supported "$network"; then
+    step "Setting up a $(network_plain_name "$network") read node"
+    hypersnap_install_report
+    hypersnap_refuse
+  fi
+
+  step "Setting up a $(network_plain_name "$network") read node"
   log "What you're getting: a read node (read_node = true). It follows the chain,"
   log "stores full state, serves HTTP :$SNAP_HTTP_PORT + gRPC :$SNAP_GRPC_PORT, and"
   log "relays your writes to validators over gossip. No API keys. Your compute only."
@@ -90,6 +123,12 @@ node_up() {
   else
     node_install_remote "$force"
   fi
+
+  # Record which network this node follows: reads from two networks look
+  # identical on the wire, so the one thing that can name the network later is
+  # the thing that installed it.
+  config_set FIDDY_NODE_NETWORK "$network"
+  ok "network recorded: $network (fiddy config shows it; fiddy client up passes it on)"
 }
 
 node_install_remote() {
@@ -306,6 +345,7 @@ node_status() {
   local host="${FIDDY_TARGET#*@}"
   local base="${FIDDY_NODE_HTTP:-http://$host:$SNAP_HTTP_PORT}"
   step "Node status ($base)"
+  node_network_line
   local body
   body="$(curl -fsS --max-time 10 "$base/v1/info")" || die "node not answering — try: fiddy node logs"
   printf '%s\n' "$body" | if command -v jq >/dev/null 2>&1; then jq '.'; else cat; fi
@@ -321,6 +361,7 @@ node_verify() { # the bounty's acceptance checks, against the node's HTTP API
   local fails=0
 
   step "Verifying the node at $base (fid $fid)"
+  node_network_line
 
   # 1. Health / sync state
   local info
@@ -370,8 +411,26 @@ node_verify() { # the bounty's acceptance checks, against the node's HTTP API
   log "confirm inclusion with MERGE_MESSAGE events or by querying the message back."
 }
 
+# Which network the recorded node follows. Older installs predate networks, so
+# "not recorded" is a real answer and is never upgraded to a guess.
+node_network_line() {
+  config_load
+  case "${FIDDY_NODE_NETWORK:-}" in
+    snapchain) log "network: Snapchain (Farcaster's own network)" ;;
+    hypersnap) log "network: Hypersnap (the Quilibrium community's parallel network)" ;;
+    *)         log "network: not recorded (this node was installed before fiddy knew about networks)" ;;
+  esac
+}
+
 require_snapchain_remote() {
   require_target
+  config_load
+  # A Hypersnap install has its own directory and its own script; fiddy did not
+  # create it and does not drive it. Say which command does, rather than
+  # reporting "no Snapchain install" about something that is there.
+  if [ "${FIDDY_NODE_NETWORK:-}" = hypersnap ]; then
+    die "the node on $FIDDY_TARGET is a Hypersnap install, not a Snapchain one — fiddy does not manage it. Use its own script: ssh $FIDDY_TARGET 'cd ~/hypersnap && ./hypersnap.sh logs' (see docs/NETWORK-CHOICE.md)"
+  fi
   ssh_run 'test -d ~/snapchain && test -f ~/snapchain/snapchain.sh' \
     || die "no Snapchain install on $FIDDY_TARGET — run: fiddy node up"
 }

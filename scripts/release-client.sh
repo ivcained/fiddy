@@ -11,6 +11,14 @@
 #                                 session lands on the device-only landing.
 #        VITE_FIDDY_MEDIA_URL     the media host the composer uploads to
 #                                 (default https://fiddy.fun, named anyway);
+#        VITE_FIDDY_NETWORK       which network the node speaks (snapchain |
+#                                 hypersnap). A node does not announce it —
+#                                 measured: /v1/info carries no network name —
+#                                 so the release records it for the client's
+#                                 Network card. Defaulted from NODE_URL when
+#                                 that is the known public Hypersnap node;
+#                                 otherwise FIDDY_BUILD_NETWORK, else unset
+#                                 (the card then says "not recorded", honestly).
 #        VITE_TOGETHER_API_URL    the collaboration service's origin, for the
 #                                 Together surface (/~/together). It is BAKED on
 #                                 purpose: `src/lib/together.ts` falls back to
@@ -86,6 +94,23 @@ STAGE_ROOT=${FIDDY_RELEASE_STAGE_ROOT:-$HOME/.hermes/cache/scratch}
 # created per run, below, once the sha under release is known.
 STAGE_PINNED=${FIDDY_RELEASE_STAGE:-}
 NODE_URL=${FIDDY_BUILD_NODE_URL:-https://haatz.quilibrium.com}
+# Which network that node speaks. The default public node is Hypersnap's, and
+# that is a measured fact about the address, not a guess about the software:
+# hypersnap.org names it as their public node and it serves Hypersnap's network.
+# Any other address has to say so (FIDDY_BUILD_NETWORK=snapchain|hypersnap) —
+# a node's own /v1/info cannot be asked (no network name in the payload), so an
+# undeclared custom node ships as "not recorded" instead of as a wrong answer.
+NETWORK=${FIDDY_BUILD_NETWORK:-}
+if [ -z "$NETWORK" ]; then
+  case "$NODE_URL" in
+    https://haatz.quilibrium.com) NETWORK=hypersnap ;;
+    *) NETWORK="" ;;
+  esac
+fi
+case "$NETWORK" in
+  ""|snapchain|hypersnap) ;;
+  *) echo "FIDDY_BUILD_NETWORK must be snapchain or hypersnap (got: $NETWORK)" >&2; exit 1 ;;
+esac
 MEDIA_URL=${FIDDY_BUILD_MEDIA_URL:-https://fiddy.fun}
 # The collaboration service's origin for the Together surface. Empty string is
 # the production shape: the client and the service share fiddy.fun's origin, and
@@ -175,9 +200,10 @@ git -C "$REPO" archive "$SHA" | tar -x -C "$STAGE/base"
 ln -s "$REPO/node_modules" "$STAGE/base/node_modules"
 ln -s "$REPO/apps/farcaster-web/node_modules" "$STAGE/base/apps/farcaster-web/node_modules"
 
-say "2/8 vite build (node $NODE_URL, media $MEDIA_URL, together '${TOGETHER_URL}' = same origin)"
+say "2/8 vite build (node $NODE_URL, network '${NETWORK:-not recorded}', media $MEDIA_URL, together '${TOGETHER_URL}' = same origin)"
 ( cd "$STAGE/base/apps/farcaster-web" && rm -rf dist && \
-  VITE_SNAPCHAIN_HTTP_URL="$NODE_URL" VITE_FIDDY_MEDIA_URL="$MEDIA_URL" \
+  VITE_SNAPCHAIN_HTTP_URL="$NODE_URL" VITE_FIDDY_NETWORK="$NETWORK" \
+  VITE_FIDDY_MEDIA_URL="$MEDIA_URL" \
   VITE_TOGETHER_API_URL="$TOGETHER_URL" \
   NODE_OPTIONS=--max-old-space-size=8192 npx vite build > "$STAGE/build.log" 2>&1 ) \
   || { tail -30 "$STAGE/build.log"; exit 1; }
@@ -187,6 +213,14 @@ APP="$STAGE/base/apps/farcaster-web/dist"
 grep -rqs --include='*.js' "$GATE_ADAPTER" "$APP/assets" || { echo "MISSING adapter sentence in the build" >&2; exit 1; }
 grep -rqs "$GATE_MEDIA" "$APP/assets" || { echo "MISSING media path in the build" >&2; exit 1; }
 grep -rqs "$NODE_URL" "$APP/assets" || { echo "MISSING the configured node in the build" >&2; exit 1; }
+# The Network card identifies itself with this marker, and the row for each
+# network is what a reader presses; a build without either has lost the
+# surface the network choice lives on.
+grep -rqs --include='*.js' 'network-choice' "$APP/assets" || { echo "MISSING the network picker in the build" >&2; exit 1; }
+# Deliberately NOT grepping for the network value itself: both names appear in
+# the client's own vocabulary, so finding one proves nothing about whether
+# VITE_FIDDY_NETWORK arrived. The card's marker above is the honest signal —
+# and the served page is where the reading is confirmed, by hand.
 # `--include='*.js'`: vite writes a sourcemap per chunk and a sourcemap carries
 # the ORIGINAL source text, so a plain `grep -r` over assets finds strings the
 # shipped JavaScript does not contain (measured 2026-10-21: the fallback below in
@@ -227,6 +261,7 @@ node "$UNFURL_CHECK" "$APP/index.html" "$UNFURL_OUT" \
 echo "  adapter  ok"
 echo "  media    ok"
 echo "  node     ok ($NODE_URL)"
+echo "  network  ok (${NETWORK:-not recorded} — the client's Network card says it)"
 echo "  together ok (route literal; no laptop fallback in the chunks, api = '${TOGETHER_URL}' same origin)"
 # The shell the host serves runs under script-src 'self'. An inline <script> in
 # index.html (the theme bootstrap used to be one) or an inline on*= handler (the
@@ -277,8 +312,11 @@ mkdir -p "$WEB/preview" "$STAGE/release/server"
 # …and only the ones this repo no longer builds: `fiddy-splash.png` left this
 # list when the app-list manifest's splash moved into `public/` (card
 # t_8654d91e) — a carried-forward copy would WIN over the repo's, so an updated
-# splash would never ship while the release still reported success.
-for f in fiddy-card.png fiddy-icon.png fiddy-mark-180.png fiddy-favicon.svg fiddy-baby.glb ROBOT-HEADS-NOTICE.txt; do
+# splash would never ship while the release still reported success. Same reason
+# `fiddy-baby.glb` left it (card t_5c4b847b): the interactive hero's model is a
+# file THIS repo now owns, and carrying the previous release's copy forward
+# would silently pin the hero to the old bytes.
+for f in fiddy-card.png fiddy-icon.png fiddy-mark-180.png fiddy-favicon.svg ROBOT-HEADS-NOTICE.txt; do
   rsync -a "$HOST:$PRIOR/web/$f" "$WEB/$f"
 done
 # …and moves to /preview/, with its own asset references made relative so both

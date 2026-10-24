@@ -4,13 +4,21 @@
  *
  * These are the things that fail silently and only on somebody else's phone:
  *
- *   * `fiddy-hero.glb` names `EXT_texture_webp` in `extensionsRequired`, which
- *     is a hard requirement — a loader that does not know the extension is
- *     entitled to refuse the whole file. three.js registers it unconditionally
- *     as of r150, the app is on a version well past that, and the browser half
- *     (WebP decoding) is iOS 14+ and every engine since. The day someone swaps
- *     in a Draco- or KTX2-compressed export, or drops three back a major, this
- *     test is what says so — instead of a poster that never moves on Safari.
+ *   * `fiddy-baby.glb` is the interactive hero, so three of its properties are
+ *     load-bearing: it ships the clip the stage asks for BY NAME
+ *     (`CuteBaby5sLoop`), it ships a `HeadGroup` for the pointer to turn, and it
+ *     requires no extension at all. The hero that replaced it named
+ *     `EXT_texture_webp` in `extensionsRequired`, which is a hard requirement a
+ *     loader is entitled to refuse the whole file over; this mascot embeds no
+ *     textures and needs nothing. The day someone swaps in a Draco- or
+ *     KTX2-compressed export this test is what says so — instead of a poster
+ *     that never moves on Safari.
+ *
+ *   * every outline shell in the file is an INFLATED copy (all of them are
+ *     scaled up), which is the premise the scene module's side-flip rests on:
+ *     with the shells' front faces on they are a lid over the figure and the
+ *     character arrives as a dark silhouette. If that ever stops being true, the
+ *     flip in `fiddyModelScene.ts` is drawing the wrong faces.
  *
  *   * `fiddy-hero-poster.png` is the whole hero on a browser with no WebGL and
  *     the whole hero under reduced motion. A hero whose fallback is missing is a
@@ -32,7 +40,7 @@ const APP = path.resolve(
   '..',
   '..',
 );
-const GLB = path.join(APP, 'public', 'fiddy-hero.glb');
+const GLB = path.join(APP, 'public', 'fiddy-baby.glb');
 const POSTER = path.join(APP, 'public', 'fiddy-hero-poster.png');
 
 /** The JSON chunk of a GLB, which is where a glTF keeps its promises. */
@@ -53,21 +61,34 @@ const threeVersion = () =>
     ),
   ).version as string;
 
-describe('fiddy-hero.glb', () => {
-  it('is a binary glTF the app can actually parse', () => {
+describe('fiddy-baby.glb', () => {
+  it('is a binary glTF the app can actually parse, with a head to turn', () => {
     const json = gltfJson(GLB);
     expect(json.asset.version).toBe('2.0');
-    expect(json.meshes).toHaveLength(1);
-    expect(json.animations ?? []).toHaveLength(0);
+    expect(json.meshes.length).toBeGreaterThan(1);
+    expect(
+      json.nodes.some((node: { name?: string }) => node.name === 'HeadGroup'),
+    ).toBe(true);
   });
 
-  it("requires only EXT_texture_webp, and the app's three.js knows it", () => {
-    const required: string[] = gltfJson(GLB).extensionsRequired ?? [];
-    expect(required).toEqual(['EXT_texture_webp']);
+  it('ships the one clip the hero asks for, by name', () => {
+    // The stage names its clip rather than taking `animations[0]`, precisely so
+    // that a model which grows a second clip cannot silently start playing a
+    // different one — which means the name has to actually be in the file.
+    const names = gltfJson(GLB).animations.map(
+      (clip: { name?: string }) => clip.name,
+    );
+    expect(names).toEqual(['CuteBaby5sLoop']);
+  });
 
+  it('requires no extension and embeds no texture, so nothing can refuse it', () => {
+    const json = gltfJson(GLB);
+    expect(json.extensionsRequired ?? []).toEqual([]);
+    expect(json.images ?? []).toEqual([]);
+
+    // What it does USE is core three.js support, and this is the cheap guard
+    // against a downgrade that would silently drop the material treatment.
     const [major, minor] = threeVersion().split('.').map(Number);
-    // r150 added the extension; anything at or past it is fine. The app is on a
-    // 0.1xx release, where the loader registers it unconditionally.
     expect(major * 1000 + minor).toBeGreaterThanOrEqual(150);
     expect(
       fs.readFileSync(
@@ -82,7 +103,36 @@ describe('fiddy-hero.glb', () => {
         ),
         'utf8',
       ),
-    ).toContain('EXT_TEXTURE_WEBP');
+    ).toContain('KHR_materials_unlit');
+  });
+
+  it('makes every outline shell an inflated copy, which is what the flip assumes', () => {
+    const json = gltfJson(GLB);
+    const materialNames: string[] = json.materials.map(
+      (material: { name?: string }) => material.name,
+    );
+    const shells: { name?: string; scale?: number[] }[] = [];
+    for (const node of json.nodes) {
+      if (node.mesh === undefined) {
+        continue;
+      }
+      for (const primitive of json.meshes[node.mesh].primitives) {
+        if (/outline/i.test(materialNames[primitive.material])) {
+          shells.push({ name: node.name, scale: node.scale });
+        }
+      }
+    }
+    expect(shells.length).toBeGreaterThan(0);
+    for (const shell of shells) {
+      expect(shell.scale, `${shell.name} carries no scale`).toBeTruthy();
+      for (const axis of shell.scale ?? []) {
+        expect(
+          axis,
+          `${shell.name} is not inflated on every axis`,
+        ).toBeGreaterThan(1);
+      }
+      expect(shell.scale).toHaveLength(3);
+    }
   });
 });
 

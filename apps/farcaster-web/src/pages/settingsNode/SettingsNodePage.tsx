@@ -21,6 +21,7 @@
  * - Client include/exclude filter
  */
 
+import { useQueryClient } from '@tanstack/react-query';
 import {
   type AppKey,
   appKeyFromPrivateKeyHex,
@@ -34,6 +35,7 @@ import {
   type ClientFilterMode,
   type ClientFilterPolicy,
   type ClientIdentity,
+  createAppClientNameLookup,
   fetchCastsByFid,
   fetchFollowingFeed,
   fetchSignerState,
@@ -44,7 +46,14 @@ import {
   type NodeSigner,
   revokeAppKey,
 } from 'farcaster-node-client';
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { mnemonicToAccount } from 'viem/accounts';
 
 import { BorderedMainContent } from '~/components/BorderedMainContent';
@@ -62,6 +71,17 @@ import {
   saveAppNonce,
 } from '~/snapchain/appKeyStorage';
 import {
+  applyClientFilterPolicy,
+  applyClientLabels,
+  loadActiveClientPreferences,
+} from '~/snapchain/clientFilterPreferences';
+import {
+  networkName,
+  networkOffers,
+  type NetworkRoute,
+  readNetwork,
+} from '~/snapchain/networks';
+import {
   chooseNode,
   type NodeChoice,
   resetNodeChoice,
@@ -69,19 +89,18 @@ import {
 } from '~/snapchain/nodeChoice';
 import {
   type ClientLabels,
-  loadClientLabels,
-  loadFilterPolicy,
-  saveClientLabels,
-  saveFilterPolicy,
+  toClientLabels,
   toKnownClients,
   withClientLabel,
 } from '~/snapchain/nodePreferences';
+import { THIS_CLIENT_APP_FID } from '~/snapchain/thisClientApp';
 import { useNodeChoice } from '~/snapchain/useNodeChoice';
 import { useNodeClient } from '~/snapchain/useNodeClient';
 import { trackError } from '~/utils/errorUtils';
 
 import { AppKeyCard } from './Component/AppKeyCard';
 import { ClientFilterCard } from './Component/ClientFilterCard';
+import { NetworkChoiceCard } from './Component/NetworkChoiceCard';
 import { NodeChoiceCard } from './Component/NodeChoiceCard';
 import { NodeComposer } from './Component/NodeComposer';
 import { NodeFeed } from './Component/NodeFeed';
@@ -102,6 +121,10 @@ const nodeError = (operation: string, error: unknown) =>
 const SettingsNodePage = memo(() => {
   const { fid } = useCurrentUser();
   const node = useNodeClient();
+  // Saved preferences also have to reach pages that are already cached: a filter
+  // that is stored but still served from a stale page reads as "the filter does
+  // nothing", so every save drops the cached reads.
+  const queryClient = useQueryClient();
 
   // The server this reader chose (a public one, or their own). Restoring it is
   // what points the rest of this page — and the pill, and the feed — at it, so
@@ -210,16 +233,22 @@ const SettingsNodePage = memo(() => {
   }, [fid]);
 
   // Restore the view-layer preferences (client filter + your client labels).
+  // Read through the shared store (`clientFilterPreferences`) rather than
+  // straight out of storage: the same values the feed filters by are the ones
+  // this screen shows, so the two cannot disagree — and saving below updates
+  // that store, which is what makes a change apply without a reload.
   useEffect(() => {
     if (!fid) {
       return;
     }
-    Promise.all([loadFilterPolicy(fid), loadClientLabels(fid)]).then(
-      ([policy, labels]) => {
+    loadActiveClientPreferences(fid)
+      .then(({ policy, knownClients }) => {
         setFilterPolicy(policy);
-        setClientLabels(labels);
-      },
-    );
+        setClientLabels(toClientLabels(knownClients));
+      })
+      .catch(() => {
+        // Unreadable storage must not stop the screen: no filter, no labels.
+      });
   }, [fid]);
 
   // Fetch node health
@@ -317,12 +346,14 @@ const SettingsNodePage = memo(() => {
         );
         setFeedEmpty(true);
       } else {
-        // Resolve client identities. `knownClients` is the map of labels the
-        // reader gave to other clients; unlabelled app FIDs stay anonymous.
+        // Resolve who made each cast: the app FID that requested the signing
+        // key, then that app account's own name from the node. A label the
+        // reader typed wins over the app's own profile.
         const resolver = new CastClientResolver({
           node,
-          selfAppFid: fid,
+          thisAppFid: THIS_CLIENT_APP_FID,
           knownClients: toKnownClients(clientLabels),
+          names: createAppClientNameLookup({ node }),
         });
 
         const resolved = await resolver.resolveAll(
@@ -596,19 +627,24 @@ const SettingsNodePage = memo(() => {
   );
 
   // Handle filter change. The policy is view-layer preference, so it is stored
-  // per FID and reapplied on reload; `refreshFeed` re-runs from the changed
-  // state via its own effect, so no manual re-fetch is needed here.
+  // per FID and reapplied on reload; saving through the shared store is also
+  // what puts it in force for the next feed read (the read seam asks that store
+  // on every request), and the page cache is dropped so the change is visible
+  // on the next page rather than after a stale copy expires.
   const handleFilterChange = useCallback(
     (mode: ClientFilterMode, clientIds: string[]) => {
       const next: ClientFilterPolicy = { mode, clientIds };
       setFilterPolicy(next);
       if (fid) {
-        saveFilterPolicy(fid, next).catch(() => {
-          // Storage failing must not block filtering for this session.
-        });
+        applyClientFilterPolicy(fid, next)
+          .then(() => queryClient.invalidateQueries())
+          .catch(() => {
+            // Storage failing must not block filtering for this session: the
+            // in-memory policy above still applies to this screen's feed.
+          });
       }
     },
-    [fid],
+    [fid, queryClient],
   );
 
   // Choosing a server is a preference like the filter: stored per FID, and
@@ -624,18 +660,52 @@ const SettingsNodePage = memo(() => {
     [fid],
   );
 
-  // Name (or un-name) another client. Labels are the reader's, never invented.
+  // Which NETWORK this client is reading — a different question from which
+  // Which NETWORK this client is reading — a different question from which
+  // server, and one the client must answer from provenance, never by guessing
+  // (a node carries no network name in /v1/info; see ~/snapchain/networks).
+  const networkReading = useMemo(
+    () =>
+      readNetwork({
+        choiceUrl: nodeChoice?.url ?? null,
+        choiceKind: nodeChoice?.kind ?? null,
+      }),
+    [nodeChoice],
+  );
+
+  // And both networks with the address each would be read from here, so the
+  // chooser offers only what this client can actually read.
+  const networkChoices = useMemo(
+    () => networkOffers({ choiceUrl: nodeChoice?.url ?? null }),
+    [nodeChoice],
+  );
+
+  // Picking a network is picking its server: the same stored choice the card
+  // above writes, which is what makes the switch real rather than a label.
+  const handleChooseNetwork = useCallback(
+    (route: NetworkRoute) =>
+      fid
+        ? chooseNode(fid, { kind: route.kind, url: route.url })
+        : Promise.resolve(),
+    [fid],
+  );
+
+  // Name (or un-name) another client. A label the reader types wins over what
+  // the app calls itself, and saving it through the store is what makes every
+  // cast from that app read the new name on the next page.
   const handleLabelClient = useCallback(
     (clientId: string, label: string) => {
       setClientLabels((current) => {
         const next = withClientLabel(current, clientId, label);
         if (fid) {
-          saveClientLabels(fid, next).catch(() => {});
+          applyClientLabels(fid, next)
+            .then(() => queryClient.invalidateQueries())
+            .catch(() => {});
         }
         return next;
       });
     },
-    [fid],
+    [fid, queryClient],
   );
 
   if (!fid) {
@@ -694,6 +764,12 @@ const SettingsNodePage = memo(() => {
             {/* Where Fiddy reads from: the reader's choice, and the first
                 thing on this screen because everything below it reads through
                 whichever server it names. */}
+            <NetworkChoiceCard
+              reading={networkReading}
+              offers={networkChoices}
+              onChooseRoute={handleChooseNetwork}
+            />
+
             <NodeChoiceCard
               choice={nodeChoice}
               onChoose={handleChooseNode}
@@ -709,6 +785,7 @@ const SettingsNodePage = memo(() => {
               health={nodeHealth}
               loading={healthLoading}
               onRefresh={refreshHealth}
+              network={networkName(networkReading.network)}
             />
 
             {/* Posting key: the primary way to let Fiddy post for you — one

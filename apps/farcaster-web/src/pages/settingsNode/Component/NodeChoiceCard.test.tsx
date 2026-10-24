@@ -44,7 +44,7 @@ describe('NodeChoiceCard', () => {
       <NodeChoiceCard choice={null} onChoose={vi.fn()} onReset={vi.fn()} />,
     );
 
-    expect(screen.getByText('Use a public Farcaster node')).toBeTruthy();
+    expect(screen.getByText('Use a public node')).toBeTruthy();
     expect(screen.getByText('Run your own node')).toBeTruthy();
     expect(screen.getByText(/about 2 TB of free disk/)).toBeTruthy();
     expect(

@@ -38,6 +38,7 @@
 
 import {
   ApiCast,
+  ApiCastClient,
   ApiCastEmbeds,
   ApiCastFeedItem,
   ApiCastImageEmbed,
@@ -50,6 +51,7 @@ import {
   ApiUserMinimal,
 } from 'farcaster-client-data';
 import {
+  type ClientIdentity,
   type NodeCastAddBody,
   type NodeMessage,
   type NodeUserDataBody,
@@ -319,6 +321,38 @@ export const userMinimalFrom = (user: ApiUser): ApiUserMinimal => ({
   ...(user.pfp === undefined ? {} : { pfp: user.pfp }),
 });
 
+/**
+ * The app that made a cast, as `ApiCast.client`.
+ *
+ * A node-backed read resolves this from the protocol (`clientAttribution`): the
+ * signing key's signed key request names an app FID, and that app account's own
+ * profile names the app. The shape is the hosted API's own `client` field — a
+ * minimal user — so the conversation view's "Sent from …" row and anything else
+ * that already reads `cast.client` lights up without knowing where it came from.
+ *
+ * `fid` is the app FID when there is one; for a key the account requested
+ * itself (`own`) or an on-chain key (`onchain`) there is no app, so it is the
+ * account's own FID and `kind` is what says so. `displayName` carries the label
+ * the cast card shows, which for `own`/`onchain` is a description rather than a
+ * name — deliberately, because inventing an app for those would be a lie.
+ */
+export const apiCastClientFromIdentity = ({
+  identity,
+  authorFid,
+}: {
+  identity: ClientIdentity;
+  authorFid: number;
+}): ApiCastClient => ({
+  fid: identity.requestFid ?? authorFid,
+  displayName: identity.label,
+  ...(identity.username === undefined ? {} : { username: identity.username }),
+  ...(identity.pfpUrl === undefined
+    ? {}
+    : { pfp: { url: identity.pfpUrl, verified: false } }),
+  kind: identity.kind,
+  clientId: identity.id,
+});
+
 const HANDLE_CHARACTER = /[a-zA-Z0-9_.-]/;
 
 /**
@@ -462,6 +496,14 @@ export interface ApiCastFromNodeOptions {
    * data. A fid with no entry keeps the fid floor.
    */
   mentionUsers?: ReadonlyMap<number, ApiUser>;
+  /**
+   * Which app made this cast, when the caller resolved it from the protocol
+   * (`farcaster-node-client`'s `clientAttribution`: the signer's signed key
+   * request names an app FID, and that app account's own profile names the app).
+   * Absent when nothing established it — a cast with no attribution is drawn
+   * without a client, never with a guessed one.
+   */
+  client?: ApiCastClient;
 }
 
 /**
@@ -485,6 +527,7 @@ export const apiCastFromNode = ({
   embedKind,
   cardOf,
   mentionUsers,
+  client,
 }: ApiCastFromNodeOptions): ApiCast => {
   const { embeds } = castEmbedsFromNode({
     body,
@@ -556,6 +599,12 @@ export const apiCastFromNode = ({
   }
   if (viewerContext) {
     cast.viewerContext = viewerContext;
+  }
+  if (client) {
+    // The app that made this cast, as the protocol names it. Set only when it
+    // was really resolved (see `reads.ts`): an unresolved client leaves the
+    // field absent, which renders as no label rather than as a claim.
+    cast.client = client;
   }
 
   return cast;
