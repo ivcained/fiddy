@@ -171,7 +171,10 @@ const keepHandedOverKey = async (
   // answer can put bytes in this device's key store, and an answer that carries
   // anything but a 32-byte key (`~/snapchain/accounts/managedConnect` reads the
   // field strictly for the same reason) must never reach it.
-  if (typeof status.postingKey !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(status.postingKey)) {
+  if (
+    typeof status.postingKey !== 'string' ||
+    !/^0x[0-9a-fA-F]{64}$/.test(status.postingKey)
+  ) {
     return;
   }
   // AWAITED, not fired and forgotten: on this path the connection exists to
