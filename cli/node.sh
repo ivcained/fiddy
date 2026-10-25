@@ -552,7 +552,8 @@ node_autoupgrade() {
       # clobbered — a dirty tree just skips that run).
       if [ -d "$FIDDY_REPO/.git" ]; then
         mkdir -p "$FIDDY_HOME"
-        ( crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade' | grep -v 'fiddy self-update'; echo "0 * * * * git -C $FIDDY_REPO pull --ff-only >> $FIDDY_HOME/self-update.log 2>&1 # fiddy self-update" ) | crontab -
+        snap_line="$cron $snap_dir/snapchain.sh autoupgrade >> $snap_dir/snapchain-autoupgrade.log 2>&1"
+        ( crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade' | grep -v 'fiddy self-update'; echo "$snap_line"; echo "0 * * * * git -C $FIDDY_REPO pull --ff-only >> $FIDDY_HOME/self-update.log 2>&1 # fiddy self-update" ) | crontab -
       fi
       crontab -l | grep snapchain \
         && ok "auto-upgrade on (local): $every (cron '$cron'; log: ~/snapchain/snapchain-autoupgrade.log)"
