@@ -87,7 +87,7 @@ a { color: var(--lime); text-decoration: none; }
     </div>
 
     <div class="provider">
-      <div class="phead"><strong>AWS</strong><span class="price">~$285/mo · default cloud path</span></div>
+      <div class="phead"><strong>AWS</strong><span class="price">~$304/mo · default cloud path</span></div>
       <p style="margin:10px 0 4px"><a class="btn" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener">Open AWS CloudShell ↗</a></p>
       <p class="dim prow">CloudShell opens pre-authenticated in your account. One line inside:</p>
       <pre class="pcmd"><span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span></pre>
@@ -102,11 +102,21 @@ a { color: var(--lime); text-decoration: none; }
     </div>
 
     <div class="provider">
-      <div class="phead"><strong>Hetzner</strong><span class="price">~€120/mo · cheapest cloud</span></div>
+      <div class="phead"><strong>BuyVM — manual order</strong><span class="price">$80/mo · 4 vCPU / 16 GB / 4 TB</span></div>
+      <p class="dim prow">Slice 16384 ($60) plus a 4 TB Performance block-storage slab ($20). Stock and Performance-tier choice matter. Choose this path in <code style="font-family:var(--mono)">fiddy start</code>, then paste back the public SSH address.</p>
+    </div>
+
+    <div class="provider">
+      <div class="phead"><strong>Hetzner auction — manual order</strong><span class="price">listing verified at checkout</span></div>
+      <p class="dim prow">A 2026-10-25 listing offered 2x4 TB disks at EUR 72.70/mo before VAT. Stock and prices change, so verify the live listing. Choose this path in <code style="font-family:var(--mono)">fiddy start</code>, then paste back the public SSH address.</p>
+    </div>
+
+    <div class="provider">
+      <div class="phead"><strong>Hetzner Cloud</strong><span class="price">~€230/mo · quota-sensitive path</span></div>
       <p class="dim prow">Get an API token at <a href="https://console.hetzner.cloud" target="_blank" rel="noopener">console.hetzner.cloud</a> (project → Security → API tokens), then:</p>
       <pre class="pcmd"><span class="k">export HCLOUD_TOKEN=…
 git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/hetzner-deploy.sh</span></pre>
-      <p class="dim prow" style="font-size:13px">Roughly a third of AWS's price and fully supported <em>once your account's
+      <p class="dim prow" style="font-size:13px">Lower list price than AWS fully supported <em>once your account's
       volume quota has been raised past 1024 GB</em> — new accounts are capped below what the node needs
       (see the AWS note above).</p>
     </div>
@@ -119,10 +129,10 @@ git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/ovh-depl
     </div>
 
     <div class="provider">
-      <div class="phead"><strong>Google Cloud</strong><span class="price">~$350/mo · we tested this one · $300 free credit for new accounts</span></div>
+      <div class="phead"><strong>Google Cloud</strong><span class="price">~$180/mo · we tested this one · $300 free credit for new accounts</span></div>
       <p style="margin:10px 0 4px"><a class="btn" href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener">Open in Cloud Shell ↗</a></p>
       <p class="dim prow" style="margin-top:8px">True one click, from right here: Cloud Shell opens pre-authenticated, the walkthrough runs itself.
-      ~$350/mo while it runs (our own bill) — <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 free credit</a>
+      ~$180/mo list price — <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 free credit</a>
       makes it free to start. Set a reminder to delete the VM before the credit ends.</p>
     </div>
 
@@ -189,7 +199,7 @@ fiddy node up</span></pre>
     <p class="dim" style="font-size:13px;margin:10px 0 0">Runs inside a Farcaster client (Warpcast etc.) with your wallet.
     On the open web the button tells you how to pay instead. The machine appears in minutes; the node answers once it has
     caught up with chain history (~470 GB — hours, not minutes). <strong style="color:var(--ink)">Money honesty:</strong>
-    the machine costs us about $285/mo at list; the balance is the babysitting. Cancel anytime — a lapsed
+    the machine costs us about $304/mo at list; the balance is the babysitting. Cancel anytime — a lapsed
     subscription gets 7 days' grace before the machine goes back.</p>
   </div>
 

@@ -305,7 +305,7 @@ details summary::marker { color: var(--lime-text); }
     </div>
     <p class="dim" style="margin-top:16px">Prefer the individual commands? <code class="inline">fiddy provision</code>, <code class="inline">fiddy node up</code>, and <code class="inline">fiddy client up</code> still run the same steps separately.</p>
     <div class="cloud-actions">
-      <p><strong>Need the server first?</strong> A cloud server is a recurring bill: AWS is about $285/month; GCP is about $350/month with a $300 new-user credit. New AWS accounts can wait 0-2 days for verification, so GCP is the alternative.</p>
+      <p><strong>Need the server first?</strong> Run the three-answer wizard: <code class="inline">fiddy start</code>. A cloud server is a recurring bill: AWS is about $304/month; GCP is about $180/month with a $300 new-user credit. New AWS accounts can wait 0-2 days for verification, so GCP is the alternative.</p>
       <div class="cloud-buttons">
         <a class="cloud-button aws" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener">Open AWS CloudShell ↗</a>
         <a class="cloud-button google" href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&amp;cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" width="190" height="36"></a>
@@ -376,10 +376,10 @@ details summary::marker { color: var(--lime-text); }
     <div class="reading">
       <details class="pane provider-details">
         <summary>Other providers: same three commands, your pick</summary>
-        <pre><code><span class="c"># AWS, needs the aws CLI configured, about $285/month list:</span>
+        <pre><code><span class="c"># AWS, needs the aws CLI configured, about $304/month list:</span>
 <span class="k">fiddy provision --aws</span>
 
-<span class="c"># Hetzner CCX33 + 2 TB volume, about €120/month, token from console.hetzner.cloud:</span>
+<span class="c"># Hetzner CCX33 + 2 TB volume, about €230/month, token from console.hetzner.cloud:</span>
 <span class="k">fiddy provision --hetzner</span>
 
 <span class="c"># OVHcloud Public Cloud b3-16 + 2 TB volume, about $190/month:</span>
@@ -401,14 +401,16 @@ details summary::marker { color: var(--lime-text); }
       <p class="dim">You pay your provider directly. Fiddy does not add a fee.</p>
       <ul class="price-ladder">
         <li class="price-row"><strong>Your own machine</strong><span class="price">Free</span><small>Use hardware you already have, if it meets the disk and memory requirements.</small></li>
-        <li class="price-row"><strong>Hetzner</strong><span class="price">~€120/mo</span><small>CCX33 with a 2 TB volume. New accounts are capped at 1024 GB volumes, fine once your quota is raised.</small></li>
+        <li class="price-row"><strong>BuyVM</strong><span class="price">$80/mo</span><small>Slice 16384 plus a 4 TB Performance slab: 4 vCPU, 16 GB RAM. Manual order; stock and the Performance tier matter.</small></li>
+        <li class="price-row"><strong>Hetzner auction</strong><span class="price">auction listing, verified at checkout</span><small>A 2026-10-25 listing offered 2x4 TB disks at EUR 72.70/mo before VAT. Dynamic stock and price.</small></li>
+        <li class="price-row"><strong>Hetzner Cloud</strong><span class="price">~€230/mo</span><small>CCX33 with a 2 TB volume. New accounts are capped at 1024 GB volumes, fine once your quota is raised.</small></li>
         <li class="price-row"><strong>OVHcloud</strong><span class="price">~$190/mo</span><small>b3-16 with a 2 TB volume.</small></li>
-        <li class="price-row"><strong>AWS</strong><span class="price">~$285/mo</span><small>The default path. Its root volume can simply be 2 TB, which is part of the price difference.</small></li>
-        <li class="price-row"><strong>GCP</strong><span class="price">~$350/mo</span><small>Tested end to end by us. <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 new-user credit</a>. Set a reminder to delete the VM.</small></li>
+        <li class="price-row"><strong>AWS</strong><span class="price">~$304/mo</span><small>The default path. Its root volume can simply be 2 TB, which is part of the price difference.</small></li>
+        <li class="price-row"><strong>GCP</strong><span class="price">~$180/mo</span><small>Tested end to end by us. <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 new-user credit</a>. Set a reminder to delete the VM.</small></li>
       </ul>
       <div class="pane disclosure">
         <h4>New AWS account? Read this first.</h4>
-        <p>CloudShell can stay locked for 0-2 days during verification. GCP is the alternative, with a $300 new-user credit and about $350/month list price after credit. The same AWS one-liner also runs from any terminal after <code class="inline">aws configure</code>.</p>
+        <p>CloudShell can stay locked for 0-2 days during verification. GCP is the alternative, with a $300 new-user credit and about $180/month list price after credit. The same AWS one-liner also runs from any terminal after <code class="inline">aws configure</code>.</p>
         <p><strong>If your hosting company caps your disk:</strong> new accounts can be limited to 1 TB, which cannot safely finish the first boot. Ask support to raise the limit to 2 TB, pick a different company, or start on the public relay and move later. Do not retry against the same cap.</p>
         <p>Prefer no setup? <a href="/client/deploy/#managedCard">Managed by Fiddy is $320/month</a>. Prefer a guided self-host page? <a href="/client/deploy/">Open fiddy.fun/client/deploy</a>.</p>
       </div>
