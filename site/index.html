@@ -272,7 +272,7 @@ details summary::marker { color: var(--lime-text); }
       <p class="label">The easiest way in</p>
       <h2 id="handoff-title">Give it to your agent.</h2>
       <p class="agent-help">Paste this into [CC], Codex, Hermes, or any agent with a shell. The linked guide has the steps, prices, and mistakes to avoid.</p>
-      <div class="prompt"><code id="agent-prompt">Help me run my own Farcaster node and client: https://fiddy.fun/client/skill.md</code></div>
+      <div class="prompt"><code id="agent-prompt">I want my own copy of Farcaster running on my own computer. Before you start, check how much free space it has. About 2 TB is needed while it downloads. Then follow https://fiddy.fun/client/skill.md. It downloads the whole history first (about 468 GB, many hours), so my computer must stay on. If anything costs money, give me the monthly price and ask me first. Never ask for my seed phrase.</code></div>
       <button class="primary-action copy-prompt" type="button" data-copy-target="agent-prompt">Copy prompt</button>
       <a class="manual-link" href="#quickstart">or do it by hand: see the 3 commands ↓</a>
     </section>
@@ -304,7 +304,7 @@ details summary::marker { color: var(--lime-text); }
       </div>
     </div>
     <div class="cloud-actions">
-      <p><strong>Need the server first?</strong> Open a shell with the CLI ready.</p>
+      <p><strong>Need the server first?</strong> A cloud server is a recurring bill: AWS is about $285/month; GCP is about $350/month with a $300 new-user credit. New AWS accounts can wait 0-2 days for verification, so GCP is the alternative.</p>
       <div class="cloud-buttons">
         <a class="cloud-button aws" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener">Open AWS CloudShell ↗</a>
         <a class="cloud-button google" href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&amp;cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" width="190" height="36"></a>
@@ -324,7 +324,11 @@ details summary::marker { color: var(--lime-text); }
     <div class="reading">
       <div class="step-label"><span class="number">1</span>Provision</div>
       <h2>Get a server, without guessing the size.</h2>
-      <p class="section-intro">A read node needs <strong>4 vCPU, 16 GB RAM, and 1.5 to 2 TB free disk</strong>, running Ubuntu 22.04 or newer. The mainnet snapshot is about 200 GB compressed and takes several times that once decompressed. Size for 1.5 to 2 TB, not 200 GB.</p>
+      <p class="section-intro"><strong>Check free disk space before any install.</strong> A read node needs 4 vCPU, 16 GB RAM, and 2 TB free disk on Ubuntu 22.04 or newer. It downloads about 468 GB, peaks at about 1.66 TB while unpacking, then settles near 597 GB before new blocks are added. Under 1 TB free, never start a local node: use the <a href="#networks">free public relay</a> or the <a href="/client/deploy/#managedCard">managed card, $320/month</a>.</p>
+      <div class="pane note warning">
+        <h3>A full disk starts the download over.</h3>
+        <p>A too-small disk fills, the node restarts, and it re-downloads from chunk 1 until the disk fills again. Pre-check the space; do not retry the same install. Free space or move to a computer with 2 TB free before running it again.</p>
+      </div>
     </div>
 
     <div class="cli-setup reading">
@@ -385,6 +389,10 @@ details summary::marker { color: var(--lime-text); }
         <p>Hetzner and OVH paths are scripted against their API docs but not yet battle-tested. They fail loudly with the provider’s own error if anything drifts. OVH credentials come from <code class="inline">api.ovh.com/createToken</code>. A 2 TB box at any Hetzner, Contabo, or OVH-class host typically runs <strong>$50 to 120/month</strong>. Infra-as-code people: the same validated GCP config ships as a Terraform module in <code class="inline">terraform/gcp-read-node/</code>. Run <code class="inline">terraform apply</code> and it prints the next commands.</p>
       </details>
       <p class="dim">Every scripted path creates a 4 vCPU, 16 GB machine with about 2 TB disk and Docker preinstalled, then saves the target to <code class="inline">~/.fiddy/config</code>. The AWS path also generates an SSH keypair into <code class="inline">~/.fiddy/</code> and locks the security group down. SSH and the node API answer <strong>your IP only</strong>. Gossip ports stay open to the network so your node can talk to peers.</p>
+      <div class="pane note">
+        <h3>If the outside world cannot reach your copy</h3>
+        <p>Your provider's firewall is blocking the network connection. Open port 3382 over UDP to the network; allow ports 3381 and 3383 over TCP only from your own IP for the HTTP and gRPC APIs.</p>
+      </div>
     </div>
 
     <div class="price-block reading" id="costs">
@@ -399,9 +407,9 @@ details summary::marker { color: var(--lime-text); }
       </ul>
       <div class="pane disclosure">
         <h4>New AWS account? Read this first.</h4>
-        <p>CloudShell can stay locked for up to 2 days during verification. The same one-liner runs from any terminal after <code class="inline">aws configure</code>.</p>
-        <p>Hetzner’s 1024 GB new-account volume cap is not enough for the recommended 1.5 to 2 TB. Raise the quota before provisioning.</p>
-        <p>Prefer a guided page? <a href="/client/deploy/">Open fiddy.fun/client/deploy</a>.</p>
+        <p>CloudShell can stay locked for 0-2 days during verification. GCP is the alternative, with a $300 new-user credit and about $350/month list price after credit. The same AWS one-liner also runs from any terminal after <code class="inline">aws configure</code>.</p>
+        <p><strong>If your hosting company caps your disk:</strong> new accounts can be limited to 1 TB, which cannot safely finish the first boot. Ask support to raise the limit to 2 TB, pick a different company, or start on the public relay and move later. Do not retry against the same cap.</p>
+        <p>Prefer no setup? <a href="/client/deploy/#managedCard">Managed by Fiddy is $320/month</a>. Prefer a guided self-host page? <a href="/client/deploy/">Open fiddy.fun/client/deploy</a>.</p>
       </div>
     </div>
   </div>
@@ -426,7 +434,35 @@ details summary::marker { color: var(--lime-text); }
       <p>When you <code class="inline">submitMessage</code> to your read node, it validates the message and <strong>gossips it to validators</strong>. A read node has no mempool of its own. A success response means “valid, accepted for relay,” not “in a block.” Confirm inclusion by watching for a <code class="inline">MERGE_MESSAGE</code> event or querying the message back.</p>
       <p>Under heavy network load a gossiped message can drop and need resubmitting. The client can fall back to submitting at a validator endpoint, and this tutorial shows the trade-off when it matters.</p>
     </div>
-    <p class="dim">Full sync takes hours. The API answers immediately and catches up in the background.</p>
+    <p class="dim"><strong>Downloading the whole history: 5,690 pieces, about 468 GB total.</strong> At the measured 10-20 MB/s, this takes many hours. Plan for overnight on a slow disk.</p>
+    <div class="pane note">
+      <h3>0%</h3>
+      <p>Your computer is downloading the whole history of what everyone has ever posted. No exact finish time yet. At 10-20 MB/s this takes many hours.</p>
+      <p>You can close this and come back. It keeps going on its own.</p>
+    </div>
+    <div class="pane note">
+      <h3>34%</h3>
+      <p>About a third is down. It is pulling 10-20 megabytes every second. Roughly 300 GB is left. The speed depends on your connection and disk, so plan for overnight.</p>
+      <p>You can close this and come back. It keeps going on its own.</p>
+    </div>
+    <div class="pane note">
+      <h3>99%</h3>
+      <p>The download finished. Now it unpacks everything into working space. That step needs the full 2 TB free at once, then it shrinks to about 597 GB. A few more minutes.</p>
+      <p>You can close this and come back. You're nearly there.</p>
+    </div>
+    <p class="dim"><strong>Your copy will not answer any requests until the whole history is downloaded and unpacked.</strong> That is normal, not broken.</p>
+    <div class="pane note">
+      <h3>If your copy is not answering yet</h3>
+      <p>A brand-new copy refuses every request until the whole history finishes downloading and unpacking, which takes hours. Run <code class="inline">fiddy node logs</code> to watch progress, then keep waiting; <code class="inline">fiddy node status</code> works after the load completes.</p>
+    </div>
+    <div class="pane note warning">
+      <h3>If your disk filled up</h3>
+      <p>The first boot briefly needs about 2 TB, with a measured peak of about 1.66 TB. A smaller disk fills and the whole download starts over from chunk 1. Free up space or move to a computer with 2 TB free, then run it again. Do not retry on the same full disk.</p>
+    </div>
+    <div class="pane note">
+      <h3>If your laptop went to sleep</h3>
+      <p>Your computer paused, so a local download paused with it. Keep it plugged in and awake, or move to a computer that stays on (about $120-285/month to rent one).</p>
+    </div>
   </div>
 </section>
 
