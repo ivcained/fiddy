@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -45,6 +46,53 @@ def wait_for_return(single):
         input("\nPress Enter to return to Fiddy console. ")
 
 
+def sync_view(manager):
+    """Live download view: percent, rate and ETA. Distinct from the one-shot
+    Node Status report so the two tabs are not the same screen."""
+    previous = None
+    while True:
+        print("\033[2J\033[H", end="")
+        print("\033[38;5;154mFIDDY / SYNC PROGRESS\033[0m")
+        print("One-time download of Farcaster history; the node syncs after it.\n")
+        status = manager.status()
+        snapshot = status.get("snapshot")
+        now = time.time()
+        if snapshot:
+            print("CHUNKS   %(chunk)s / %(total)s" % snapshot)
+            print("PROGRESS %(percent)s%%" % snapshot)
+            if previous:
+                elapsed = now - previous[0]
+                done = snapshot["chunk"] - previous[1]
+                if done > 0 and elapsed > 0:
+                    per_second = done / elapsed
+                    print("SPEED    %.1f chunks/min" % (per_second * 60))
+                    print("ETA      ~%d min at the current speed" % ((snapshot["total"] - snapshot["chunk"]) / per_second / 60))
+        else:
+            print(status_text(status))
+        print("\nLive, refreshes every 10s. Press Enter or q to close.")
+        previous = (now, snapshot["chunk"]) if snapshot else None
+        if wait_or_quit(10):
+            return 0
+
+
+def wait_or_quit(seconds):
+    if os.name == "nt":
+        import msvcrt
+        end = time.time() + seconds
+        while time.time() < end:
+            if msvcrt.kbhit():
+                msvcrt.getch()
+                return True
+            time.sleep(0.2)
+        return False
+    import select
+    ready, _, _ = select.select([sys.stdin], [], [], seconds)
+    if ready:
+        sys.stdin.readline()
+        return True
+    return False
+
+
 def main():
     from console.config import ConfigStore
     from console.node import NodeError, NodeManager
@@ -53,6 +101,8 @@ def main():
     store = ConfigStore()
     manager = NodeManager(store)
     action = os.environ.get("FIDDY_CONSOLE_ACTION", "console")
+    if action == "sync":
+        return sync_view(manager)
     single = action != "console"
     while True:
         print("\033[2J\033[H", end="")
