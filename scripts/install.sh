@@ -65,13 +65,14 @@ if [ "$INSTALL_CONSOLE" = 1 ]; then
     curl -fsSL https://herdr.dev/install.sh | sh
     export PATH="$HOME/.local/bin:$PATH"
   fi
-  if ! herdr plugin list 2>/dev/null | grep -q 'devswha.ovis'; then
+  PLUGINS="$(herdr plugin list 2>/dev/null || true)"
+  if [[ "$PLUGINS" != *devswha.ovis* ]]; then
     say "Installing Ovis"
     curl -fsSL https://ovis.sh/install.sh | sh
     export PATH="$HOME/.local/bin:$PATH"
   fi
   say "Installing the Fiddy console buttons"
-  if ! herdr plugin list 2>/dev/null | grep -q 'fun.fiddy.console'; then
+  if [[ "$PLUGINS" != *fun.fiddy.console* ]]; then
     if [ -n "${FIDDY_CONSOLE_PLUGIN_DIR:-}" ]; then
       herdr plugin link "$FIDDY_CONSOLE_PLUGIN_DIR"
     elif [ -f "$DEST/plugins/fiddy-console/herdr-plugin.toml" ]; then
