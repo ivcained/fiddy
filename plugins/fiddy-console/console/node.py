@@ -107,10 +107,27 @@ class TunnelManager:
                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except FileNotFoundError:
             raise NodeError("SSH is required to reach a remote node's loopback dashboard.") from None
-        time.sleep(0.4)
-        if self.process.poll() is not None:
+        # Do not race the browser: wait until both local forwards actually
+        # accept TCP. The old fixed 0.4s sleep let the first page load hit a
+        # not-yet-bound port and surface as a 502.
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if self.process.poll() is not None:
+                self.close()
+                raise NodeError("Could not open the SSH tunnels. Check the target and key in Settings.")
+            ready = 0
+            for port in (local_node, local_grafana):
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=1):
+                        ready += 1
+                except OSError:
+                    pass
+            if ready == 2:
+                break
+            time.sleep(0.25)
+        else:
             self.close()
-            raise NodeError("Could not open the SSH tunnels. Check the target and key in Settings.")
+            raise NodeError("The SSH tunnels did not come up in time. Check the target and key in Settings.")
         self.signature = signature
         self.endpoints = ("http://127.0.0.1:%d" % local_node, "http://127.0.0.1:%d" % local_grafana)
         return self.endpoints
