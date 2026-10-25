@@ -77,9 +77,7 @@ a { color: var(--lime); text-decoration: none; }
     <div class="provider">
       <div class="phead"><strong>Your own machine</strong><span class="price">free · zero cloud</span></div>
       <p class="dim prow">Any Mac/Linux box — the CLI installs Docker, Node and pnpm itself. The node runs right here — no account, no bill, no keys to anyone:</p>
-      <pre class="pcmd"><span class="k">git clone https://github.com/ivcained/fiddy && cd fiddy
-export PATH="$PWD/bin:$PATH"
-bin/fiddy node up --local</span></pre>
+      <pre class="pcmd"><span class="k">curl -fsSL https://fiddy.fun/client/install.sh | bash</span></pre>
       <p class="dim prow" style="font-size:13px">Bootstrap still downloads ~470 GB (overnight on home broadband). A sleeping laptop pauses the node — it catches up when it wakes. Perfect for trying everything; move to a server later if you want it always-on.</p>
     </div>
 
@@ -222,17 +220,8 @@ $('copy').addEventListener('click', () => {
 });
 
 // "Hand it to your AI agent" — one self-contained prompt, any agent.
-const AGENT_PROMPT = `Set me up with my own Farcaster read node and the Fiddy client, following the tutorial at https://fiddy.fun/client/ (repo: https://github.com/ivcained/fiddy).
-
-Do it step by step, asking me before anything that spends money:
-1. Help me pick compute. Options: my own machine (free, needs ~2TB free disk + Docker), or a cloud — AWS is the default (~$285/mo, root volume can be 2TB), Hetzner is cheapest (~€120/mo but new accounts are capped at 1024GB volumes until quota is raised), GCP ~$350/mo (tested by the authors; $300 new-user credit), or a budget VPS I order manually then hand you the IP for.
-2. Clone the repo: git clone https://github.com/ivcained/fiddy && cd fiddy && export PATH="$PWD/bin:$PATH"
-   (the CLI is bin/fiddy — without the PATH export, every command says 'fiddy: command not found')
-3. Provision: bin/fiddy provision --aws (or --hetzner / --gcp / --ovh / --ssh user@host for a machine I give you).
-4. Node: bin/fiddy node up, then bin/fiddy node status. The snapshot is ~470GB and bootstraps overnight — warn me, don't wait on it.
-5. Verify: bin/fiddy node verify must print all green.
-6. Client: bin/fiddy client up, then give me the localhost URL.
-Rules: never ask me for a seed phrase in chat — the tutorial has a test-accounts-only policy; point me at its #safety section. If a command fails, run bin/fiddy doctor and show me the output.`;
+// The detail lives in the agent-readable skill.md, not here.
+const AGENT_PROMPT = `Help me run my own Farcaster node and client: https://fiddy.fun/client/skill.md`;
 
 document.querySelectorAll('.abtn').forEach(btn => {
   btn.addEventListener('click', () => {

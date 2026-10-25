@@ -21,17 +21,31 @@ Full tutorial (mobile + desktop, protocol concepts explained as you go):
 
 ## Quickstart
 
-```bash
-git clone https://github.com/ivcained/fiddy && cd fiddy
-export PATH="$PWD/bin:$PATH"   # puts `fiddy` on PATH for this shell
-                               # (or permanently: sudo ln -sf "$PWD/bin/fiddy" /usr/local/bin/fiddy)
+Two ways in — pick the one that matches where you're sitting:
 
-fiddy provision   # (0) compute: one click on GCP (https://fiddy.fun/client/deploy/),
-                  #      --gcp / --aws / --ovh / --hetzner, Terraform (terraform/gcp-read-node/),
-                  #      or register any server (--ssh user@host)
-fiddy node up     # (1) Snapchain read node on that compute — installs, then bootstraps
-fiddy client up   # (2) the Fiddy web client, pointed at your node (SSH-tunneled by default)
+**Way 1 · from your own terminal** (Mac/Windows/Linux; the CLI drives the server over SSH):
+
+```bash
+# create the machine — one click (https://fiddy.fun/client/deploy/) or:
+curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash   # AWS, ~$285/mo
+# then, from your terminal:
+git clone https://github.com/ivcained/fiddy && cd fiddy
+export PATH="$PWD/bin:$PATH"          # puts `fiddy` on PATH (or: bin/fiddy install, once, permanent)
+fiddy provision --ssh ubuntu@<ip>     # register the box (or: --aws / --gcp / --hetzner / --ovh)
+fiddy node up                         # (1) Snapchain read node on it — installs, then bootstraps
+fiddy client up                       # (2) the Fiddy client, tunneled to your node
 ```
+
+**Way 2 · inside the VPS terminal** (you already made a server and SSH'd in — skip provision):
+
+```bash
+curl -fsSL https://fiddy.fun/client/install.sh | bash   # clone + PATH + Docker + node, one line
+fiddy client up --tunnel                                # then, when the node answers
+```
+
+Hand the whole thing to an agent instead: `Help me run my own Farcaster node and client: https://fiddy.fun/client/skill.md` (that file is written for agents). Full tutorial: **https://fiddy.fun/client** (mobile + desktop, EN + 中文).
+
+Other everyday commands: `fiddy doctor` (machine + network check with the fix spelled out), `fiddy node status` / `verify` / `dashboard` / `logs`, `fiddy node autoupgrade on [--every weekly|daily|hourly]` (off by default — the upstream job prunes the whole Docker host), `fiddy up` (doctor → node → client, one shot).
 
 **Two networks, same idea, and you pick** (`--network snapchain|hypersnap`,
 Snapchain by default). Both carry the same kind of social data and do not talk to
