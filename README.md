@@ -28,24 +28,33 @@ Two ways in — pick the one that matches where you're sitting:
 ```bash
 # create the machine — one click (https://fiddy.fun/client/deploy/) or:
 curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash   # AWS, ~$285/mo
-# then, from your terminal:
-git clone https://github.com/ivcained/fiddy && cd fiddy
-export PATH="$PWD/bin:$PATH"          # puts `fiddy` on PATH (or: bin/fiddy install, once, permanent)
+# install fiddy + Herdr/Ovis console on this computer (no local 2 TB node):
+curl -fsSL https://fiddy.fun/client/install.sh | bash
 fiddy provision --ssh ubuntu@<ip>     # register the box (or: --aws / --gcp / --hetzner / --ovh)
 fiddy node up                         # (1) Snapchain read node on it — installs, then bootstraps
 fiddy client up                       # (2) the Fiddy client, tunneled to your node
+herdr                                 # or: node buttons + built-in Grafana in Ovis
 ```
 
 **Way 2 · inside the VPS terminal** (you already made a server and SSH'd in — skip provision):
 
 ```bash
-curl -fsSL https://fiddy.fun/client/install.sh | bash   # clone + PATH + Docker + node, one line
+curl -fsSL https://fiddy.fun/client/install.sh | bash   # clone + PATH + console + node, one line
 fiddy client up --tunnel                                # then, when the node answers
 ```
 
 Hand the whole thing to an agent instead: `Help me run my own Farcaster node and client: https://fiddy.fun/client/skill.md` (that file is written for agents). Full tutorial: **https://fiddy.fun/client** (mobile + desktop, EN + 中文).
 
 Other everyday commands: `fiddy doctor` (machine + network check with the fix spelled out), `fiddy node status` / `verify` / `dashboard` / `logs`, `fiddy node autoupgrade on [--every weekly|daily|hourly]` (off by default — the upstream job prunes the whole Docker host), `fiddy up` (doctor → node → client, one shot).
+
+**Buttons instead of commands:** the same installer adds Herdr + Ovis and the
+`plugins/fiddy-console` plugin. Open Ovis's command palette
+(Cmd/Ctrl+Shift+K), type `Fiddy`, and use the native buttons for live status,
+sync, logs, start/stop, operator FID, settings, and upgrades. The Grafana button
+opens the node's real dashboard through a token-gated loopback proxy and SSH
+tunnel; Shift-click its link to embed Grafana beside the terminal. Node controls
+and Grafana need no AI key. The optional Surp agent/key flow is not part of this
+release.
 
 **Two networks, same idea, and you pick** (`--network snapchain|hypersnap`,
 Snapchain by default). Both carry the same kind of social data and do not talk to

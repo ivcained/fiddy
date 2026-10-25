@@ -77,7 +77,7 @@ a { color: var(--lime); text-decoration: none; }
     <div class="provider">
       <div class="phead"><strong>Your own machine</strong><span class="price">free · zero cloud</span></div>
       <p class="dim prow">Any Mac/Linux box — the CLI installs Docker, Node and pnpm itself. The node runs right here — no account, no bill, no keys to anyone:</p>
-      <pre class="pcmd"><span class="k">curl -fsSL https://fiddy.fun/client/install.sh | bash</span></pre>
+      <pre class="pcmd"><span class="k">curl -fsSL https://fiddy.fun/client/install.sh | FIDDY_INSTALL_NODE=1 bash</span></pre>
       <p class="dim prow" style="font-size:13px">Bootstrap still downloads ~470 GB (overnight on home broadband). A sleeping laptop pauses the node — it catches up when it wakes. Perfect for trying everything; move to a server later if you want it always-on.</p>
     </div>
 
@@ -157,9 +157,9 @@ git clone https://github.com/ivcained/fiddy && cd fiddy && bash scripts/ovh-depl
     <h2><span class="n">2</span>Paste your node's IP</h2>
     <p class="dim" style="font-size:14.5px">The script prints it. Paste it here — the rest of the commands build themselves.</p>
     <input id="ip" inputmode="decimal" placeholder="34.101.…" autocomplete="off">
-    <pre id="cmds" hidden><span class="k">git clone https://github.com/ivcained/fiddy && cd fiddy
-bin/fiddy provision --ssh</span> <span id="sshuser">ubuntu</span>@<span id="ip2">…</span><span class="k">
-bin/fiddy node up</span></pre>
+    <pre id="cmds" hidden><span class="k">curl -fsSL https://fiddy.fun/client/install.sh | bash
+fiddy provision --ssh</span> <span id="sshuser">ubuntu</span>@<span id="ip2">…</span><span class="k">
+fiddy node up</span></pre>
     <p style="margin-top:10px" id="copyrow" hidden><button class="btn ghost" id="copy">Copy commands</button></p>
   </div>
 
