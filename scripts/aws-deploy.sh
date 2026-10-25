@@ -8,7 +8,7 @@
 # Creates (idempotent — safe to re-run):
 #   * key pair "fiddy-node" (private key saved to ./fiddy-node.pem — guard it)
 #   * security group "fiddy-node": SSH + node APIs from YOUR ip only, gossip open
-#   * EC2 m5.xlarge, Ubuntu 24.04, 2048 GB gp3 (~$285/mo list) with Docker
+#   * EC2 m5.xlarge, Ubuntu 24.04, 2048 GB gp3 (~$304/mo list) with Docker
 #
 set -euo pipefail
 
@@ -58,7 +58,7 @@ UD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/aws-node-user-data.sh"
 
 IID="$(aws ec2 describe-instances --region "$REGION" --filters "Name=tag:Name,Values=$NAME" "Name=instance-state-name,Values=pending,running" --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null || true)"
 if [ -z "$IID" ] || [ "$IID" = "None" ]; then
-  echo "▸ launching the VM (billing starts now, ~\$285/mo until you terminate)"
+  echo "▸ launching the VM (billing starts now, ~\$304/mo until you terminate)"
   IID="$(aws ec2 run-instances --region "$REGION" --image-id "$AMI" --instance-type "$ITYPE" \
     --key-name "$NAME" --security-group-ids "$SG" --user-data "file://$UD" \
     --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=$VOL_GB,VolumeType=gp3}" \
@@ -81,7 +81,7 @@ cat <<EOF2
   external IP:  $IP
   ssh:          ssh -i $NAME.pem ubuntu@$IP
 
-Cost honesty: ~\$285/mo at list price while this runs. Stop billing with:
+Cost honesty: ~\$304/mo at list price while this runs. Stop billing with:
   aws ec2 terminate-instances --region $REGION --instance-ids $IID
 
 Next — install the node (from any machine with the fiddy repo cloned):

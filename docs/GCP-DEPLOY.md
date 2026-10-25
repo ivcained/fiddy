@@ -1,7 +1,9 @@
 # Deploy your Farcaster read node on Google Cloud — one command
 
 You are in **Google Cloud Shell** — gcloud is already signed in as you, and nothing
-you type here leaves your project. This is command (0) of the three-command path:
+you type here leaves your project. New to the terminal? Run `fiddy start` instead: it asks up to 3 questions and confirms the monthly cost before creating anything.
+
+This is command (0) of the manual three-command path:
 
 ```
 0. provision compute   ← you are here
@@ -30,8 +32,8 @@ It creates one firewall rule and one VM (`e2-standard-4`, Ubuntu 24.04, 2 TB dis
 installs Docker + cron, and prints the node's IP. Safe to re-run — it reuses what exists.
 
 **Why a Standard (HDD) disk?** New GCP projects cap regional SSD at 500 GB and will
-reject a 2 TB SSD. HDD has its own, larger quota. Cost runs about \$350/mo all-in
-(VM plus 2 TB disk, measured on our own bill). **New customers get
+reject a 2 TB SSD. HDD has its own, larger quota. Cost runs about \$180/mo all-in
+(e2-standard-4 plus a 2 TB standard disk at list price: $97.84 + $81.92). **New customers get
 [\$300 in free credit](https://cloud.google.com/free)** — the node is free to start,
 but set a reminder now to delete the VM (or decide to keep paying) before the credit
 runs out, so the bill never surprises you. Teardown prints at the end of the script.

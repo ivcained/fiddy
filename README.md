@@ -1,4 +1,4 @@
-# Fiddy — your own Farcaster client, on your own node, in three commands
+# Fiddy — your own Farcaster client, on your own node, with one command
 
 Fiddy is a forkable Farcaster client with external wallet support that is built
 to read and write through **your own Snapchain read node** — no API keys, no
@@ -21,13 +21,20 @@ Full tutorial (mobile + desktop, protocol concepts explained as you go):
 
 ## Quickstart
 
-Two ways in — pick the one that matches where you're sitting:
+```bash
+fiddy start    # answer up to 3 questions, confirm the monthly cost, done
+fiddy status   # plain-English sync, web URL, and monthly cost
+```
+
+`fiddy start` asks whether you already have a server, offers six provider paths with current prices, and waits for Enter before creating anything. Two are manual orders: Fiddy cannot create a BuyVM or Hetzner auction server, so it says exactly what to order and what to paste back. It then runs the existing doctor, node, and client chain. After the first snapshot chunk appears in the log, it says you can close your laptop; before that, it does not. `fiddy destroy` prints the server and monthly bill first, then requires `DESTROY` before it deletes AWS, Hetzner, or Google Cloud resources.
+
+Prefer to drive each step yourself? Two ways in:
 
 **Way 1 · from your own terminal** (Mac/Windows/Linux; the CLI drives the server over SSH):
 
 ```bash
 # create the machine — one click (https://fiddy.fun/client/deploy/) or:
-curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash   # AWS, ~$285/mo
+curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash   # AWS, ~$304/mo
 # install fiddy + Herdr/Ovis console on this computer (no local 2 TB node):
 curl -fsSL https://fiddy.fun/client/install.sh | bash
 fiddy provision --ssh ubuntu@<ip>     # register the box (or: --aws / --gcp / --hetzner / --ovh)
@@ -45,7 +52,7 @@ fiddy client up --tunnel                                # then, when the node an
 
 Hand the whole thing to an agent instead: `Help me run my own Farcaster node and client: https://fiddy.fun/client/skill.md` (that file is written for agents). Full tutorial: **https://fiddy.fun/client** (mobile + desktop, EN + 中文).
 
-Other everyday commands: `fiddy doctor` (machine + network check with the fix spelled out), `fiddy node status` / `verify` / `dashboard` / `logs`, `fiddy node autoupgrade on [--every weekly|daily|hourly]` (off by default — the upstream job prunes the whole Docker host), `fiddy up` (doctor → node → client, one shot).
+Other everyday commands: `fiddy status`, `fiddy destroy`, `fiddy doctor` (machine + network check with the fix spelled out), `fiddy node status` / `verify` / `dashboard` / `logs`, `fiddy node autoupgrade on [--every weekly|daily|hourly]` (off by default — the upstream job prunes the whole Docker host), `fiddy up` (doctor → node → client, one shot).
 
 **Buttons instead of commands:** the same installer adds Herdr + Ovis and the
 `plugins/fiddy-console` plugin. Open Ovis's command palette

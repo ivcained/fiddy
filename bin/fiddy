@@ -40,6 +40,9 @@ fiddy — your own Farcaster client on your own node.
 
 Usage: fiddy <command> [options]
 
+  start       Guided setup: server, node, and web client (3 questions)
+  status      One plain-English line: sync, web URL, monthly cost
+  destroy     Stop billing: confirm before deleting your server and disk
   provision   Provision compute for your node
               --aws                       create an AWS EC2 instance (needs aws CLI)
               --ssh user@host             use any server you already have
@@ -80,6 +83,9 @@ EOF
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  start)     source "$FIDDY_REPO/cli/start.sh";     start_main "$@" ;;
+  status)    source "$FIDDY_REPO/cli/status.sh";    status_main "$@" ;;
+  destroy)   source "$FIDDY_REPO/cli/destroy.sh";   destroy_main "$@" ;;
   provision) source "$FIDDY_REPO/cli/provision.sh"; provision_main "$@" ;;
   up)
     # One-shot: check the machine, bring the node up, then the client.

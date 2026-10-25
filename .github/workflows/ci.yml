@@ -63,6 +63,21 @@ jobs:
       - name: ${{ matrix.gate }}
         run: pnpm --filter farcaster-web ${{ matrix.gate }}
 
+  cli:
+    name: beginner CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Bash syntax
+        run: find bin cli scripts -name '*.sh' -o -path bin/fiddy | xargs -n1 bash -n
+      - name: Shellcheck new beginner surfaces
+        run: shellcheck cli/start.sh cli/status.sh cli/destroy.sh scripts/hetzner-teardown.sh
+      - name: Mock cloud and SSH acceptance tests
+        run: bash tests/cli-beginner.sh
+
   # The deploy-agent is the one component that spends money and the only one no
   # other gate executes (lint/typecheck/test never load services/deploy-agent).
   # Measured 2026-10-24: a job-killing ASI bug in it shipped green through all

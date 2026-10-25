@@ -182,11 +182,11 @@ client_up() {
     node_url="http://127.0.0.1:$SNAP_HTTP_PORT"
   fi
 
-  # The node refuses HTTP for the whole snapshot bootstrap (up to ~2h), so do
+  # The node refuses HTTP for the whole snapshot bootstrap (6-12h on HDD / 2-4h on SSD), so do
   # not treat "not answering yet" as fatal here.
   if ! node_api_reachable "$node_url"; then
     warn "node at $node_url is not answering yet — a fresh read node only serves"
-    warn "HTTP after its snapshot bootstrap finishes (up to ~2h). Starting the"
+    warn "HTTP after its snapshot bootstrap finishes (6-12h on HDD / 2-4h on SSD). Starting the"
     warn "client anyway; check later with: fiddy node status"
   fi
 
@@ -246,14 +246,18 @@ client_up() {
   fi
 
   step "Starting Fiddy"
+  local web_port="${FIDDY_WEB_PORT:-3000}"
+  local web_url="${FIDDY_WEB_URL:-http://localhost:$web_port}"
+  config_set FIDDY_WEB_URL "$web_url"
+  log "Web: $web_url"
   # The upstream dev server forces a self-signed HTTPS cert, which greets every
   # first-time user with a browser security warning. localhost is a secure
   # context over plain HTTP, so nothing needs it — default off, opt back in
   # with HTTPS=true.
   if [ "$build" = 1 ]; then
-    ( cd "$FIDDY_REPO" && pnpm --filter farcaster-web build && pnpm --filter farcaster-web preview )
+    ( cd "$FIDDY_REPO" && pnpm --filter farcaster-web build && pnpm --filter farcaster-web preview -- --port "$web_port" --strictPort )
   else
     log "serving plain HTTP on localhost (set HTTPS=true to restore the self-signed cert)"
-    ( cd "$FIDDY_REPO" && HTTPS="${HTTPS:-false}" pnpm --filter farcaster-web dev )
+    ( cd "$FIDDY_REPO" && HTTPS="${HTTPS:-false}" pnpm --filter farcaster-web dev -- --port "$web_port" --strictPort )
   fi
 }

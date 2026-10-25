@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fiddy: your own Farcaster node and client in three commands</title>
+<title>Fiddy: your own Farcaster node and client with one command</title>
 <meta name="description" content="Give one prompt to your agent, or run three commands yourself. Provision compute, sync a Snapchain read node, and open your own Fiddy client. No API keys.">
 <meta property="og:title" content="Fiddy: your own node. Your own client. Three commands.">
 <meta property="og:description" content="One prompt for your agent, or three commands by hand. Your compute, your node, your client.">
@@ -265,46 +265,47 @@ details summary::marker { color: var(--lime-text); }
 <div class="shell">
   <div class="hero-grid">
     <div>
-      <h1><span>Your own node.</span><span>Your own client.</span><span>Three commands.</span></h1>
+      <h1><span>Your own node.</span><span>Your own client.</span><span>One command.</span></h1>
       <p class="lede">No API keys from anyone. Run a Snapchain read node, open Fiddy through it, and add your own Hermes agent. <strong>You furnish the compute. You own the stack.</strong></p>
     </div>
     <section class="card handoff" aria-labelledby="handoff-title">
       <p class="label">The easiest way in</p>
       <h2 id="handoff-title">Give it to your agent.</h2>
       <p class="agent-help">Paste this into [CC], Codex, Hermes, or any agent with a shell. The linked guide has the steps, prices, and mistakes to avoid.</p>
-      <div class="prompt"><code id="agent-prompt">I want my own copy of Farcaster. Before you start, ask me where I want to run my node: (a) my own computer, (b) a server I already have, or (c) a new cloud server you provision for me. Prices I was shown for a new cloud server (confirm the current price with the provider first, cloud prices change): about $285/month on AWS, about $350/month on GCP, about \u20ac120/month on Hetzner, about $190/month on OVH. For each option, tell me its cost and the disk it needs (about 2 TB while it downloads), then wait for my choice and my written approval before spending anything. Then follow https://fiddy.fun/client/skill.md. The first download is about 468 GB and takes many hours, so the machine must stay on. If anything else costs money, give me the monthly price and ask me first. Never ask for my seed phrase.</code></div>
+      <div class="prompt"><code id="agent-prompt">I want my own copy of Farcaster. Before you start, ask me where I want to run my node: (a) my own computer, (b) a server I already have, or (c) a new cloud server you provision for me. Prices I was shown for a new cloud server (confirm the current price with the provider first, cloud prices change): about $304/month on AWS, about $180/month on GCP, about \u20ac230/month on Hetzner Cloud, about $190/month on OVH. Also offer the manual-order BuyVM ($80/month) and Hetzner auction (dynamic stock, verify the live listing) paths when they fit my disk and hardware. For each option, tell me its cost and the disk it needs (about 2 TB while it downloads), then wait for my choice and my written approval before spending anything. Then follow https://fiddy.fun/client/skill.md. The first download is about 468 GB and takes many hours, so the machine must stay on. If anything else costs money, give me the monthly price and ask me first. Never ask for my seed phrase.</code></div>
       <button class="primary-action copy-prompt" type="button" data-copy-target="agent-prompt">Copy prompt</button>
-      <a class="manual-link" href="#quickstart">or do it by hand: see the 3 commands ↓</a>
+      <a class="manual-link" href="#quickstart">or do it by hand: start here ↓</a>
     </section>
   </div>
 
   <section class="quickstart" id="quickstart" aria-labelledby="quick-title">
     <div class="quick-heading">
-      <h2 id="quick-title">Three commands. That’s the setup.</h2>
+      <h2 id="quick-title">One command. That’s the setup.</h2>
       <p>Run these from the cloned Fiddy repo, with <code class="inline">bin</code> on PATH.</p>
     </div>
-    <div class="command-grid">
+    <div class="command-grid" style="grid-template-columns:1fr">
       <div class="quick-command">
-        <span class="command-name">1 · Provision</span>
-        <button class="copy-command" type="button" data-copy="fiddy provision --aws" aria-label="Copy provision command">Copy</button>
-        <code>fiddy provision --aws</code>
-        <small>Create cloud compute. Use <code class="inline">--ssh you@server</code> for a box you have.</small>
+        <span class="command-name">Start here</span>
+        <button class="copy-command" type="button" data-copy="fiddy start" aria-label="Copy start command">Copy</button>
+        <code>fiddy start</code>
+        <small>Answer up to 3 plain-language questions. See the monthly cost and press Enter before anything is created.</small>
       </div>
       <div class="quick-command">
-        <span class="command-name">2 · Node</span>
-        <button class="copy-command" type="button" data-copy="fiddy node up" aria-label="Copy node command">Copy</button>
-        <code>fiddy node up</code>
-        <small>Install and sync Snapchain. <code class="inline">--network hypersnap</code> selects the other network.</small>
+        <span class="command-name">Check later</span>
+        <button class="copy-command" type="button" data-copy="fiddy status" aria-label="Copy status command">Copy</button>
+        <code>fiddy status</code>
+        <small>One line: sync progress, web address, monthly cost, and whether everything is fine.</small>
       </div>
       <div class="quick-command">
-        <span class="command-name">3 · Client</span>
-        <button class="copy-command" type="button" data-copy="fiddy client up" aria-label="Copy client command">Copy</button>
-        <code>fiddy client up</code>
-        <small>Boot Fiddy pointed at your node.</small>
+        <span class="command-name">Stop the bill</span>
+        <button class="copy-command" type="button" data-copy="fiddy destroy" aria-label="Copy destroy command">Copy</button>
+        <code>fiddy destroy</code>
+        <small>See exactly what will be deleted and the monthly cost that stops. Confirmation is always required.</small>
       </div>
     </div>
+    <p class="dim" style="margin-top:16px">Prefer the individual commands? <code class="inline">fiddy provision</code>, <code class="inline">fiddy node up</code>, and <code class="inline">fiddy client up</code> still run the same steps separately.</p>
     <div class="cloud-actions">
-      <p><strong>Need the server first?</strong> A cloud server is a recurring bill: AWS is about $285/month; GCP is about $350/month with a $300 new-user credit. New AWS accounts can wait 0-2 days for verification, so GCP is the alternative.</p>
+      <p><strong>Need the server first?</strong> Run the three-answer wizard: <code class="inline">fiddy start</code>. A cloud server is a recurring bill: AWS is about $304/month; GCP is about $180/month with a $300 new-user credit. New AWS accounts can wait 0-2 days for verification, so GCP is the alternative.</p>
       <div class="cloud-buttons">
         <a class="cloud-button aws" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener">Open AWS CloudShell ↗</a>
         <a class="cloud-button google" href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&amp;cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" width="190" height="36"></a>
@@ -375,10 +376,10 @@ details summary::marker { color: var(--lime-text); }
     <div class="reading">
       <details class="pane provider-details">
         <summary>Other providers: same three commands, your pick</summary>
-        <pre><code><span class="c"># AWS, needs the aws CLI configured, about $285/month list:</span>
+        <pre><code><span class="c"># AWS, needs the aws CLI configured, about $304/month list:</span>
 <span class="k">fiddy provision --aws</span>
 
-<span class="c"># Hetzner CCX33 + 2 TB volume, about €120/month, token from console.hetzner.cloud:</span>
+<span class="c"># Hetzner CCX33 + 2 TB volume, about €230/month, token from console.hetzner.cloud:</span>
 <span class="k">fiddy provision --hetzner</span>
 
 <span class="c"># OVHcloud Public Cloud b3-16 + 2 TB volume, about $190/month:</span>
@@ -400,14 +401,16 @@ details summary::marker { color: var(--lime-text); }
       <p class="dim">You pay your provider directly. Fiddy does not add a fee.</p>
       <ul class="price-ladder">
         <li class="price-row"><strong>Your own machine</strong><span class="price">Free</span><small>Use hardware you already have, if it meets the disk and memory requirements.</small></li>
-        <li class="price-row"><strong>Hetzner</strong><span class="price">~€120/mo</span><small>CCX33 with a 2 TB volume. New accounts are capped at 1024 GB volumes, fine once your quota is raised.</small></li>
+        <li class="price-row"><strong>BuyVM</strong><span class="price">$80/mo</span><small>Slice 16384 plus a 4 TB Performance slab: 4 vCPU, 16 GB RAM. Manual order; stock and the Performance tier matter.</small></li>
+        <li class="price-row"><strong>Hetzner auction</strong><span class="price">auction listing, verified at checkout</span><small>A 2026-10-25 listing offered 2x4 TB disks at EUR 72.70/mo before VAT. Dynamic stock and price.</small></li>
+        <li class="price-row"><strong>Hetzner Cloud</strong><span class="price">~€230/mo</span><small>CCX33 with a 2 TB volume. New accounts are capped at 1024 GB volumes, fine once your quota is raised.</small></li>
         <li class="price-row"><strong>OVHcloud</strong><span class="price">~$190/mo</span><small>b3-16 with a 2 TB volume.</small></li>
-        <li class="price-row"><strong>AWS</strong><span class="price">~$285/mo</span><small>The default path. Its root volume can simply be 2 TB, which is part of the price difference.</small></li>
-        <li class="price-row"><strong>GCP</strong><span class="price">~$350/mo</span><small>Tested end to end by us. <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 new-user credit</a>. Set a reminder to delete the VM.</small></li>
+        <li class="price-row"><strong>AWS</strong><span class="price">~$304/mo</span><small>The default path. Its root volume can simply be 2 TB, which is part of the price difference.</small></li>
+        <li class="price-row"><strong>GCP</strong><span class="price">~$180/mo</span><small>Tested end to end by us. <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 new-user credit</a>. Set a reminder to delete the VM.</small></li>
       </ul>
       <div class="pane disclosure">
         <h4>New AWS account? Read this first.</h4>
-        <p>CloudShell can stay locked for 0-2 days during verification. GCP is the alternative, with a $300 new-user credit and about $350/month list price after credit. The same AWS one-liner also runs from any terminal after <code class="inline">aws configure</code>.</p>
+        <p>CloudShell can stay locked for 0-2 days during verification. GCP is the alternative, with a $300 new-user credit and about $180/month list price after credit. The same AWS one-liner also runs from any terminal after <code class="inline">aws configure</code>.</p>
         <p><strong>If your hosting company caps your disk:</strong> new accounts can be limited to 1 TB, which cannot safely finish the first boot. Ask support to raise the limit to 2 TB, pick a different company, or start on the public relay and move later. Do not retry against the same cap.</p>
         <p>Prefer no setup? <a href="/client/deploy/#managedCard">Managed by Fiddy is $320/month</a>. Prefer a guided self-host page? <a href="/client/deploy/">Open fiddy.fun/client/deploy</a>.</p>
       </div>
@@ -423,7 +426,7 @@ details summary::marker { color: var(--lime-text); }
     <p class="dim">Want an agent to drive instead? Use the <a href="#handoff-title">agent hand-off at the top</a>. Its linked guide is written for agents, with the steps, prices, and mistakes to avoid.</p>
     <p class="dim">On Linux the CLI installs the Docker engine itself through <code class="inline">get.docker.com</code>, adds you to the docker group, and asks you to log back in once. There is no Docker Desktop on a headless box. On macOS it offers Docker Desktop instead. The CLI is <code class="inline">bin/fiddy</code>: run <code class="inline">export PATH="$PWD/bin:$PATH"</code> after cloning, or every command says <code class="inline">fiddy: command not found</code>.</p>
     <pre><code><span class="k">fiddy node up</span>      <span class="c"># install, start, wait for the API to answer</span>
-<span class="k">fiddy node status</span>  <span class="c"># sync progress</span>
+<span class="k">fiddy status</span>        <span class="c"># plain-English sync, web, and cost</span>
 <span class="k">fiddy node logs</span>    <span class="c"># tail the node</span>
 <span class="k">fiddy node dashboard</span> <span class="c"># Grafana at localhost:3000 through an SSH tunnel</span>
 <span class="k">fiddy node autoupgrade on</span> <span class="c"># weekly upgrades, Tuesday 03:00</span></code></pre>
@@ -461,8 +464,9 @@ details summary::marker { color: var(--lime-text); }
     </div>
     <div class="pane note">
       <h3>If your laptop went to sleep</h3>
-      <p>Your computer paused, so a local download paused with it. Keep it plugged in and awake, or move to a computer that stays on (about $120-285/month to rent one).</p>
+      <p>Your computer paused, so a local download paused with it. Keep it plugged in and awake, or move to a computer that stays on. The rental prices are in the costs section above.</p>
     </div>
+    <p class="dim">When <code class="inline">fiddy start</code> installs on a remote server, it starts detached. Once the remote log shows the first download chunk, you can close your laptop; it keeps going.</p>
   </div>
 </section>
 

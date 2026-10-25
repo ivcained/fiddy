@@ -6,7 +6,7 @@
 #
 # Creates: a 2 TB ext4 volume + a CCX33 (4 vCPU / 16 GB, ~€30/mo) with the
 # volume mounted at /var/lib/fiddy-node and ~/snapchain symlinked onto it.
-# All-in ≈ €120/mo (volume ~€88). Hetzner has no default inbound firewall, so
+# All-in ≈ €230/mo (volume ~€90). Hetzner has no default inbound firewall, so
 # the node's gossip ports work immediately.
 #
 # STATUS: built against the Hetzner Cloud API docs but NOT yet battle-tested
@@ -90,6 +90,8 @@ IP="$(printf '%s' "$S" | jqpy "d['server']['public_net']['ipv4']['ip']")"
 
 mkdir -p "${FIDDY_HOME:-$HOME/.fiddy}"
 printf '%s\n' "$IP" > "${FIDDY_HOME:-$HOME/.fiddy}/hetzner-last-ip"
+printf '%s\n' "$SERVER_ID" > "${FIDDY_HOME:-$HOME/.fiddy}/hetzner-last-server-id"
+printf '%s\n' "$VOL_ID" > "${FIDDY_HOME:-$HOME/.fiddy}/hetzner-last-volume-id"
 
 cat <<EOF
 
@@ -111,3 +113,5 @@ Tear down (both, or the volume keeps billing):
   curl -X DELETE -H "Authorization: Bearer \$HCLOUD_TOKEN" $API/servers/$SERVER_ID
   curl -X DELETE -H "Authorization: Bearer \$HCLOUD_TOKEN" $API/volumes/$VOL_ID
 EOF
+
+# With this checkout on PATH, `fiddy destroy` is the confirmed unified teardown.
