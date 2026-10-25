@@ -33,7 +33,10 @@ def bootstrap(store=None, environ=None):
     if env.get("FIDDY_CONSOLE_TARGET"):
         changes["target"] = env["FIDDY_CONSOLE_TARGET"]
     elif cli.get("FIDDY_TARGET"):
-        changes["target"] = cli["FIDDY_TARGET"]
+        target = cli["FIDDY_TARGET"]
+        host = target.rsplit("@", 1)[-1]
+        host = host[1:].split("]", 1)[0] if host.startswith("[") else host.split(":", 1)[0]
+        changes["target"] = "local" if host in ("127.0.0.1", "localhost", "::1") else target
     if env.get("FIDDY_CONSOLE_SSH_KEY"):
         changes["ssh_key"] = os.path.expanduser(env["FIDDY_CONSOLE_SSH_KEY"])
     elif cli.get("FIDDY_SSH_KEY"):
