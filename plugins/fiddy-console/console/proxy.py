@@ -56,11 +56,10 @@ class GrafanaProxy:
                 parsed_request = urllib.parse.urlparse(self.path)
                 supplied = urllib.parse.parse_qs(parsed_request.query).get("token", [""])[-1]
                 with proxy.handoff_lock:
+                    # The link stays valid for this pane's lifetime: the browser
+                    # auto-open, a manual click and an Ovis embed all need it.
+                    # It is still a 32-byte secret on loopback, never logged.
                     accepted = bool(proxy.token) and hmac.compare_digest(supplied, proxy.token)
-                    if accepted:
-                        # The printed link is single-use. Browser history and the
-                        # Ovis frame title cannot replay it later in the session.
-                        proxy.token = None
                 if accepted:
                     query = [(key, value) for key, values in urllib.parse.parse_qsl(parsed_request.query, keep_blank_values=True) if key != "token" for value in [values]]
                     destination = parsed_request.path or "/"
@@ -76,7 +75,7 @@ class GrafanaProxy:
                 morsel = cookie.get("fiddy_console")
                 if morsel is not None and hmac.compare_digest(morsel.value, proxy.session_token):
                     return True
-                body = b"Fiddy console: open Grafana from its Herdr pane. This loopback address needs its one-time link.\n"
+                body = b"Fiddy console: this address only works through the Grafana button's link. Open the Fiddy console and choose Grafana; it opens the dashboard for you.\n"
                 self.send_response(403)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
