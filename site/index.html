@@ -215,17 +215,21 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
     <p style="margin:10px 0 4px"><a class="btn" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener" style="display:inline-block;background:var(--lime);color:#1a1c10;font-weight:700;border-radius:999px;padding:10px 20px;text-decoration:none">Open AWS CloudShell ↗</a>&nbsp;&nbsp;<a href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener" style="border:none"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" style="height:36px;vertical-align:middle"></a></p>
     <pre><span class="c"># in CloudShell, or any terminal with the AWS CLI configured:</span>
 <span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span>
-<span class="c"># …then back in your own terminal, inside the cloned repo:</span>
+<span class="c"># install fiddy + Herdr/Ovis console locally (no laptop-sized node):</span>
+<span class="k">curl -fsSL https://fiddy.fun/client/install.sh | bash</span>
 <span class="k">fiddy provision --ssh ubuntu@<your-new-ip></span>   <span class="c"># register the box the script printed</span>
 <span class="k">fiddy node up</span>       <span class="c"># install + sync the node on it, over SSH</span>
-<span class="k">fiddy client up</span>     <span class="c"># the client on your laptop, tunneled to your node</span></pre>
+<span class="k">fiddy client up</span>     <span class="c"># the client on your laptop, tunneled to your node</span>
+<span class="k">herdr</span>                 <span class="c"># or: Fiddy buttons + built-in Grafana in Ovis</span></pre>
 
     <h3 style="margin:22px 0 6px">Way 2 · Inside the VPS terminal (you already made a server and SSH'd in)</h3>
     <p class="dim">Skip provision entirely — you already have the machine. One line does the rest:</p>
     <pre><span class="c"># on the server itself:</span>
 <span class="k">curl -fsSL https://fiddy.fun/client/install.sh | bash</span></pre>
-    <p class="dim" style="margin-bottom:0">That clones the repo, puts <code class="inline">fiddy</code> on PATH, installs Docker, and starts
-    the node — then <code class="inline">fiddy client up --tunnel</code> when you want the client. The one wrong move here is
+    <p class="dim" style="margin-bottom:0">That clones the repo, puts <code class="inline">fiddy</code> on PATH, installs the Herdr/Ovis
+    console, and starts a node if this server does not already have one &mdash; then <code class="inline">fiddy client up --tunnel</code>
+    when you want the client. In Ovis, press <strong>Cmd/Ctrl+Shift+K</strong> and type <strong>Fiddy</strong> for node buttons;
+    the Grafana button embeds the real dashboard beside the terminal with no AI key. The one wrong move here is
     <code class="inline">fiddy provision</code> on the server: provisioning runs <em>from</em> a machine that talks to the cloud, never
     on the machine being provisioned. Rule of thumb: <strong>Way 1 provisions, Way 2 runs.</strong></p>
 

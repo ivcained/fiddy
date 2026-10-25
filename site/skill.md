@@ -46,7 +46,14 @@ curl -fsSL https://fiddy.fun/client/install.sh | bash
 
 or by hand: `git clone https://github.com/ivcained/fiddy && cd fiddy`, then
 `export PATH="$PWD/bin:$PATH"` (the CLI is `bin/fiddy`), then `fiddy node up`
-(remote target) or `fiddy node up --local` (this machine). The CLI installs
+(remote target) or `fiddy node up --local` (this machine). The installer detects
+an SSH session: inside a server it follows Way 2 and installs a missing local
+node; on a laptop it follows Way 1 and leaves the 2 TB node remote. Set
+`FIDDY_INSTALL_NODE=1` to force a local node install. It also installs Herdr,
+Ovis, and `plugins/fiddy-console`: open Ovis with Cmd/Ctrl+Shift+K, type Fiddy,
+and use the node buttons. The Grafana button embeds the real dashboard beside
+the terminal through a loopback-only tunnel/proxy; no AI key is needed.
+The CLI installs
 Docker itself, checks the machine can hold a node, and says so plainly if not.
 
 ### 3. The client
