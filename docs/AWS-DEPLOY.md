@@ -3,7 +3,9 @@
 Run this in **AWS CloudShell** — the terminal built into the AWS Console,
 already signed in as you, free. Nothing you type leaves your account.
 
-This is command (0) of the three-command path:
+New to the terminal? Run `fiddy start` instead: it asks up to 3 questions and confirms the monthly cost before creating anything.
+
+This is command (0) of the manual three-command path:
 
 ```
 0. provision compute   ← you are here

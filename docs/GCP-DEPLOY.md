@@ -1,7 +1,9 @@
 # Deploy your Farcaster read node on Google Cloud — one command
 
 You are in **Google Cloud Shell** — gcloud is already signed in as you, and nothing
-you type here leaves your project. This is command (0) of the three-command path:
+you type here leaves your project. New to the terminal? Run `fiddy start` instead: it asks up to 3 questions and confirms the monthly cost before creating anything.
+
+This is command (0) of the manual three-command path:
 
 ```
 0. provision compute   ← you are here

@@ -70,6 +70,11 @@ a { color: var(--lime); text-decoration: none; }
   Nothing custodial — the script runs where you can read it.</p>
 
   <div class="card">
+    <h2><span class="n">✦</span>Already have the CLI?</h2>
+    <p class="dim" style="font-size:14.5px">Run <code style="font-family:var(--mono)">fiddy start</code>. It asks up to 3 questions, shows the monthly cost before creating anything, then starts the node and client. Use <code style="font-family:var(--mono)">fiddy status</code> later and <code style="font-family:var(--mono)">fiddy destroy</code> to stop the bill.</p>
+  </div>
+
+  <div class="card">
     <h2><span class="n">1</span>Create the machine — pick your cloud</h2>
     <p class="dim" style="font-size:14.5px">Free first, then cheapest. Every path ends the same: a 4 vCPU / 16 GB box with a 2 TB disk,
     Docker preinstalled, and an IP to paste below.</p>
@@ -237,7 +242,7 @@ document.querySelectorAll('pre').forEach(pre => {
 
 // "Hand it to your AI agent" — one self-contained prompt, any agent.
 // The detail lives in the agent-readable skill.md, not here.
-const AGENT_PROMPT = `Help me run my own Farcaster node and client: https://fiddy.fun/client/skill.md`;
+const AGENT_PROMPT = `Help me run fiddy start for my own Farcaster node and client: https://fiddy.fun/client/skill.md`;
 
 document.querySelectorAll('.abtn').forEach(btn => {
   btn.addEventListener('click', () => {
