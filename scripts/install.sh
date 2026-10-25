@@ -86,6 +86,22 @@ if [ "$INSTALL_CONSOLE" = 1 ]; then
   python3 "$DEST/plugins/fiddy-console/console/bootstrap.py"
 fi
 
+if [ "$INSTALL_CONSOLE" = 1 ]; then
+  cat <<'EOF'
+
+Fiddy Console is installed. Start Herdr:
+  herdr
+Then open Ovis, press Cmd/Ctrl+Shift+K, and type Fiddy. The node buttons are native.
+On a headless server, from your laptop instead:
+  ssh -N -L 7317:127.0.0.1:7317 <user>@<this-server-ip>
+then open http://localhost:7317 in your browser.
+For Grafana: Fiddy → Open Grafana dashboard, then Shift-click [ Open live Grafana ].
+Set Ovis Settings → Web links → Beside the pane to embed with a plain click.
+No AI key is needed for node controls or Grafana.
+Grafana panels show "No data" during the snapshot download — live sync % is in the Fiddy pane.
+EOF
+fi
+
 SHOULD_INSTALL_NODE=0
 case "$INSTALL_NODE" in
   1|yes|true) SHOULD_INSTALL_NODE=1 ;;
@@ -111,14 +127,3 @@ Open Fiddy Console → Settings in Herdr and set that same SSH target.
 EOF
 fi
 
-if [ "$INSTALL_CONSOLE" = 1 ]; then
-  cat <<'EOF'
-
-Fiddy Console is installed. Start Herdr:
-  herdr
-Then open Ovis, press Cmd/Ctrl+Shift+K, and type Fiddy. The node buttons are native.
-For Grafana: Fiddy → Open Grafana dashboard, then Shift-click [ Open live Grafana ].
-Set Ovis Settings → Web links → Beside the pane to embed with a plain click.
-No AI key is needed for node controls or Grafana.
-EOF
-fi
