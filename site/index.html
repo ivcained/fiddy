@@ -267,6 +267,14 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
   <p class="dim">This installs Docker and the official Snapchain bootstrap on your server and starts syncing.
   You now run a <strong>read node</strong>: it follows the chain, stores the full state, and serves the HTTP
   (<code class="inline">:3381</code>) and gRPC (<code class="inline">:3383</code>) APIs. Anyone can run one. No permission, no API keys.</p>
+  <div class="pane note" style="margin:16px 0">
+    <div class="t">Don't want to drive the terminal? Hand it to your agent.</div>
+    <p>Paste this into your agent (Claude Code, Codex, Hermes, any agent with a shell):</p>
+    <pre><span class="k">Help me run my own Farcaster node and client: https://fiddy.fun/client/skill.md</span></pre>
+    <p style="margin-bottom:0">That file is written for agents: the steps, the prices, the mistakes to avoid.
+    Or do it by hand → the steps on this page.</p>
+  </div>
+
   <p class="dim" style="font-size:14px">On Linux the CLI installs the Docker <em>engine</em> itself (<code class="inline">get.docker.com</code>,
   adds you to the docker group) and asks you to log back in once — there is no Docker Desktop on a headless box.
   On macOS it offers Docker Desktop instead. First thing to know: the CLI is <code class="inline">bin/fiddy</code> —
