@@ -33,7 +33,7 @@ installs Docker + cron, and prints the node's IP. Safe to re-run — it reuses w
 
 **Why a Standard (HDD) disk?** New GCP projects cap regional SSD at 500 GB and will
 reject a 2 TB SSD. HDD has its own, larger quota. Cost runs about \$350/mo all-in
-(VM plus 2 TB disk, measured on our own bill). **New customers get
+(e2-standard-4 plus a 2 TB standard disk at list price: $97.84 + $81.92 = ~$180/mo). **New customers get
 [\$300 in free credit](https://cloud.google.com/free)** — the node is free to start,
 but set a reminder now to delete the VM (or decide to keep paying) before the credit
 runs out, so the bill never surprises you. Teardown prints at the end of the script.

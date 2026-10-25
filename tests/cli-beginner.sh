@@ -75,7 +75,7 @@ write_status_config() {
 FIDDY_TARGET=ubuntu@203.0.113.10
 FIDDY_PROVIDER=aws
 FIDDY_NODE_HTTP=http://203.0.113.10:3381
-FIDDY_MONTHLY_COST='~$285/mo'
+FIDDY_MONTHLY_COST='~$304/mo'
 FIDDY_WEB_URL=http://localhost:3000
 CONFIG
 }
@@ -86,7 +86,7 @@ FIDDY_TARGET=ubuntu@203.0.113.10
 FIDDY_PROVIDER=aws
 FIDDY_AWS_INSTANCE_ID=i-0123456789abcdef0
 FIDDY_AWS_REGION=us-east-1
-FIDDY_MONTHLY_COST='~$285/mo'
+FIDDY_MONTHLY_COST='~$304/mo'
 CONFIG
 }
 
@@ -96,7 +96,7 @@ FIDDY_TARGET=root@203.0.113.11
 FIDDY_PROVIDER=hetzner
 FIDDY_HETZNER_SERVER_ID=12345
 FIDDY_HETZNER_VOLUME_ID=67890
-FIDDY_MONTHLY_COST='~€120/mo'
+FIDDY_MONTHLY_COST='~€230/mo'
 CONFIG
 }
 
@@ -106,7 +106,7 @@ FIDDY_TARGET=ubuntu@203.0.113.12
 FIDDY_PROVIDER=gcp
 FIDDY_GCP_NAME=fiddy-node
 FIDDY_GCP_ZONE=us-central1-a
-FIDDY_MONTHLY_COST='~$350/mo'
+FIDDY_MONTHLY_COST='~$180/mo'
 CONFIG
 }
 
@@ -194,7 +194,7 @@ record 'typing at the cost gate cancels instead of provisioning'
 new_case
 run_start_with_stubs 'n\n2\nyes\n'
 check assert_status 1 -- 'a non-empty cost answer cancels'
-check assert_output_contains '~€120/mo' -- 'Hetzner shows its monthly price'
+check assert_output_contains '~€230/mo' -- 'Hetzner shows its monthly price'
 check assert_calls_empty -- 'a mistaken answer cannot spend money'
 
 record 'the existing-server path runs against a mock SSH target'
@@ -224,7 +224,7 @@ CURL
 run_fiddy status
 check assert_status 0 -- 'healthy status succeeds'
 check assert_output_one_line -- 'healthy status is one line'
-check assert_output_contains 'Your node is answering and keeping up. Web: http://localhost:3000. Cost: ~$285/mo. Everything is fine.' -- 'healthy status uses plain English'
+check assert_output_contains 'Your node is answering and keeping up. Web: http://localhost:3000. Cost: ~$304/mo. Everything is fine.' -- 'healthy status uses plain English'
 check assert_output_not_contains 'shardInfos' -- 'status never prints raw JSON'
 
 record 'fiddy status explains snapshot progress and reuses the measured ETA'
@@ -247,7 +247,7 @@ run_fiddy status
 check assert_status 0 -- 'an expected snapshot bootstrap is not a failure'
 check assert_output_one_line -- 'bootstrap status is one line'
 check assert_output_contains 'Your node is 34% synced (~5 h left).' -- 'bootstrap status includes percentage and measured ETA'
-check assert_output_contains 'Web: http://localhost:3000. Cost: ~$285/mo. Everything is fine.' -- 'bootstrap status still includes web, cost, and reassurance'
+check assert_output_contains 'Web: http://localhost:3000. Cost: ~$304/mo. First download on this SSD usually takes 2-4 h. Everything is fine.' -- 'bootstrap status still includes web, cost, and reassurance'
 check assert_output_not_contains 'chunk_1938' -- 'bootstrap status hides log noise'
 
 record 'fiddy destroy names the machine and cost before refusing an unconfirmed teardown'
@@ -256,7 +256,7 @@ write_aws_destroy_config
 run_destroy_with_stubs ''
 check assert_status 1 -- 'destroy fails closed without confirmation'
 check assert_output_contains 'i-0123456789abcdef0' -- 'destroy names the instance it would terminate'
-check assert_output_contains 'Monthly cost that stops: ~$285/mo.' -- 'destroy names the bill that stops'
+check assert_output_contains 'Monthly cost that stops: ~$304/mo.' -- 'destroy names the bill that stops'
 check assert_calls_empty -- 'no teardown runs without confirmation'
 
 record 'typing DESTROY is the only AWS teardown confirmation'
@@ -292,7 +292,7 @@ CURL
 run_destroy_with_stubs 'DESTROY\n'
 check assert_status 0 -- 'confirmed Hetzner destroy succeeds'
 check assert_output_contains 'server 12345 and volume 67890' -- 'Hetzner confirmation names both resources'
-check assert_output_contains 'Monthly cost that stops: ~€120/mo.' -- 'Hetzner confirmation names the monthly bill'
+check assert_output_contains 'Monthly cost that stops: ~€230/mo.' -- 'Hetzner confirmation names the monthly bill'
 check assert_calls_contain 'Authorization: Bearer' -- 'Hetzner teardown authenticates to the API'
 check assert_calls_contain 'DELETE https://api.hetzner.cloud/v1/servers/12345' -- 'Hetzner server is deleted'
 check assert_calls_contain 'DELETE https://api.hetzner.cloud/v1/volumes/67890' -- 'Hetzner volume is deleted too'
@@ -315,10 +315,30 @@ OUTPUT="$(cat "$OUT")"
 check assert_status 0 -- 'mock Hetzner provisioning succeeds'
 check assert_file_contains "$FIDDY_HOME/config" 'FIDDY_HETZNER_SERVER_ID=12345' -- 'the server id is saved'
 check assert_file_contains "$FIDDY_HOME/config" 'FIDDY_HETZNER_VOLUME_ID=67890' -- 'the volume id is saved'
-check assert_config_value FIDDY_MONTHLY_COST '~€120/mo' -- 'the monthly price is saved'
+check assert_config_value FIDDY_MONTHLY_COST '~€230/mo' -- 'the monthly price is saved'
 check assert_file_contains "$ROOT/scripts/hetzner-deploy.sh" 'hetzner-last-server-id' -- 'the real deploy script records the server id'
 check assert_file_contains "$ROOT/scripts/hetzner-deploy.sh" 'hetzner-last-volume-id' -- 'the real deploy script records the volume id'
 check assert_file_contains "$ROOT/scripts/hetzner-deploy.sh" 'Authorization: Bearer $TOKEN' -- 'the real deploy script sends the token instead of a redaction placeholder'
+
+record 'the GCP provisioner records the measured price used by status'
+new_case
+stub gcloud <<'GCLOUD'
+#!/usr/bin/env bash
+case "$*" in
+  *'instances describe'*) printf '203.0.113.12\n' ;;
+  *'config get-value project'*) printf 'fiddy-test\n' ;;
+  *) printf '%s\n' "$*" >> "$CALLS" ;;
+esac
+exit 0
+GCLOUD
+set +e
+PATH="$STUB_BIN:$PATH" FIDDY_HOME="$FIDDY_HOME" FIDDY_REPO="$ROOT" CALLS="$CALLS" \
+  /bin/bash -c 'source "$FIDDY_REPO/cli/lib/common.sh"; source "$FIDDY_REPO/cli/provision.sh"; provision_gcp' > "$OUT" 2>&1
+STATUS=$?
+set -e
+OUTPUT="$(cat "$OUT")"
+check assert_status 0 -- 'mock GCP provisioning succeeds'
+check assert_config_value FIDDY_MONTHLY_COST '~$180/mo' -- 'the recorded GCP price is updated'
 
 record 'the AWS cost gate uses the same calculated list estimate as provisioning'
 new_case
@@ -327,6 +347,16 @@ run_start_with_stubs 'n\n1\n'
 unset FIDDY_AWS_INSTANCE_HOURLY FIDDY_AWS_VOLUME_GB FIDDY_AWS_GP3_GB_MONTH
 check assert_output_contains 'Monthly cost: ~$304/mo' -- 'the gate shows the real AWS instance-plus-disk estimate'
 check assert_calls_empty -- 'showing the calculated estimate still creates nothing'
+
+record 'the start menu offers six provider paths with updated prices'
+new_case
+run_start_with_stubs 'n\n9\n'
+check assert_status 1 -- 'an unknown provider choice stops'
+check assert_output_contains '1. AWS (~$304/mo)' -- 'the menu shows the AWS estimate'
+check assert_output_contains '2. Hetzner (~€230/mo)' -- 'the menu shows the Hetzner estimate'
+check assert_output_contains '5. BuyVM ($80/mo, manual order)' -- 'the menu shows the BuyVM estimate'
+check assert_output_contains '6. Hetzner auction (dynamic price, manual order)' -- 'the menu shows the Hetzner auction path'
+check assert_calls_empty -- 'an unknown provider choice creates nothing'
 
 record 'GCP destroy deletes its recorded instance and names the stop'
 new_case
@@ -343,12 +373,12 @@ GCLOUD
 run_destroy_with_stubs 'DESTROY\n'
 check assert_status 0 -- 'confirmed GCP destroy succeeds'
 check assert_output_contains 'fiddy-node in us-central1-a' -- 'GCP confirmation names the recorded instance'
-check assert_output_contains 'Monthly cost that stops: ~$350/mo.' -- 'GCP confirmation names the monthly bill'
+check assert_output_contains 'Monthly cost that stops: ~$180/mo.' -- 'GCP confirmation names the monthly bill'
 check assert_calls_contain 'instances delete fiddy-node' -- 'GCP deletes the recorded instance'
 check assert_calls_contain 'firewall-rules delete snapchain-node' -- 'GCP removes the Fiddy firewall rule'
 check assert_config_value FIDDY_TARGET '' -- 'GCP teardown clears the target'
 
-record 'detached remote install says when the laptop can close'
+record 'the remote installer does not claim a safe quit point before the first chunk'
 new_case
 set +e
 FIDDY_HOME="$FIDDY_HOME" FIDDY_REPO="$ROOT" FIDDY_TARGET=ubuntu@203.0.113.10 \
@@ -357,7 +387,29 @@ STATUS=$?
 set -e
 OUTPUT="$(cat "$OUT")"
 check assert_status 0 -- 'mock detached install succeeds'
-check assert_output_contains 'you can close your laptop now, it keeps going' -- 'the honest quit point is printed when the remote node detaches'
+check assert_output_not_contains 'you can close your laptop now, it keeps going' -- 'detaching alone is not enough to promise a working download'
+
+record 'node-up announces the safe quit point only after the first chunk appears'
+new_case
+set +e
+FIDDY_HOME="$FIDDY_HOME" FIDDY_REPO="$ROOT" FIDDY_TARGET=ubuntu@203.0.113.10 \
+  /bin/bash -c 'source "$FIDDY_REPO/cli/lib/common.sh"; source "$FIDDY_REPO/cli/networks.sh"; source "$FIDDY_REPO/cli/node.sh"; curl(){ printf "still-waiting"; return 1; }; snapshot_progress(){ printf "downloading snapshot: chunk 1938/5690 (34%%)"; }; ssh_run(){ printf "Up\n"; }; sleep(){ :; }; pipefail(){ :; }; node_wait_or_report http://203.0.113.10:3381 203.0.113.10 1' > "$OUT" 2>&1
+STATUS=$?
+set -e
+OUTPUT="$(cat "$OUT")"
+check assert_status 0 -- 'mock remote wait completes'
+check assert_output_contains 'you can close your laptop now, it keeps going' -- 'the honest quit point appears at the first chunk'
+
+record 'a node-up wait without any chunk does not tell the laptop to close'
+new_case
+set +e
+FIDDY_HOME="$FIDDY_HOME" FIDDY_REPO="$ROOT" FIDDY_TARGET=ubuntu@203.0.113.10 \
+  /bin/bash -c 'source "$FIDDY_REPO/cli/lib/common.sh"; source "$FIDDY_REPO/cli/networks.sh"; source "$FIDDY_REPO/cli/node.sh"; curl(){ return 1; }; snapshot_progress(){ printf "preparing the snapshot download"; }; ssh_run(){ printf "Up\n"; }; sleep(){ :; }; node_wait_or_report http://203.0.113.10:3381 203.0.113.10 1' > "$OUT" 2>&1
+STATUS=$?
+set -e
+OUTPUT="$(cat "$OUT")"
+check assert_status 0 -- 'mock wait without a chunk completes'
+check assert_output_not_contains 'you can close your laptop now, it keeps going' -- 'the safe quit point is withheld until a chunk exists'
 
 record 'the client records and serves the web URL status prints'
 new_case

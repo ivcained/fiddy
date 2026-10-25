@@ -26,12 +26,7 @@ fiddy start    # answer up to 3 questions, confirm the monthly cost, done
 fiddy status   # plain-English sync, web URL, and monthly cost
 ```
 
-`fiddy start` asks whether you already have a server, offers AWS, Hetzner,
-OVHcloud, or Google Cloud with prices, and waits for Enter before creating
-anything. It then runs the existing doctor, node, and client chain. Once the
-remote node is detached, it says when you can close your laptop. `fiddy destroy`
-prints the server and monthly bill first, then requires `DESTROY` before it
-deletes AWS, Hetzner, or Google Cloud resources.
+`fiddy start` asks whether you already have a server, offers six provider paths with current prices, and waits for Enter before creating anything. Two are manual orders: Fiddy cannot create a BuyVM or Hetzner auction server, so it says exactly what to order and what to paste back. It then runs the existing doctor, node, and client chain. After the first snapshot chunk appears in the log, it says you can close your laptop; before that, it does not. `fiddy destroy` prints the server and monthly bill first, then requires `DESTROY` before it deletes AWS, Hetzner, or Google Cloud resources.
 
 Prefer to drive each step yourself? Two ways in:
 
@@ -39,7 +34,7 @@ Prefer to drive each step yourself? Two ways in:
 
 ```bash
 # create the machine — one click (https://fiddy.fun/client/deploy/) or:
-curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash   # AWS, ~$285/mo
+curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash   # AWS, ~$304/mo
 # install fiddy + Herdr/Ovis console on this computer (no local 2 TB node):
 curl -fsSL https://fiddy.fun/client/install.sh | bash
 fiddy provision --ssh ubuntu@<ip>     # register the box (or: --aws / --gcp / --hetzner / --ovh)

@@ -182,11 +182,11 @@ client_up() {
     node_url="http://127.0.0.1:$SNAP_HTTP_PORT"
   fi
 
-  # The node refuses HTTP for the whole snapshot bootstrap (up to ~2h), so do
+  # The node refuses HTTP for the whole snapshot bootstrap (6-12h on HDD / 2-4h on SSD), so do
   # not treat "not answering yet" as fatal here.
   if ! node_api_reachable "$node_url"; then
     warn "node at $node_url is not answering yet — a fresh read node only serves"
-    warn "HTTP after its snapshot bootstrap finishes (up to ~2h). Starting the"
+    warn "HTTP after its snapshot bootstrap finishes (6-12h on HDD / 2-4h on SSD). Starting the"
     warn "client anyway; check later with: fiddy node status"
   fi
 

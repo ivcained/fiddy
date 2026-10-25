@@ -6,7 +6,7 @@
 #
 # Creates: a 2 TB ext4 volume + a CCX33 (4 vCPU / 16 GB, ~€30/mo) with the
 # volume mounted at /var/lib/fiddy-node and ~/snapchain symlinked onto it.
-# All-in ≈ €120/mo (volume ~€88). Hetzner has no default inbound firewall, so
+# All-in ≈ €230/mo (volume ~€90). Hetzner has no default inbound firewall, so
 # the node's gossip ports work immediately.
 #
 # STATUS: built against the Hetzner Cloud API docs but NOT yet battle-tested

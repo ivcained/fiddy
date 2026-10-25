@@ -121,7 +121,7 @@ node_up() {
   log "stores full state, serves HTTP :$SNAP_HTTP_PORT + gRPC :$SNAP_GRPC_PORT, and"
   log "relays your writes to validators over gossip. No API keys. Your compute only."
   log "First boot downloads the historical snapshot from Farcaster's public bucket"
-  log "(up to ~2h), then it syncs blocks."
+  log "(6-12h on HDD / 2-4h on SSD), then it syncs blocks."
 
   if [ "$local_mode" = 1 ]; then
     node_install_local "$force"
@@ -175,22 +175,29 @@ node_install_remote() {
 # :3381 for the whole bootstrap). So: report progress instead of blocking for
 # hours. `fiddy node status` is the "is it up yet" command afterwards.
 node_wait_or_report() {
-  local base="$1" host="$2" tries="${3:-24}" i
+  local base="$1" host="$2" tries="${3:-24}" i quit_announced=0 response
   log "waiting up to $((tries * 5))s for the node API at ${base}…"
   for ((i = 1; i <= tries; i++)); do
-    if curl -fsS --max-time 5 "$base/v1/info" 2>/dev/null | node_info_summary; then
+    if response="$(curl -fsS --max-time 5 "$base/v1/info" 2>/dev/null)" && printf '%s\n' "$response" | node_info_summary; then
       printf '\n'
       ok "node API is up: $base"
       return 0
     fi
-    printf '\r\033[K%s' "$(snapshot_progress)"
+    local progress
+    progress="$(snapshot_progress)"
+    printf '\r\033[K%s' "$progress"
+    if [ "$quit_announced" = 0 ] && [[ "$progress" =~ downloading\ snapshot:\ chunk\ [0-9]+ ]]; then
+      printf '\n'
+      ok "you can close your laptop now, it keeps going. The node is detached on $FIDDY_TARGET"
+      quit_announced=1
+    fi
     sleep 5
   done
   printf '\n'
   warn "the API is not answering yet — a fresh read node refuses HTTP until the"
-  warn "snapshot bootstrap finishes (up to ~2h, ~470 GB of chunks; see"
+  warn "snapshot bootstrap finishes (6-12h on HDD / 2-4h on SSD, ~470 GB of chunks; see"
   warn "docs/NODE-REQUIREMENTS.md). This is expected on first boot."
-  local status progress
+  local status
   status="$(ssh_run 'docker ps --filter name=snapchain-snapchain-1 --format "{{.Status}}"' 2>/dev/null || true)"
   progress="$(ssh_run 'docker logs snapchain-snapchain-1 2>&1 | grep -oE "chunk_[0-9]+\.bin" | tail -1' 2>/dev/null || true)"
   if [ -n "$status" ]; then log "container: $status"; fi
@@ -310,7 +317,6 @@ remote_seed_snapchain_env() {
 remote_start_upgrade() { # remote_start_upgrade [grafana_blocked 0|1]
   local blocked="${1:-0}"
   log "starting the node (detached; logs → ~/snapchain/upgrade.log)…"
-  ok "you can close your laptop now, it keeps going. The node is detached on $FIDDY_TARGET"
   ssh_run 'cd ~/snapchain && (setsid ./snapchain.sh upgrade > upgrade.log 2>&1 < /dev/null &) ; sleep 2; echo started' \
     || die "could not start snapchain.sh upgrade on $FIDDY_TARGET"
 
@@ -380,7 +386,7 @@ node_status() {
 node_status_silent() { # base host
   local base="$1" host="$2" status="" progress="" is_local=0
   warn "the node's HTTP API is not answering at $base yet"
-  warn "this is expected while the snapshot bootstrap runs (up to ~2h, ~470 GB)"
+  warn "this is expected while the snapshot bootstrap runs (6-12h on HDD / 2-4h on SSD, ~470 GB)"
   case "$host" in localhost|127.0.0.1|::1) is_local=1 ;; esac
   if [ "$is_local" = 1 ] && command -v docker >/dev/null 2>&1 && docker ps >/dev/null 2>&1; then
     status="$(docker ps --filter name=snapchain-snapchain-1 --format '{{.Status}}' 2>/dev/null || true)"

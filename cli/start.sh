@@ -20,6 +20,26 @@ start_confirm_cost() { # provider; only an empty line authorizes creation
   [ -z "$answer" ] || die "cost was not confirmed. Nothing was created"
 }
 
+start_register_server() { # validated SSH target -> provision_ssh
+  local target="$1"
+  if [[ ! "$target" =~ ^[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+$ ]]; then
+    die "use the SSH address in the form user@IP, for example ubuntu@203.0.113.10"
+  fi
+  provision_main --ssh "$target"
+}
+
+start_manual_path() { # provider target-prompt; 0 only when a server is registered
+  local provider="$1" prompt="$2"
+  step "Order the $provider server first"
+  printf 'This one is a manual order: Fiddy cannot create it for you.\n'
+  printf 'Buy 4 vCPU, 16 GB RAM, and at least 2 TB of disk that stays mounted.\n'
+  printf "What's the user@IP? (leave blank to stop here) "
+  local target
+  read -r target || die "setup cancelled before anything changed"
+  [ -n "$target" ] || { ok "$prompt"; return 1; }
+  start_register_server "$target"
+}
+
 start_run_up() {
   source "$FIDDY_REPO/cli/doctor.sh"
   source "$FIDDY_REPO/cli/node.sh"
@@ -38,6 +58,7 @@ start_main() {
   printf 'The first download takes hours. Your provider bills you directly.\n\n'
 
   local has_server provider choice target
+  provider=""
   printf 'Do you already have a server? [y/N] '
   read -r has_server || die "setup cancelled before anything changed"
 
@@ -45,26 +66,40 @@ start_main() {
     [yY]*)
       printf "What's the user@IP? "
       read -r target || die "setup cancelled before anything changed"
-      if [[ ! "$target" =~ ^[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+$ ]]; then
-        die "use the SSH address in the form user@IP, for example ubuntu@203.0.113.10"
-      fi
-      provision_main --ssh "$target"
+      start_register_server "$target"
       ;;
     *)
       step "Pick your cloud provider"
-      printf "  1. AWS (~\$285/mo)\n"
-      printf '  2. Hetzner (~€120/mo)\n'
+      printf "  1. AWS (~\$304/mo)\n"
+      printf '  2. Hetzner (~€230/mo)\n'
       printf "  3. OVHcloud (~\$190/mo)\n"
-      printf "  4. Google Cloud (~\$350/mo)\n"
-      printf 'Choose 1-4 [1]: '
+      printf "  4. Google Cloud (~\$180/mo)\n"
+      printf "  5. BuyVM (\$80/mo, manual order)\n"
+      printf '  6. Hetzner auction (dynamic price, manual order)\n'
+      printf 'Choose 1-6 [1]: '
       read -r choice || die "setup cancelled before anything was created"
       case "${choice:-1}" in
         1) provider=aws ;;
         2) provider=hetzner ;;
         3) provider=ovh ;;
         4) provider=gcp ;;
-        *) die "choose a provider from 1 to 4. Nothing was created" ;;
+        5)
+          step "BuyVM manual order"
+          printf 'Order Slice 16384 (\$60/mo: 4 cores, 16 GB RAM) plus a 4 TB Performance slab (\$20/mo).\n'
+          printf 'Confirm the Performance tier and stock before paying; Classic slabs cap at 200 IOPS.\n'
+          printf 'Order links: https://buyvm.net/kvm-dedicated-server-slices/ and https://buyvm.net/block-storage-slabs/\n'
+          start_manual_path BuyVM "BuyVM costs about \$80/mo before tax. Nothing was ordered or created" || return 0
+          ;;
+        6)
+          step "Hetzner auction manual order"
+          printf 'Pick a server with 4 CPU cores, 16 GB RAM, and two disks.\n'
+          printf 'A recent auction listing was an i7-6700 with 32 GB RAM and 2x4 TB disks at EUR 72.70/mo before VAT.\n'
+          printf 'Prices and stock change constantly, so verify the actual listing at checkout: https://www.hetzner.com/sb/\n'
+          start_manual_path "Hetzner auction" "auction pricing changes, so no price was confirmed. Nothing was ordered or created" || return 0
+          ;;
+        *) die "choose a provider from 1 to 6. Nothing was created" ;;
       esac
+      if [ -z "${provider:-}" ]; then start_run_up; return 0; fi
       start_confirm_cost "$provider"
       provision_main "--$provider"
       ;;

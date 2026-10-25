@@ -33,6 +33,20 @@ else:
 '
 }
 
+status_sync_expectation() { # provider -> honest disk-size class
+  case "${FIDDY_PROVIDER:-}" in
+    aws|hetzner|ovh|buyvm)
+      printf 'First download on this SSD usually takes 2-4 h.'
+      ;;
+    gcp|hetzner-auction)
+      printf 'First download on this HDD usually takes 6-12 h.'
+      ;;
+    *)
+      printf 'First download usually takes 2-4 h on SSD or 6-12 h on HDD.'
+      ;;
+  esac
+}
+
 status_container_visible() { # host -> 0 when the bootstrap container exists
   local host="$1" status=""
   case "$host" in
@@ -64,12 +78,12 @@ status_main() {
       pct="${BASH_REMATCH[1]}"
       if [[ "$progress" =~ ~([0-9]+)(h|m)\ left ]]; then
         eta="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
-        printf 'Your node is %s%% synced (~%s left). %s Everything is fine.\n' "$pct" "$eta" "$(status_web_and_cost)"
+        printf 'Your node is %s%% synced (~%s left). %s %s Everything is fine.\n' "$pct" "$eta" "$(status_web_and_cost)" "$(status_sync_expectation)"
       else
         printf 'Your node is %s%% through the first download. %s Time left is still being measured.\n' "$pct" "$(status_web_and_cost)"
       fi
     else
-      printf 'Your node is preparing its first download. %s Everything is fine.\n' "$(status_web_and_cost)"
+      printf 'Your node is preparing its first download. %s %s Everything is fine.\n' "$(status_web_and_cost)" "$(status_sync_expectation)"
     fi
     return 0
   fi

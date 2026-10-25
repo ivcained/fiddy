@@ -34,9 +34,9 @@ monthly_cost_for_provider() { # provider -> honest estimate, or "not recorded"
       local gb_mo="${FIDDY_AWS_GP3_GB_MONTH:-0.08}"
       awk -v h="$inst_hr" -v g="$volume_gb" -v p="$gb_mo" 'BEGIN {printf "~$%.0f/mo", h*730 + g*p}'
       ;;
-    hetzner) printf '~€120/mo' ;;
+    hetzner) printf '~€230/mo' ;;
     ovh) printf '~$190/mo' ;;
-    gcp) printf '~$350/mo' ;;
+    gcp) printf '~$180/mo' ;;
     *) printf 'not recorded' ;;
   esac
 }

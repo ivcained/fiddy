@@ -27,24 +27,27 @@ provision_main() {
 fiddy provision — furnish the compute your node will run on.
 
   --aws             Create an AWS EC2 instance with Docker preinstalled.
-  --gcp             Create a Google Cloud VM (e2-standard-4 + 2 TB HDD).
-                    Needs: gcloud CLI signed in (gcloud auth login) and a
-                    project set (gcloud config set project ...).
-                    Options: FIDDY_GCP_ZONE (default us-central1-a)
-                             FIDDY_GCP_TYPE (default e2-standard-4)
-  --ovh             OVHcloud Public Cloud: b3-16 + 2 TB Classic volume (~\$190/mo).
-                    Needs: OVH_APPLICATION_KEY / _SECRET / CONSUMER_KEY and
-                    OVH_PUBLIC_CLOUD_PROJECT env vars (api.ovh.com/createToken).
-                    NOTE: not yet battle-tested — fails loudly with API errors.
-  --hetzner         Hetzner Cloud: CCX33 + 2 TB volume (~€120/mo).
-                    Needs: HCLOUD_TOKEN env (console.hetzner.cloud → project →
-                    Security → API tokens). NOTE: not yet battle-tested.
                     Needs: aws CLI configured (aws configure).
                     Defaults: m5.xlarge (4 vCPU / 16 GB) in ${FIDDY_AWS_REGION:-us-east-1}
                               with a ${FIDDY_AWS_VOLUME_GB:-2048} GB gp3 volume.
                     Options: FIDDY_AWS_REGION, FIDDY_AWS_INSTANCE_TYPE,
                              FIDDY_AWS_VOLUME_GB
                     Rough list price: instance + volume (printed before it runs).
+  --gcp             Create a Google Cloud VM (e2-standard-4 + 2 TB HDD).
+                    Needs: gcloud CLI signed in (gcloud auth login) and a
+                    project set (gcloud config set project ...).
+                    Options: FIDDY_GCP_ZONE (default us-central1-a)
+                             FIDDY_GCP_TYPE (default e2-standard-4)
+                    Rough list price: VM + 2 TB standard disk (about \$180/mo).
+  --ovh             OVHcloud Public Cloud: b3-16 + 2 TB Classic volume (~\$190/mo).
+                    Needs: OVH_APPLICATION_KEY / _SECRET / CONSUMER_KEY and
+                    OVH_PUBLIC_CLOUD_PROJECT env vars (api.ovh.com/createToken).
+                    NOTE: not yet battle-tested — fails loudly with API errors.
+  --hetzner         Hetzner Cloud: CCX33 + 2 TB volume (~€230/mo).
+                    Needs: HCLOUD_TOKEN env (console.hetzner.cloud → project →
+                    Security → API tokens). CCX33 is 8 vCPU/32 GB at €138.99 and
+                    the 2048 GB volume is ~€90.11, both excl. VAT. NOTE: not yet
+                    battle-tested.
   --ssh user@host   Skip creation — use a server you already have.
                     Needs: SSH key auth already working, sudo on the remote.
   --teardown        Give back the AWS compute --aws created (terminate the
@@ -79,15 +82,15 @@ EOF
       echo "New here? Use: fiddy start (guided, with a cost confirmation)"
       echo "Pick your compute (free first, then default):"
       echo "  0. Your own machine (FREE):                fiddy node up --local"
-      echo "  1. AWS (~\$285/mo — DEFAULT cloud):          fiddy provision --aws"
+      echo "  1. AWS (~\$304/mo — DEFAULT cloud):          fiddy provision --aws"
       echo "     Why default: Hetzner caps NEW accounts at 1024 GB of volume"
       echo "     storage (verified: resize refused, resource_limit_exceeded) —"
       echo "     not enough for an unmodified node restore. AWS root volumes"
       echo "     can simply be 2 TB."
-      echo "  2. Hetzner (~€120/mo, cheapest — fine once   fiddy provision --hetzner"
+      echo "  2. Hetzner (~€230/mo, quota required — fine once   fiddy provision --hetzner"
       echo "     your account's volume quota is raised):"
       echo "  3. OVH Public Cloud (~\$190/mo):              fiddy provision --ovh"
-      echo "  4. Google Cloud (~\$350/mo, TESTED by us):    fiddy provision --gcp"
+      echo "  4. Google Cloud (~\$180/mo, TESTED by us):    fiddy provision --gcp"
       echo "     …or one click in Cloud Shell: https://fiddy.fun/client#step0"
       echo "  5. Any server you have:                    fiddy provision --ssh user@host"
       echo "     (budget VPS from ~€24/mo — MivoCloud, Advin, Contabo, LuxVPS —"
@@ -117,7 +120,7 @@ provision_gcp() {
   config_set FIDDY_PROVIDER "gcp"
   config_set FIDDY_GCP_NAME "$name"
   config_set FIDDY_GCP_ZONE "$zone"
-  config_set FIDDY_MONTHLY_COST '~$350/mo'
+  config_set FIDDY_MONTHLY_COST '~$180/mo'
   ok "compute ready: $(whoami)@$ip"
   ok "Next: fiddy node up"
 }
@@ -153,7 +156,7 @@ provision_hetzner() {
   config_set FIDDY_PROVIDER "hetzner"
   config_set FIDDY_HETZNER_SERVER_ID "$server_id"
   config_set FIDDY_HETZNER_VOLUME_ID "$volume_id"
-  config_set FIDDY_MONTHLY_COST '~€120/mo'
+  config_set FIDDY_MONTHLY_COST '~€230/mo'
   ok "compute ready: root@$ip"
   ok "Next: fiddy node up"
 }
