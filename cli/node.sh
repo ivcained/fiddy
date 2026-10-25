@@ -183,7 +183,7 @@ node_wait_or_report() {
       ok "node API is up: $base"
       return 0
     fi
-    printf '\r%s…%s attempt %d/%d' "$c_dim" "$c_reset" "$i" "$tries"
+    printf '\r\033[K%s' "$(snapshot_progress)"
     sleep 5
   done
   printf '\n'
@@ -218,7 +218,7 @@ node_install_local() {
         # (sg) so the user never has to run the command twice. NOTE: $* here is
         # this function's own args (the force flag), NOT the user's — rebuild
         # the command from the flags we actually know.
-        warn "Docker installed. Continuing with the docker group active…"
+        warn "Docker installed. Restarting this command ONCE so the new docker group applies — not a retry, nothing failed."
         if command -v sg >/dev/null 2>&1; then
           local again="--local"
           [ "$force" = 1 ] && again="$again --force"
