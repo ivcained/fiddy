@@ -174,7 +174,17 @@ provision_ssh() {
 }
 
 provision_aws() {
-  require aws "install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+  if ! command -v aws >/dev/null 2>&1; then
+    # The #1 real-user mistake (measured 2026-10-24): provisioning runs FROM a
+    # machine that talks to AWS (laptop / CloudShell). People clone the repo
+    # ON the VPS they made by hand and hit this error there.
+    warn "no aws CLI here. Two readings:"
+    warn "  • you meant to CREATE a server → install the AWS CLI on your laptop"
+    warn "    (or use the CloudShell button at fiddy.fun/client) and run this there"
+    warn "  • you ALREADY MADE the server and are SSH'd into it → skip provision:"
+    warn "    fiddy node up --local"
+    die "install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+  fi
   require ssh "install openssh"
 
   local region="${FIDDY_AWS_REGION:-us-east-1}"
