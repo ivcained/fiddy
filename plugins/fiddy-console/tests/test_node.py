@@ -73,7 +73,7 @@ class NodeManagerTests(unittest.TestCase):
         self.assertIn("started", self.manager.start()["message"])
         self.assertIn("stopped", self.manager.stop()["message"])
         scripts = "\n".join(self.executor.scripts)
-        self.assertIn("docker compose up -d snapchain statsd", scripts)
+        self.assertIn("docker compose up -d snapchain statsd grafana", scripts)
         self.assertIn("./snapchain.sh down", scripts)
 
     def test_fid_and_upgrade_settings_are_guided_writes(self):
