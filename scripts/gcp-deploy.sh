@@ -131,3 +131,5 @@ overnight on this HDD. fiddy node status shows progress. Delete everything with:
   gcloud compute instances delete $NAME --zone $ZONE --quiet
   gcloud compute firewall-rules delete snapchain-node --quiet
 EOF
+
+# With this checkout on PATH, `fiddy destroy` is the confirmed unified teardown.

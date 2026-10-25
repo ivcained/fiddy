@@ -90,6 +90,8 @@ IP="$(printf '%s' "$S" | jqpy "d['server']['public_net']['ipv4']['ip']")"
 
 mkdir -p "${FIDDY_HOME:-$HOME/.fiddy}"
 printf '%s\n' "$IP" > "${FIDDY_HOME:-$HOME/.fiddy}/hetzner-last-ip"
+printf '%s\n' "$SERVER_ID" > "${FIDDY_HOME:-$HOME/.fiddy}/hetzner-last-server-id"
+printf '%s\n' "$VOL_ID" > "${FIDDY_HOME:-$HOME/.fiddy}/hetzner-last-volume-id"
 
 cat <<EOF
 
@@ -111,3 +113,5 @@ Tear down (both, or the volume keeps billing):
   curl -X DELETE -H "Authorization: Bearer \$HCLOUD_TOKEN" $API/servers/$SERVER_ID
   curl -X DELETE -H "Authorization: Bearer \$HCLOUD_TOKEN" $API/volumes/$VOL_ID
 EOF
+
+# With this checkout on PATH, `fiddy destroy` is the confirmed unified teardown.

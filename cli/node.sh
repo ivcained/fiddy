@@ -310,6 +310,7 @@ remote_seed_snapchain_env() {
 remote_start_upgrade() { # remote_start_upgrade [grafana_blocked 0|1]
   local blocked="${1:-0}"
   log "starting the node (detached; logs → ~/snapchain/upgrade.log)…"
+  ok "you can close your laptop now, it keeps going. The node is detached on $FIDDY_TARGET"
   ssh_run 'cd ~/snapchain && (setsid ./snapchain.sh upgrade > upgrade.log 2>&1 < /dev/null &) ; sleep 2; echo started' \
     || die "could not start snapchain.sh upgrade on $FIDDY_TARGET"
 

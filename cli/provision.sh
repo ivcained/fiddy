@@ -73,9 +73,10 @@ EOF
     ovh) provision_ovh ;;
     hetzner) provision_hetzner ;;
     ssh) provision_ssh "${FIDDY_SSH_TARGET_ARG:?missing user@host after --ssh}" ;;
-    teardown) provision_teardown ;;
+    teardown) source "$FIDDY_REPO/cli/destroy.sh"; destroy_main ;;
     *)
       step "fiddy provision"
+      echo "New here? Use: fiddy start (guided, with a cost confirmation)"
       echo "Pick your compute (free first, then default):"
       echo "  0. Your own machine (FREE):                fiddy node up --local"
       echo "  1. AWS (~\$285/mo — DEFAULT cloud):          fiddy provision --aws"
@@ -114,6 +115,9 @@ provision_gcp() {
     || die "instance created but no external IP — check: gcloud compute instances describe $name --zone $zone"
   config_set FIDDY_TARGET "$(whoami)@$ip"
   config_set FIDDY_PROVIDER "gcp"
+  config_set FIDDY_GCP_NAME "$name"
+  config_set FIDDY_GCP_ZONE "$zone"
+  config_set FIDDY_MONTHLY_COST '~$350/mo'
   ok "compute ready: $(whoami)@$ip"
   ok "Next: fiddy node up"
 }
@@ -139,11 +143,17 @@ provision_hetzner() {
   # $FIDDY_HOME/hetzner-last-ip on success.
   mkdir -p "$FIDDY_HOME"
   bash "$FIDDY_REPO/scripts/hetzner-deploy.sh" || die "Hetzner deploy failed — see the output above"
-  local ip
+  local ip server_id volume_id
   ip="$(cat "$FIDDY_HOME/hetzner-last-ip" 2>/dev/null || true)"
+  server_id="$(cat "$FIDDY_HOME/hetzner-last-server-id" 2>/dev/null || true)"
+  volume_id="$(cat "$FIDDY_HOME/hetzner-last-volume-id" 2>/dev/null || true)"
   [ -n "$ip" ] || die "deploy finished but no IP was recorded — re-run, or: fiddy provision --ssh root@<IP-from-output>"
+  [ -n "$server_id" ] && [ -n "$volume_id" ] || die "deploy finished but its server/volume ids were not recorded — fiddy destroy cannot safely clean it up"
   config_set FIDDY_TARGET "root@$ip"
   config_set FIDDY_PROVIDER "hetzner"
+  config_set FIDDY_HETZNER_SERVER_ID "$server_id"
+  config_set FIDDY_HETZNER_VOLUME_ID "$volume_id"
+  config_set FIDDY_MONTHLY_COST '~€120/mo'
   ok "compute ready: root@$ip"
   ok "Next: fiddy node up"
 }
@@ -291,6 +301,7 @@ provision_aws() {
   config_set FIDDY_AWS_KEY_NAME "$name"
   config_set FIDDY_AWS_IP "$ip"
   config_set FIDDY_AWS_VOLUME_GB "$volume_gb"
+  config_set FIDDY_MONTHLY_COST "$(monthly_cost_for_provider aws)"
 
   log "waiting for cloud-init (Docker install)…"
   local i

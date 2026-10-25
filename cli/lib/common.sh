@@ -26,6 +26,21 @@ step() { printf '\n%s%s%s\n' "$c_bold" "$*" "$c_reset"; }
 
 require() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1 — $2"; }
 
+monthly_cost_for_provider() { # provider -> honest estimate, or "not recorded"
+  case "$1" in
+    aws)
+      local volume_gb="${FIDDY_AWS_VOLUME_GB:-2048}"
+      local inst_hr="${FIDDY_AWS_INSTANCE_HOURLY:-0.192}"
+      local gb_mo="${FIDDY_AWS_GP3_GB_MONTH:-0.08}"
+      awk -v h="$inst_hr" -v g="$volume_gb" -v p="$gb_mo" 'BEGIN {printf "~$%.0f/mo", h*730 + g*p}'
+      ;;
+    hetzner) printf '~€120/mo' ;;
+    ovh) printf '~$190/mo' ;;
+    gcp) printf '~$350/mo' ;;
+    *) printf 'not recorded' ;;
+  esac
+}
+
 config_load() {
   [ -f "$FIDDY_CONFIG" ] || return 0
   # shellcheck disable=SC1090
@@ -112,11 +127,29 @@ snapshot_progress() {
   fi
   [ -n "$chunk" ] || { printf 'preparing the snapshot download (the node API answers after it loads)…'; return; }
   local n="${chunk#chunk_}"; n="${n%.bin}"
-  local now; now="$(date +%s)"
-  if [ -z "${_SP_FIRST_N:-}" ]; then _SP_FIRST_N=$n; _SP_START=$now; fi
+  local now first="" start="" state="$FIDDY_HOME/snapshot-progress"
+  now="$(date +%s)"
+  if [ -f "$state" ]; then read -r first start < "$state" || true; fi
+  case "$first$start" in *[!0-9]*) first=""; start="" ;; esac
+  # Command substitution runs this function in a subshell, so shell variables
+  # alone forget the first sample on every poll. Persist it to make the rate a
+  # real measurement across both node-up polls and later `fiddy status` runs.
+  if [ -z "$first" ] || [ -z "$start" ] || [ "$n" -lt "$first" ]; then
+    first="$n"; start="$now"
+    mkdir -p "$FIDDY_HOME"
+    printf '%s %s\n' "$first" "$start" > "$state"
+  fi
   local pct=$(( n * 100 / 5690 ))
-  local elapsed=$(( (now - _SP_START) / 60 )); [ "$elapsed" -lt 1 ] && elapsed=1
-  local rate=$(( (n - _SP_FIRST_N) / elapsed )); [ "$rate" -lt 1 ] && rate=1
+  local elapsed=$(( (now - start) / 60 ))
+  if [ "$elapsed" -lt 1 ] || [ "$n" -le "$first" ]; then
+    printf 'downloading snapshot: chunk %s/5690 (%s%%) · measuring time left · safe to close this terminal' "$n" "$pct"
+    return
+  fi
+  local rate=$(( (n - first) / elapsed ))
+  if [ "$rate" -lt 1 ]; then
+    printf 'downloading snapshot: chunk %s/5690 (%s%%) · measuring time left · safe to close this terminal' "$n" "$pct"
+    return
+  fi
   local eta_min=$(( (5690 - n) / rate ))
   local eta
   if [ "$eta_min" -ge 90 ]; then eta="$(( (eta_min + 30) / 60 ))h"; else eta="${eta_min}m"; fi
