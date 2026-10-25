@@ -54,6 +54,9 @@ Usage: fiddy <command> [options]
               status                      sync status and health
               logs                        tail node logs
               start | stop | upgrade      lifecycle without the log tail
+  console     One command to the GUI: starts herdr/Ovis on the box,
+              opens the SSH tunnel for you, launches the browser.
+              open (default) | stop (close the tunnel)
   client      Run the Fiddy client
               up [--network N] [--tunnel] [--build]
                                           N = snapchain (default) | hypersnap
@@ -86,6 +89,7 @@ case "$cmd" in
     source "$FIDDY_REPO/cli/client.sh";  client_main up "$@"
     ;;
   node)      source "$FIDDY_REPO/cli/node.sh";      node_main "$@" ;;
+  console)   source "$FIDDY_REPO/cli/console.sh";   console_main "$@" ;;
   client)    source "$FIDDY_REPO/cli/client.sh";    client_main "$@" ;;
   doctor)    source "$FIDDY_REPO/cli/doctor.sh";    doctor_main "$@" ;;
   install)
