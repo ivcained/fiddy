@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from pathlib import Path
@@ -31,18 +32,26 @@ def main():
     print("")
     print(hyperlink(proxy.url, "[ Open live Grafana ]"))
     print("")
-    print("EMBED IT HERE: Shift-click the link above and Grafana opens beside")
-    print("this pane, inside Ovis. No second browser tab.")
-    print("To make a plain click embed too, set Ovis Settings > Web links > Beside the pane.")
+    print("EMBED IT HERE: Grafana opens beside this pane automatically.")
+    print("If it does not, Shift-click [ Open live Grafana ].")
     print("Grafana's first login is admin / admin; change that password in Grafana.")
     print("Keep this pane open: closing it closes the dashboard tunnel.")
     print("")
+    # Publish the tokened URL for the Ovis auto-embed hook. The file is 0600
+    # because the URL carries the hand-off token; it is loopback-only anyway.
+    fd = os.open(store.runtime_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump({"grafana_url": proxy.url}, handle)
     try:
         proxy.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         proxy.server_close()
+        try:
+            store.runtime_path.unlink()
+        except OSError:
+            pass
         if hasattr(tunnel, "close"):
             tunnel.close()
     return 0
