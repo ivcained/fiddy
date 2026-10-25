@@ -139,8 +139,12 @@ const overGround = (image, ground) => {
   for (let at = 0; at < image.data.length; at += 4) {
     const alpha = image.data[at + 3] / 255;
     data[at] = Math.round(image.data[at] * alpha + ground.r * (1 - alpha));
-    data[at + 1] = Math.round(image.data[at + 1] * alpha + ground.g * (1 - alpha));
-    data[at + 2] = Math.round(image.data[at + 2] * alpha + ground.b * (1 - alpha));
+    data[at + 1] = Math.round(
+      image.data[at + 1] * alpha + ground.g * (1 - alpha),
+    );
+    data[at + 2] = Math.round(
+      image.data[at + 2] * alpha + ground.b * (1 - alpha),
+    );
     data[at + 3] = 255;
   }
   return { width: image.width, height: image.height, data };
@@ -196,6 +200,15 @@ const motionOf = (page) =>
     return canvas?.getAttribute('data-motion') ?? null;
   });
 
+/** The authored hop's height, read from the same value that moves the model. */
+const hopOf = (page) =>
+  page.evaluate(() => {
+    const canvas = document.querySelector(
+      '[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas',
+    );
+    return Number(canvas?.getAttribute('data-hop') ?? 0);
+  });
+
 /**
  * The angle the character's own head has turned to, in degrees, as
  * `yaw,pitch`.
@@ -222,7 +235,9 @@ const waitForRest = (page, timeout = 20000) =>
   page.waitForFunction(
     () =>
       document
-        .querySelector('[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas')
+        .querySelector(
+          '[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas',
+        )
         ?.getAttribute('data-motion') === 'resting',
     undefined,
     { timeout },
@@ -232,7 +247,9 @@ const waitForMotion = (page, state, timeout = 8000) =>
   page.waitForFunction(
     (expected) =>
       document
-        .querySelector('[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas')
+        .querySelector(
+          '[data-fiddy-hero-variant="hero"] .fiddy-hero-stage-canvas',
+        )
         ?.getAttribute('data-motion') === expected,
     state,
     { timeout },
@@ -242,7 +259,8 @@ const waitForMotion = (page, state, timeout = 8000) =>
  * The figure's own box on the stage, in pixels, off a screenshot of the stage.
  *
  * The brand glow behind the hero is switched off for the measurement: it is
- * decoration, and a halo would be read as part of the figure.
+ * decoration, and a halo would be read as part of the figure. The caller hides
+ * the greeting bubble for the whole hop sample, not once per frame.
  */
 async function figureBox(page, stage, file) {
   await page.addStyleTag({
@@ -301,8 +319,10 @@ async function compareStageToPoster(page, stage, label) {
   );
   check(
     `${label}: it is lit like the still, not a dark blob`,
-    litPixels(live, GROUND) > litPixels(overGround(poster, GROUND), GROUND) * 0.7 &&
-      litPixels(live, GROUND) < litPixels(overGround(poster, GROUND), GROUND) * 1.4,
+    litPixels(live, GROUND) >
+      litPixels(overGround(poster, GROUND), GROUND) * 0.7 &&
+      litPixels(live, GROUND) <
+        litPixels(overGround(poster, GROUND), GROUND) * 1.4,
     `painted ${litPixels(live, GROUND).toFixed(1)} vs still ${litPixels(overGround(poster, GROUND), GROUND).toFixed(1)}`,
   );
   check(
@@ -339,7 +359,10 @@ async function checkFrontDoor(browser, width) {
   await page.waitForSelector('[data-fiddy-hero-variant="hero"]', {
     timeout: 20000,
   });
-  check(`${label}: the hero stage is on the front door`, (await stage.count()) === 1);
+  check(
+    `${label}: the hero stage is on the front door`,
+    (await stage.count()) === 1,
+  );
 
   // (2) the still paints before anything is fetched, and it is the real still.
   const still = stage.locator('.fiddy-hero-stage-still');
@@ -357,7 +380,8 @@ async function checkFrontDoor(browser, width) {
   // The observer's own record, not the browser's read-back buffer: the app
   // clears resource timings, and an emptied bucket cannot answer this question.
   const timing = await page.evaluate(() => {
-    const entries = window.__resources ?? performance.getEntriesByType('resource');
+    const entries =
+      window.__resources ?? performance.getEntriesByType('resource');
     const paint = performance.getEntriesByType('paint');
     const at = (match) =>
       entries
@@ -369,7 +393,9 @@ async function checkFrontDoor(browser, width) {
       // The chunk three.js lives in, whatever it is called: a bare module under
       // /node_modules/.vite in dev, an assets/ chunk in a build.
       loader: entries
-        .filter((entry) => /three|GLTFLoader|fiddyModelScene|fiddyHero/i.test(entry.name))
+        .filter((entry) =>
+          /three|GLTFLoader|fiddyModelScene|fiddyHero/i.test(entry.name),
+        )
         .map((entry) => ({
           name: entry.name.split('/').pop(),
           startTime: Math.round(entry.startTime),
@@ -400,7 +426,8 @@ async function checkFrontDoor(browser, width) {
   // state change before reading it back — otherwise this reads "moving=0" and
   // looks like the swap never happened.
   await page.waitForFunction(
-    () => (window.__heroSamples ?? []).some((sample) => sample.attr === 'moving'),
+    () =>
+      (window.__heroSamples ?? []).some((sample) => sample.attr === 'moving'),
     undefined,
     { timeout: 5000 },
   );
@@ -415,7 +442,14 @@ async function checkFrontDoor(browser, width) {
   if (stills.length && movings.length) {
     const shapes = new Set(
       samples.map((sample) =>
-        [sample.x, sample.y, sample.w, sample.h, sample.action, sample.doc].join('|'),
+        [
+          sample.x,
+          sample.y,
+          sample.w,
+          sample.h,
+          sample.action,
+          sample.doc,
+        ].join('|'),
       ),
     );
     check(
@@ -460,7 +494,9 @@ async function checkFrontDoor(browser, width) {
   await page.waitForTimeout(1100);
   const rightUp = await lookOf(page);
   const aimedThere = await page.screenshot({ clip: box });
-  const [yawRight, pitchUp] = String(rightUp ?? '0,0').split(',').map(Number);
+  const [yawRight, pitchUp] = String(rightUp ?? '0,0')
+    .split(',')
+    .map(Number);
   check(
     `${label}: the pointer to the right and high turns the head right and up`,
     yawRight > 8 && pitchUp > 3,
@@ -475,7 +511,9 @@ async function checkFrontDoor(browser, width) {
   await page.mouse.move(8, 880);
   await page.waitForTimeout(1100);
   const leftDown = await lookOf(page);
-  const [yawLeft, pitchDown] = String(leftDown ?? '0,0').split(',').map(Number);
+  const [yawLeft, pitchDown] = String(leftDown ?? '0,0')
+    .split(',')
+    .map(Number);
   check(
     `${label}: the pointer to the left and low turns it the other way`,
     yawLeft < -8 && pitchDown < -3,
@@ -490,7 +528,8 @@ async function checkFrontDoor(browser, width) {
   const scroll = await page.evaluate(() => ({
     x: window.scrollX,
     overflow:
-      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
   }));
   check(
     `${label}: following the pointer never scrolls or widens the page`,
@@ -502,7 +541,7 @@ async function checkFrontDoor(browser, width) {
   // figure's own box leaves the ground, and comes back.
   await page.mouse.move(view.width / 2, view.height / 2);
   await waitForRest(page);
-  const ground = await figureBox(
+  await figureBox(
     page,
     stage,
     path.join(OUT, `fiddy-hero-${label}-rest.png`),
@@ -519,36 +558,48 @@ async function checkFrontDoor(browser, width) {
     greeted,
     `the canvas reports ${await motionOf(page)}`,
   );
+  check(
+    `${label}: the tap also gets a playful hello`,
+    (await page.locator('[data-fiddy="hero-reaction"]').textContent()) ===
+      'Hiya, you!',
+    await page.locator('[data-fiddy="hero-reaction"]').textContent(),
+  );
+  // The words are checked above. Hide them for the whole pixel sample so the
+  // bubble is not mistaken for the character, without touching styles per frame.
+  const greetingMeasurementStyle = await page.addStyleTag({
+    content: '.fiddy-hero-greeting { display: none !important }',
+  });
   if (greeted) {
     // The peak of a one-second hop, sampled across the whole greeting rather
     // than read at a fixed delay: the round trip from the click to this line
     // varies with how busy the box is (the first width of a run is the slowest),
     // and a screenshot taken after the hop has finished measures nothing.
-    let air = null;
+    let peakHop = 0;
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const frame = await figureBox(
+      peakHop = Math.max(peakHop, await hopOf(page));
+      await figureBox(
         page,
         stage,
         path.join(OUT, `fiddy-hero-${label}-hop-${attempt}.png`),
       );
-      if (frame && (!air || frame.y0 + frame.y1 < air.y0 + air.y1)) {
-        air = frame;
-      }
       await page.waitForTimeout(120);
     }
-    // The figure's own centre, not its top edge: turning the head changes the
-    // silhouette's height, and only its middle says "it left the ground".
-    const middle = (box2) => (box2.y0 + box2.y1 + 1) / 2;
+    // The exact authored lift, not the silhouette: the running clip changes the
+    // silhouette on its own, so pixels cannot reliably isolate the hop.
     check(
       `${label}: and the greeting lifts the figure off the ground`,
-      Boolean(ground && air) && middle(air) <= middle(ground) - 4,
-      `at rest y=${ground ? middle(ground) : null}, highest mid-hop ${air ? middle(air) : null}`,
+      peakHop > 0.1,
+      `peak authored hop=${peakHop}`,
     );
     // A greeting wakes the CLIP as well as hopping: one second of hop, five of
     // loop, then it settles again. Polled rather than sampled once, because the
     // exact moment this line runs is not predictable.
     let keptRunning = null;
-    for (let attempt = 0; attempt < 10 && keptRunning !== 'playing'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 10 && keptRunning !== 'playing';
+      attempt += 1
+    ) {
       keptRunning = await motionOf(page);
       if (keptRunning !== 'playing') {
         await page.waitForTimeout(200);
@@ -560,6 +611,7 @@ async function checkFrontDoor(browser, width) {
       `the canvas reports ${keptRunning}`,
     );
   }
+  await greetingMeasurementStyle.evaluate((node) => node.remove());
 
   // A keyboard can greet it too: the stage on the front door is a real button.
   await page.waitForTimeout(1200);
@@ -576,6 +628,12 @@ async function checkFrontDoor(browser, width) {
     `${label}: Enter on the focused stage greets it as well`,
     greetedByKey && keyboardBefore !== 'reacting',
     `before=${keyboardBefore} after=${await motionOf(page)}`,
+  );
+  check(
+    `${label}: the next hello keeps the tiny conversation going`,
+    (await page.locator('[data-fiddy="hero-reaction"]').textContent()) ===
+      'Boop received.',
+    await page.locator('[data-fiddy="hero-reaction"]').textContent(),
   );
 
   // (12) the retired vinyl toy is gone from the wire as well as from the repo.
@@ -614,7 +672,8 @@ async function checkReducedMotion(browser, width) {
   );
   check(
     `${label}: no canvas is created`,
-    (await page.locator('[data-fiddy-hero-variant="hero"] canvas').count()) === 0,
+    (await page.locator('[data-fiddy-hero-variant="hero"] canvas').count()) ===
+      0,
   );
   check(
     `${label}: the still is what the visitor sees`,
@@ -628,6 +687,23 @@ async function checkReducedMotion(browser, width) {
     page,
     page.locator('[data-fiddy-hero-variant="hero"]'),
     label,
+  );
+  await page.locator('[data-fiddy-hero-variant="hero"]').click();
+  const reducedReaction = page.locator('[data-fiddy="hero-reaction"]');
+  check(
+    `${label}: a tap still gets words, without fetching or hopping`,
+    (await reducedReaction.textContent()) === 'Hiya, you!' &&
+      requested.filter((url) => url.endsWith(GLB)).length === 0 &&
+      (await page
+        .locator('[data-fiddy-hero-variant="hero"] canvas')
+        .count()) === 0,
+    await reducedReaction.textContent(),
+  );
+  check(
+    `${label}: the hello itself has no animation`,
+    (await reducedReaction.evaluate(
+      (node) => getComputedStyle(node).animationName,
+    )) === 'none',
   );
   await shot(page, label);
   await context.close();
@@ -699,9 +775,15 @@ async function checkNameStep(browser, width) {
   await page.waitForSelector('[data-fiddy-hero-variant="form"]', {
     timeout: 20000,
   });
-  check(`${label}: the little Fiddy is on the name step`, (await stage.count()) === 1);
+  check(
+    `${label}: the little Fiddy is on the name step`,
+    (await stage.count()) === 1,
+  );
   await page.waitForFunction(
-    () => document.querySelector('[data-fiddy-hero-variant="form"][data-fiddy-hero="moving"]'),
+    () =>
+      document.querySelector(
+        '[data-fiddy-hero-variant="form"][data-fiddy-hero="moving"]',
+      ),
     undefined,
     { timeout: 45000 },
   );
@@ -716,7 +798,12 @@ async function checkNameStep(browser, width) {
     const inputBox = input.getBoundingClientRect();
     return {
       stage: { x: box.x, y: box.y, w: box.width, h: box.height },
-      field: { x: fieldBox.x, y: fieldBox.y, w: fieldBox.width, h: fieldBox.height },
+      field: {
+        x: fieldBox.x,
+        y: fieldBox.y,
+        w: fieldBox.width,
+        h: fieldBox.height,
+      },
       input: { y: inputBox.y, h: inputBox.height },
       canvasPointerEvents: getComputedStyle(canvas).pointerEvents,
       inputPointerEvents: getComputedStyle(input).pointerEvents,
@@ -797,7 +884,11 @@ const main = async () => {
 
 main().catch((error) => {
   console.log(
-    JSON.stringify({ ok: false, error: String(error?.stack ?? error) }, null, 1),
+    JSON.stringify(
+      { ok: false, error: String(error?.stack ?? error) },
+      null,
+      1,
+    ),
   );
   process.exit(1);
 });

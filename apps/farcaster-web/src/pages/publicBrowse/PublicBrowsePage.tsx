@@ -68,8 +68,11 @@ const PublicWindowSkeletons: FC = memo(() => (
     className="fiddy-public-skeletons"
     data-fiddy="public-loading"
     role="status"
-    aria-label="Loading casts"
+    aria-live="polite"
   >
+    <span className="fiddy-public-loading-copy">
+      Fiddy is looking for fresh casts…
+    </span>
     {Array.from({ length: SKELETON_ROWS }, (_, index) => (
       <PublicCastSkeleton key={index} />
     ))}
@@ -90,15 +93,14 @@ const PublicReadingNote: FC<{
 }> = memo(({ onSignIn, variant }) => (
   <div className="fiddy-public-note" data-fiddy="public-sign-in-prompt">
     <span>
-      <b>You are reading Fiddy without an account.</b> Everything here is
-      public:{' '}
+      <b>Take a look around. No account needed.</b> These are{' '}
       {variant === 'explore'
-        ? 'what is getting attention on Farcaster right now'
+        ? 'the casts getting attention on Farcaster right now'
         : 'the newest casts from people on Farcaster'}
-      . Signing in is what lets you reply, like and post.
+      . When you want to reply, like or post, signing in is the next step.
     </span>
     <DefaultButton className="fiddy-public-note-btn" onClick={onSignIn}>
-      Sign in
+      Sign in to join in
     </DefaultButton>
   </div>
 ));
@@ -238,12 +240,12 @@ const PublicBrowseColumn: FC<{
       ) : window.isEmpty ? (
         <div className="fiddy-public-state" data-fiddy="public-empty">
           <h2 className="fiddy-public-state-title">
-            Nothing to show here right now.
+            No fresh casts in this corner yet.
           </h2>
           <p className="fiddy-public-state-body">
             {window.topic !== null
-              ? `No public casts are being read from #${window.topic} at the moment. Try the whole window, or look again in a minute.`
-              : 'The window came back empty, which means the server this app reads from had nothing to give right now. It is not an empty network.'}
+              ? `Fiddy looked in #${window.topic}, but nothing came back this time. See everything, or look again in a minute.`
+              : 'Fiddy looked, but the server had nothing to share this time. The network is not empty, so it is worth another look.'}
           </p>
           <div className="fiddy-public-state-actions">
             <button
@@ -252,7 +254,7 @@ const PublicBrowseColumn: FC<{
               data-fiddy="public-retry"
               onClick={window.retry}
             >
-              Try again
+              Look again
             </button>
             {window.topic !== null && (
               <button
@@ -260,7 +262,7 @@ const PublicBrowseColumn: FC<{
                 className="fiddy-public-state-btn fiddy-public-state-btn-quiet"
                 onClick={() => window.selectTopic(null)}
               >
-                All of it
+                See everything
               </button>
             )}
           </div>

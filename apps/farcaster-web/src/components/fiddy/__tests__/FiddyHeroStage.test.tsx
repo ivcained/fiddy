@@ -85,6 +85,13 @@ describe('FiddyHeroStage', () => {
     expect(scene.mount).not.toHaveBeenCalled();
     expect(still()).toBeTruthy();
     expect(stage()?.getAttribute('data-fiddy-hero')).toBe('still');
+
+    // Stillness removes the hop, not the reply. A tap gets a motion-free hello.
+    fireEvent.click(stage() as HTMLButtonElement);
+    expect(react).not.toHaveBeenCalled();
+    expect(
+      stage()?.querySelector('[data-fiddy="hero-reaction"]')?.textContent,
+    ).toBe('Hiya, you!');
   });
 
   it('mounts the baby, with the clip, the head and the rest the hero needs', async () => {
@@ -115,6 +122,15 @@ describe('FiddyHeroStage', () => {
     // asserts is that the press reaches the scene at all.
     fireEvent.click(button);
     expect(react).toHaveBeenCalledTimes(1);
+    expect(
+      button.querySelector('[data-fiddy="hero-reaction"]')?.textContent,
+    ).toBe('Hiya, you!');
+
+    fireEvent.click(button);
+    expect(react).toHaveBeenCalledTimes(2);
+    expect(
+      button.querySelector('[data-fiddy="hero-reaction"]')?.textContent,
+    ).toBe('Boop received.');
   });
 
   it('is decoration beside the name field: no button, no name, no pointer', async () => {

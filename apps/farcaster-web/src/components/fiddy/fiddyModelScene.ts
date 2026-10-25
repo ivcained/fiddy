@@ -299,6 +299,13 @@ export const mountFiddyModel = async (
     if (host.dataset.motion !== state) {
       host.dataset.motion = state;
     }
+    // The exact authored lift, 0 at rest and 1 at the top of the hop. This is
+    // the same value that moves the figure, so a probe need not infer a small
+    // hop from a changing silhouette (the clip moves the silhouette too).
+    const hop = greeting ? Math.sin(sinceGreeting * Math.PI).toFixed(3) : '0';
+    if (host.dataset.hop !== hop) {
+      host.dataset.hop = hop;
+    }
     if (options.look && headNode) {
       // Reported as the DEFLECTION in degrees — yaw positive to the right,
       // pitch positive upward — not as the rotation about the head's own axes.
