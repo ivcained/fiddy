@@ -44,9 +44,10 @@
 #   4. assemble the release tree the vhost expects — web/ (the client) plus
 #      server/ (the read-only preview's API, which systemd runs from
 #      /var/www/fiddy.fun/current/server/server.mjs, so a release without it
-#      kills that service on its next restart), server/unfurl/ (the per-page
-#      unfurl service, shipped from THIS repo — the one part of server/ the
-#      ritual builds rather than carries forward) and web/preview/ (the preview
+#      kills that service on its next restart), server/unfurl/ + server/translate/
+#      (the per-page unfurl service and the cast-translation service beside it,
+#      shipped from THIS repo — the parts of server/ the ritual builds rather
+#      than carries forward) and web/preview/ (the preview
 #      page itself, kept byte-identical and reachable at /preview/);
 #   5. copy the artifact to the VPS and extract it into a NEW immutable
 #      releases/<sha>/ — the running release is never written to;
@@ -324,16 +325,21 @@ done
 sed 's#"/assets/#"assets/#g' "$STAGE/prior-index.html" > "$WEB/preview/index.html"
 rsync -a --delete "$HOST:$PRIOR/web/assets/" "$WEB/preview/assets/"
 cp -a "$STAGE/server/." "$STAGE/release/server/"
-# The per-page unfurl service is the one piece of server/ that comes from THIS
-# repo: the preview API next to it is built by legitmate-farcaster and carried
-# forward, and this one must not be (a carried-forward copy is a copy of
-# whatever the PREVIOUS release happened to ship, which for a service is a
-# release that changes nothing). Sources only: no __pycache__, no editor files.
-UNFURL_SRC="$STAGE/base/apps/farcaster-web/server/unfurl"
-rm -rf "$STAGE/release/server/unfurl"
-mkdir -p "$STAGE/release/server/unfurl"
-( cd "$UNFURL_SRC" && find . \( -name '__pycache__' -o -name '*.pyc' \) -prune -o -type f -print | tar -cf - -T - ) \
-  | tar -xf - -C "$STAGE/release/server/unfurl"
+# The SERVICES under server/ are the pieces that come from THIS repo: the
+# per-page unfurl service, and the cast-translation service beside it (card
+# t_bb7cca3b, which the unfurl service mounts its two routes on). The preview API
+# next to them is built by legitmate-farcaster and carried forward, and these
+# must not be (a carried-forward copy is a copy of whatever the PREVIOUS release
+# happened to ship, which for a service is a release that changes nothing).
+# Sources only: no __pycache__, no editor files.
+for SERVICE in unfurl translate; do
+  SERVICE_SRC="$STAGE/base/apps/farcaster-web/server/$SERVICE"
+  [ -d "$SERVICE_SRC" ] || { echo "REFUSING to ship: $SERVICE_SRC is not in the frozen tree" >&2; exit 1; }
+  rm -rf "$STAGE/release/server/$SERVICE"
+  mkdir -p "$STAGE/release/server/$SERVICE"
+  ( cd "$SERVICE_SRC" && find . \( -name '__pycache__' -o -name '*.pyc' \) -prune -o -type f -print | tar -cf - -T - ) \
+    | tar -xf - -C "$STAGE/release/server/$SERVICE"
+done
 rm -rf "$STAGE/preview-assets" "$STAGE/prior-index.html"
 printf 'User-agent: *\nDisallow: /api/\n' > "$WEB/robots.txt"
 printf '{"revision":"%s","mode":"node-backed-client","node":"%s","media":"%s"}\n' \
@@ -360,6 +366,7 @@ ssh_ "set -e
   grep -q '\"signature\"' $RELEASES/$SHA/web/.well-known/farcaster.json
   test -f $RELEASES/$SHA/server/unfurl/server.mjs
   test -f $RELEASES/$SHA/server/unfurl/render-card.py
+  test -f $RELEASES/$SHA/server/translate/translate.mjs
   # The card renderer is Pillow, which the host has and the release does not
   # ship (no browser, no npm install): refuse now rather than serve a page
   # whose card cannot be drawn.
@@ -367,10 +374,15 @@ ssh_ "set -e
   systemctl cat fiddy-unfurl.service > /dev/null || { echo 'fiddy-unfurl.service is not installed'; exit 1; }
   grep -q 'proxy_pass http://127.0.0.1:3220;' /etc/nginx/sites-available/fiddy.fun
   grep -q 'location ^~ /unfurl/' /etc/nginx/sites-available/fiddy.fun
+  # The translate routes the client asks for, proxied to the same service. A
+  # release whose client offers translations nginx cannot deliver is a release
+  # that ships a button which 404s, so it does not cut over.
+  grep -q 'location = /api/translate' /etc/nginx/sites-available/fiddy.fun
+  grep -q 'location = /api/translations' /etc/nginx/sites-available/fiddy.fun
   grep -q 'snapchain-api' /etc/nginx/sites-available/fiddy.fun
   grep -q 'location ^~ /preview/' /etc/nginx/sites-available/fiddy.fun
   grep -q 'proxy_pass http://127.0.0.1:8787;' /etc/nginx/sites-available/fiddy.fun
-  echo '  disk gate ok: bundle (adapter, media, node, together), preview, server, unfurl (renderer, unit, locations), vhost locations, listing manifest'"
+  echo '  disk gate ok: bundle (adapter, media, node, together), preview, server, unfurl + translate services (renderer, locations), vhost locations, listing manifest'"
 
 if [ "$NO_CUTOVER" = "--no-cutover" ]; then
   say "staged at $RELEASES/$SHA (not cut over)"

@@ -24,6 +24,19 @@
  *                         means this host stores none: a look it already holds
  *                         still renders, and a share request refuses in one
  *                         sentence rather than failing silently.
+ *   FIDDY_TRANSLATIONS_DIR
+ *                         where cast translations are kept (server/translate/),
+ *                         and the switch that makes this host able to translate
+ *                         at all: absent means `GET /api/translate` answers
+ *                         `{on:false}` and the client draws no Translate control.
+ *   OPENROUTER_API_KEY    the model credential for translations. Without it the
+ *                         capability answers `{on:false}` (a kept translation is
+ *                         still served), and asks refuse in one sentence rather
+ *                         than reaching anywhere.
+ *   OPENROUTER_URL        an OpenAI-compatible completion endpoint, if not
+ *                         OpenRouter's own (a self-hoster's own model).
+ *   OPENROUTER_MODELS     comma-separated model ids; `:free` only, and every
+ *                         request caps the price at zero.
  */
 
 import { statSync, readFileSync } from 'node:fs';
@@ -32,10 +45,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createCardRenderer } from './cards.mjs';
-import { carriesLookBody, readLookBody } from './lookBody.mjs';
+import { carriesApiBody, LOOK_SHARE_PATH, readLookBody } from './lookBody.mjs';
 import { createLookStore, LOOK_LIMITS } from './looks.mjs';
 import { createUnfurlHandler } from './handler.mjs';
 import { createLinkReader } from './reader.mjs';
+import {
+  createTranslationStore,
+  createTranslator,
+  TRANSLATION_BODY_BYTES,
+} from '../translate/translate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webRoot =
@@ -106,6 +124,39 @@ const renderCard = createCardRenderer({
 const looksDir = process.env.FIDDY_LOOKS_DIR;
 const looks = looksDir ? createLookStore({ dir: looksDir }) : undefined;
 
+/**
+ * Cast translations (`../translate/translate.mjs`), or nothing.
+ *
+ * Nothing is a real state, not a broken one: a host with no state directory and
+ * no model key answers `GET /api/translate` with `{on:false}`, and the client
+ * draws no Translate control at all. Two halves, and either alone is enough to
+ * be honest about it — the directory is where answers are kept, the key is what
+ * reaches a model.
+ */
+const translationsDir = process.env.FIDDY_TRANSLATIONS_DIR;
+const translator = translationsDir
+  ? createTranslator({
+      store: createTranslationStore({ dir: translationsDir }),
+      // The cast's words come from the node, HERE. The browser may name the
+      // author (it knows every cast's fid) because a node shards by FID — an
+      // address, never the text: a caller cannot ask this service to translate
+      // words of its own.
+      getCastText: async (fid, hash) => {
+        if (Number.isSafeInteger(fid)) {
+          return reader.castText(fid, hash);
+        }
+        const author = await reader.authorOf(hash);
+        return author === undefined ? undefined : reader.castText(author, hash);
+      },
+      key: process.env.OPENROUTER_API_KEY,
+      models: process.env.OPENROUTER_MODELS?.split(',')
+        .map((each) => each.trim())
+        .filter(Boolean),
+      url: process.env.OPENROUTER_URL,
+      site: process.env.FIDDY_ORIGIN ?? 'https://fiddy.fun',
+    })
+  : undefined;
+
 const handler = createUnfurlHandler({
   origin: process.env.FIDDY_ORIGIN ?? 'https://fiddy.fun',
   shellSource: loadShell,
@@ -113,6 +164,7 @@ const handler = createUnfurlHandler({
   renderCard,
   reader,
   looks,
+  translator,
 });
 
 /**
@@ -125,17 +177,44 @@ const handler = createUnfurlHandler({
  * else the module needs is the model's own cap.
  */
 
+/**
+ * Who to count a request against.
+ *
+ * nginx is the only caller that matters and it forwards the reader's address in
+ * `x-forwarded-for`; a call straight to the loopback port has only its socket
+ * address. Neither is trusted for anything but a rate-limit key: the limit
+ * exists so one address cannot spend the free model tier for everyone, and a
+ * shared address shares a window rather than escaping one.
+ */
+const callerOf = (request) =>
+  String(request.headers['x-forwarded-for'] ?? '')
+    .split(',')[0]
+    .trim() ||
+  request.socket?.remoteAddress ||
+  'unknown';
+
 const server = createServer(async (request, response) => {
   const path = request.url ?? '/';
   let answer;
   try {
     const method = request.method ?? 'GET';
-    // Only a share POST has a body worth reading; everything else is answered
-    // without one, exactly as before.
-    const body = carriesLookBody(method, path)
-      ? await readLookBody(request, LOOK_LIMITS.bytes)
+    // Only the POSTs that carry a JSON body have one worth reading; everything
+    // else is answered without one, exactly as before. The cap is the model's
+    // own: a look share is 8 KB by `LOOK_LIMITS.bytes`, a translation ask 4 KB.
+    const body = carriesApiBody(method, path)
+      ? await readLookBody(
+          request,
+          path.split('?')[0] === LOOK_SHARE_PATH
+            ? LOOK_LIMITS.bytes
+            : TRANSLATION_BODY_BYTES,
+        )
       : undefined;
-    answer = await handler.handle({ method, path, body });
+    answer = await handler.handle({
+      method,
+      path,
+      body,
+      ip: callerOf(request),
+    });
   } catch (error) {
     // Nothing a request can do should reach here; if something does, the answer
     // is still the app rather than a stack trace in a crawler's face.
@@ -165,7 +244,8 @@ server.listen(port, host, () => {
   process.stdout.write(
     `fiddy-unfurl on ${host}:${port} | shell ${shellPath} (${loadShell().length} bytes) | ` +
       `site card ${loadSiteCard() ? 'yes' : 'NO'} | node ${process.env.SNAPCHAIN_HTTP_URL ?? 'https://haatz.quilibrium.com'} | ` +
-      `cast-hash index ${process.env.NEYNAR_API_KEY ? 'keyed' : 'unconfigured'}\n`,
+      `cast-hash index ${process.env.NEYNAR_API_KEY ? 'keyed' : 'unconfigured'} | ` +
+      `translations ${translator ? (translator.available() ? 'on' : 'no key') : 'off'}\n`,
   );
 });
 

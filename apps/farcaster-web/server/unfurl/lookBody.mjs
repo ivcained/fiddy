@@ -34,6 +34,20 @@
 /** The path whose POST carries a look. */
 export const LOOK_SHARE_PATH = '/look';
 
+/**
+ * The paths whose POST carries a JSON body this service reads.
+ *
+ * A look share (`POST /look`), and the translation routes
+ * (`server/translate/`): an ask names a cast and a language, a lookup names up
+ * to fifty hashes. Each is read through the same capped reader below, with the
+ * cap its own model sets — never an unbounded read of whatever a caller sent.
+ */
+export const JSON_BODY_PATHS = [LOOK_SHARE_PATH, '/api/translate', '/api/translations'];
+
+/** Is this request one of the POSTs that carries a body worth reading? */
+export const carriesApiBody = (method, path) =>
+  method === 'POST' && JSON_BODY_PATHS.includes((path ?? '').split('?')[0]);
+
 /** Is this request the one that carries a body worth reading? */
 export const carriesLookBody = (method, path) =>
   method === 'POST' && (path ?? '').split('?')[0] === LOOK_SHARE_PATH;

@@ -234,6 +234,32 @@ export const createLinkReader = ({
       const author = await userData(fid);
       return author ? { author } : undefined;
     },
+    /**
+     * The FID that wrote a cast, when the caller has only the hash.
+     *
+     * The cast-hash index (Neynar) answers this, and it is the one thing a
+     * caller without a viewer needs — a node shards by FID. `undefined` when
+     * there is no index configured or the index does not know the hash: never a
+     * guess, so the caller refuses rather than reads the wrong shard.
+     */
+    async authorOf(hash) {
+      return isFullCastHash(hash) ? castAuthor(hash) : undefined;
+    },
+    /**
+     * One cast's own words, for a caller that already knows who wrote it.
+     *
+     * Used by the translator (`server/translate/`): the browser knows the
+     * author of every cast on screen, and a translation that is only of the
+     * real cast is what stops that endpoint from being a free model for
+     * anybody's words. `undefined` when the node does not hold the cast.
+     */
+    async castText(fid, hash) {
+      if (!Number.isSafeInteger(fid) || !isFullCastHash(hash)) {
+        return undefined;
+      }
+      const cast = await castByAuthor(fid, hash);
+      return cast?.text;
+    },
     size: () => cache.size(),
   };
 };
