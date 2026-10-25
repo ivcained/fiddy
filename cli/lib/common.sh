@@ -86,19 +86,41 @@ scp_to() { # scp_to <local> <remote-path>
 # Poll the node's HTTP info endpoint until it answers, printing health.
 wait_for_node() { # wait_for_node <base-url> [tries] [remote-hint]
   local base="$1" tries="${2:-60}" hint="${3:-}" i body
-  log "waiting for the node API at $base (up to $((tries * 5))s)…"
+  log "waiting for the node API at $base — the snapshot downloads first; that is the long part"
   for ((i = 1; i <= tries; i++)); do
     if body="$(curl -fsS --max-time 5 "$base/v1/info" 2>/dev/null)"; then
       ok "node API is up: $base"
       printf '%s\n' "$body" | node_info_summary
       return 0
     fi
-    printf '\r%s…%s attempt %d/%d' "$c_dim" "$c_reset" "$i" "$tries"
+    printf '\r\033[K%s' "$(snapshot_progress)"
     sleep 5
   done
   printf '\n'
   if [ -n "$hint" ]; then warn "$hint"; fi
   die "node did not answer at $base — check: fiddy node logs"
+}
+
+# Live bootstrap status: which snapshot chunk is downloading, how fast, and a
+# real ETA from the measured rate. Works locally or against the SSH target.
+snapshot_progress() {
+  local chunk
+  if [ -n "${FIDDY_TARGET:-}" ]; then
+    chunk="$(ssh_run 'docker logs snapchain-snapchain-1 2>&1 | grep -oE "chunk_[0-9]+\.bin" | tail -1' 2>/dev/null || true)"
+  else
+    chunk="$(docker logs snapchain-snapchain-1 2>&1 | grep -oE 'chunk_[0-9]+\.bin' | tail -1 2>/dev/null || true)"
+  fi
+  [ -n "$chunk" ] || { printf 'preparing the snapshot download (the node API answers after it loads)…'; return; }
+  local n="${chunk#chunk_}"; n="${n%.bin}"
+  local now; now="$(date +%s)"
+  if [ -z "${_SP_FIRST_N:-}" ]; then _SP_FIRST_N=$n; _SP_START=$now; fi
+  local pct=$(( n * 100 / 5690 ))
+  local elapsed=$(( (now - _SP_START) / 60 )); [ "$elapsed" -lt 1 ] && elapsed=1
+  local rate=$(( (n - _SP_FIRST_N) / elapsed )); [ "$rate" -lt 1 ] && rate=1
+  local eta_min=$(( (5690 - n) / rate ))
+  local eta
+  if [ "$eta_min" -ge 90 ]; then eta="$(( (eta_min + 30) / 60 ))h"; else eta="${eta_min}m"; fi
+  printf 'downloading snapshot: chunk %s/5690 (%s%%) · %s chunks/min · ~%s left · safe to close this terminal' "$n" "$pct" "$rate" "$eta"
 }
 
 # Summarise /v1/info (jq if present, otherwise raw).
