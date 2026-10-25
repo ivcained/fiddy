@@ -33,14 +33,24 @@
  * the walk, and that the step hands the panel the one press that skips it.
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BRAIN_CARDS } from '~/components/fiddy/BrainSheet';
 import { installFakeStorage } from '~/lib/__tests__/fakeStorage';
-import { loadFiddySetup, resetFiddySetup } from '~/lib/fiddySetup';
+import {
+  loadFiddySetup,
+  resetFiddySetup,
+  saveFiddySetup,
+} from '~/lib/fiddySetup';
 
 const state = vi.hoisted(() => ({ signedIn: false }));
 
@@ -258,5 +268,44 @@ describe('the way in, as a three-step walk', () => {
 
     expect(screen.getByText(/Meet Fiddy/)).toBeTruthy();
     expect(stepCount()).toBe('');
+  });
+
+  it('resumes the saved step after Do this later, and starts over only on request', () => {
+    renderWizard('/welcome/name');
+
+    fireEvent.change(screen.getByLabelText("Your agent's name"), {
+      target: { value: 'Pip' },
+    });
+    act(() => {
+      saveFiddySetup({ brain: 'google' });
+    });
+    fireEvent.click(screen.getByText('Continue'));
+    fireEvent.click(screen.getByText('Add this later'));
+    expect(stepCount()).toBe('Step 3 of 3');
+
+    fireEvent.click(screen.getByText('Do this later'));
+    expect(screen.getByText(/Meet Fiddy/)).toBeTruthy();
+    expect(loadFiddySetup()).toMatchObject({
+      agentName: 'Pip',
+      brain: 'google',
+      onboardingStep: 'ready',
+    });
+
+    fireEvent.click(screen.getByText('Resume with Pip'));
+    expect(stepCount()).toBe('Step 3 of 3');
+    expect(screen.getByText('Pip is ready.')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Do this later'));
+    fireEvent.click(screen.getByText('Start over'));
+    expect(stepCount()).toBe('Step 1 of 3');
+    expect(
+      (screen.getByLabelText("Your agent's name") as HTMLInputElement).value,
+    ).toBe('Fiddy');
+    expect(loadFiddySetup()).toMatchObject({
+      agentName: 'Fiddy',
+      brain: 'fiddy',
+      onboardingStep: 'setup',
+      completedAt: null,
+    });
   });
 });

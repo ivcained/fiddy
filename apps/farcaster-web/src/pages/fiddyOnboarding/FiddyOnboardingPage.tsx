@@ -69,10 +69,11 @@ import { useNavigate } from '~/hooks/navigation/useNavigate';
 import { LazyFiddyFundingPanel } from '~/lazy/funding';
 import {
   DEFAULT_AGENT_NAME,
+  resetFiddySetup,
   saveFiddySetup,
   useFiddySetup,
 } from '~/lib/fiddySetup';
-import { loadTrialExchange } from '~/lib/trialChat';
+import { clearTrialExchange, loadTrialExchange } from '~/lib/trialChat';
 
 /**
  * The screens this flow renders.
@@ -142,6 +143,14 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
     titleRef.current?.focus();
   }, [step]);
 
+  // Leaving the wizard to browse is not cancelling it. Keep the last numbered
+  // step beside the answers so the front door can offer a real resume action.
+  useEffect(() => {
+    if (step === 'setup' || step === 'funds' || step === 'ready') {
+      saveFiddySetup({ onboardingStep: step });
+    }
+  }, [step]);
+
   // Reaching the last step is what "done" means: the answers are already saved
   // as they were given, and the front door can then offer to continue.
   useEffect(() => {
@@ -154,6 +163,26 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
   const stepMeta = position ? { index: position, total: TOTAL_STEPS } : null;
   const go = (to: OnboardingRouteName) =>
     navigate({ to, params: {}, searchParams: {} });
+  const hasProgress =
+    setup.onboardingStep !== null || setup.completedAt !== null;
+  const resumeSetup = () => {
+    // A setup completed before steps were stored still resumes at its end.
+    const savedStep = setup.onboardingStep ?? 'ready';
+    go(
+      savedStep === 'funds'
+        ? 'fiddyWelcomeFunds'
+        : savedStep === 'ready'
+          ? 'fiddyWelcomeReady'
+          : 'fiddyWelcomeName',
+    );
+  };
+  const startOver = () => {
+    resetFiddySetup();
+    clearTrialExchange();
+    setDraftName(DEFAULT_AGENT_NAME);
+    setTrialAnswered(false);
+    go('fiddyWelcomeName');
+  };
 
   // A signed-in session does not belong on a setup screen.
   //
@@ -345,10 +374,9 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
             // the primary action because a visitor can see Fiddy's public posts
             // before deciding whether to set anything up.
             secondary={{
-              label: setup.completedAt
-                ? `Continue as ${setup.agentName}`
-                : 'Say hi',
-              onClick: () => go('fiddyWelcomeName'),
+              label: hasProgress ? `Resume with ${setup.agentName}` : 'Say hi',
+              onClick: hasProgress ? resumeSetup : () => go('fiddyWelcomeName'),
+              testId: hasProgress ? 'resume-setup' : 'start-setup',
             }}
             quiet={{
               label: 'Already have an account? Sign in',
@@ -362,6 +390,16 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
               <li>It connects to the apps you already use.</li>
               <li>You stay in control: it asks first, and you can pause it.</li>
             </ul>
+            {hasProgress ? (
+              <button
+                type="button"
+                className="fiddy-quiet-btn"
+                data-fiddy="start-over"
+                onClick={startOver}
+              >
+                Start over
+              </button>
+            ) : null}
           </FiddySheet>
         );
     }

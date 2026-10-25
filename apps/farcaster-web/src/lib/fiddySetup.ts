@@ -54,6 +54,8 @@ export type ChannelId =
   | 'imessage'
   | 'email';
 
+export type OnboardingStep = 'setup' | 'funds' | 'ready';
+
 export interface FiddySetup {
   /** What the owner called their agent. */
   agentName: string;
@@ -71,6 +73,8 @@ export interface FiddySetup {
   walletChoice: WalletChoiceId;
   /** Set when the last onboarding step was reached; null until then. */
   completedAt: number | null;
+  /** The numbered step to offer when the visitor returns. */
+  onboardingStep: OnboardingStep | null;
 }
 
 export const DEFAULT_AGENT_NAME = 'Fiddy';
@@ -107,6 +111,7 @@ export const defaultFiddySetup = (): FiddySetup => ({
   },
   walletChoice: 'farcaster',
   completedAt: null,
+  onboardingStep: null,
 });
 
 const asString = (value: unknown): string | null =>
@@ -145,6 +150,9 @@ const asModel = (value: unknown): string | null =>
  */
 const asWalletChoice = (value: unknown): WalletChoiceId =>
   value === 'fresh' ? 'fresh' : 'farcaster';
+
+const asOnboardingStep = (value: unknown): OnboardingStep | null =>
+  value === 'setup' || value === 'funds' || value === 'ready' ? value : null;
 
 /**
  * Read, never throw. Stored state from an older build, a half-written value or
@@ -189,6 +197,7 @@ export const loadFiddySetup = (): FiddySetup => {
       walletChoice: asWalletChoice(parsed.walletChoice),
       completedAt:
         typeof parsed.completedAt === 'number' ? parsed.completedAt : null,
+      onboardingStep: asOnboardingStep(parsed.onboardingStep),
     };
   } catch {
     return base;
@@ -230,6 +239,10 @@ export const saveFiddySetup = (patch: Partial<FiddySetup>): FiddySetup => {
       typeof patch.completedAt === 'number'
         ? patch.completedAt
         : current.completedAt,
+    onboardingStep:
+      patch.onboardingStep === undefined
+        ? current.onboardingStep
+        : asOnboardingStep(patch.onboardingStep),
   };
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
