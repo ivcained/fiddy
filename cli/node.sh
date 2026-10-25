@@ -519,9 +519,14 @@ node_autoupgrade() {
         && ok "auto-upgrade on: $every (cron '$cron', host time; log: ~/snapchain/snapchain-autoupgrade.log)"
     else
       # Local node (--local install): edit this machine's crontab.
-      sed -i '' 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' "$HOME/snapchain/.env" 2>/dev/null \
-        || sed -i 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' "$HOME/snapchain/.env"
-      ( crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade' | grep -v 'fiddy self-update'; echo "$cron $HOME/snapchain/snapchain.sh autoupgrade >> $HOME/snapchain/snapchain-autoupgrade.log 2>&1" ) | crontab -
+      # The install lives at $FIDDY_HOME/snapchain (~/.fiddy/snapchain), not
+      # necessarily ~/snapchain — resolve it, don't assume.
+      local snap_dir="$FIDDY_HOME/snapchain"
+      [ -f "$snap_dir/.env" ] || snap_dir="$HOME/snapchain"
+      [ -f "$snap_dir/.env" ] || die "no Snapchain install found at $FIDDY_HOME/snapchain or ~/snapchain — run: fiddy node up --local first"
+      sed -i '' 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' "$snap_dir/.env" 2>/dev/null \
+        || sed -i 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' "$snap_dir/.env"
+      ( crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade' | grep -v 'fiddy self-update'; echo "$cron $snap_dir/snapchain.sh autoupgrade >> $snap_dir/snapchain-autoupgrade.log 2>&1" ) | crontab -
       # Keep the fiddy CLI itself current too: hourly fast-forward pull of the
       # checkout this install was made from (ff-only: local edits never get
       # clobbered — a dirty tree just skips that run).
@@ -538,8 +543,11 @@ node_autoupgrade() {
       ssh_run 'sed -i "s/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/" ~/snapchain/.env; crontab -l 2>/dev/null | grep -v snapchain | crontab -' \
         && ok "auto-upgrade off — upgrade by hand: fiddy node upgrade"
     else
-      sed -i '' 's/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/' "$HOME/snapchain/.env" 2>/dev/null \
-        || sed -i 's/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/' "$HOME/snapchain/.env"
+      local snap_dir="$FIDDY_HOME/snapchain"
+      [ -f "$snap_dir/.env" ] || snap_dir="$HOME/snapchain"
+      [ -f "$snap_dir/.env" ] || die "no Snapchain install found — nothing to turn off"
+      sed -i '' 's/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/' "$snap_dir/.env" 2>/dev/null \
+        || sed -i 's/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/' "$snap_dir/.env"
       crontab -l 2>/dev/null | grep -v snapchain | grep -v 'fiddy self-update' | crontab -
       ok "auto-upgrade off (local) — upgrade by hand: fiddy node upgrade"
     fi
