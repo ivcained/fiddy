@@ -115,6 +115,10 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
       displayText,
       hasTranslation,
       isTranslationPending,
+      isTranslationOffered,
+      isAsking,
+      notice,
+      offerTranslation,
       showOriginal,
       sourceLanguageName,
       toggleLabel,
@@ -305,7 +309,10 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
               (isPinned || cast.pinned) && shouldShowPinnedLabel && 'mt-4',
               interactionTopHat && 'mt-4',
               includeReasonTopHatType && 'mt-4',
-              (hasTranslation || isTranslationPending) && 'mt-4',
+              (hasTranslation ||
+                isTranslationPending ||
+                isTranslationOffered) &&
+                'mt-4',
               typeof CastTopHatForNotificationsComponent !== 'undefined' &&
                 'mt-4',
             )}
@@ -339,9 +346,15 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
               />
             )}
             {interactionTopHat && <FeedItemTopHat topHat={interactionTopHat} />}
-            {(hasTranslation || isTranslationPending) && (
+            {(hasTranslation ||
+              isTranslationPending ||
+              isTranslationOffered) && (
               <CastTranslationTopHat
                 isPending={isTranslationPending}
+                isOffered={isTranslationOffered}
+                isAsking={isAsking}
+                notice={notice}
+                onOffer={offerTranslation}
                 sourceLanguageName={sourceLanguageName}
                 showOriginal={showOriginal}
                 toggleLabel={toggleLabel}

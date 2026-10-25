@@ -11,12 +11,19 @@
  * it cannot read is not an error page — it is the shell, unchanged, exactly
  * what the host served before this service existed. That is what makes the
  * nginx fallback and the honest-miss path the same thing.
+ *
+ * As of card t_bb7cca3b it also answers two JSON routes — `POST /api/translate`,
+ * `POST /api/translations` and the `GET /api/translate` capability probe — for
+ * cast translations (`../translate/translate.mjs`). They are the same kind of
+ * promise: the cast's words are read from the node HERE, and a host that cannot
+ * translate says `{on:false}` instead of answering a page with an invented one.
  */
 
 import { cardUrl, pageTags, renderPageHtml } from './shellMeta.mjs';
 import { castPage, lookPage, profilePage } from './pages.mjs';
 import { lookFacts, shareableLook } from './looks.mjs';
 import { CARD_HEIGHT, CARD_WIDTH } from './cards.mjs';
+import { createRateLimiter, translationRefusal } from '../translate/translate.mjs';
 
 const HTML_TTL_MS = 5 * 60 * 1000;
 const MISS_TTL_MS = 30 * 1000;
@@ -94,6 +101,22 @@ export const createUnfurlHandler = ({
    * links refuse in one sentence.
    */
   looks,
+  /**
+   * Cast translations (`../translate/translate.mjs`), or nothing.
+   *
+   * A host with no translator is a host whose `GET /api/translate` answers
+   * `{on:false}` — which is what the browser asks before drawing any control,
+   * so the app degrades honestly instead of offering a button that 404s.
+   */
+  translator,
+  /**
+   * How much translation traffic one caller may make: an ask is a model call on
+   * somebody else's free tier, a lookup is a disk read of what is already kept.
+   */
+  translationLimits = {
+    ask: { max: 30, windowMs: 10 * 60 * 1000 },
+    lookup: { max: 300, windowMs: 10 * 60 * 1000 },
+  },
   now = () => Date.now(),
   htmlTtlMs = HTML_TTL_MS,
   missTtlMs = MISS_TTL_MS,
@@ -276,12 +299,40 @@ export const createUnfurlHandler = ({
     };
   };
 
+  // One window per caller per kind (`../translate/translate.mjs`). The key is
+  // the address nginx forwarded; a caller behind a shared address shares a
+  // window, which is the honest reading of a limit that cannot know better.
+  const spentOnAsking = createRateLimiter({ ...translationLimits.ask, now });
+  const spentOnLooking = createRateLimiter({ ...translationLimits.lookup, now });
+
+  /** A refused ask, in the app's own voice, whatever went wrong inside. */
+  const translationAnswer = (error) => {
+    if (error?.status) {
+      return json(error.status, { error: error.message });
+    }
+    process.stderr.write(`translate: ${error?.stack ?? error}\n`);
+    return json(500, { error: "Couldn't translate that right now." });
+  };
+
+  /** A body this service reads as JSON, or a refusal. Never a stack trace. */
+  const askedFor = (raw) => {
+    try {
+      const parsed = JSON.parse(String(raw ?? ''));
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('not an object');
+      }
+      return parsed;
+    } catch {
+      throw translationRefusal(400, 'Bad request.');
+    }
+  };
+
   return {
     /**
-     * @param {{method: string, path: string, body?: string}} request
+     * @param {{method: string, path: string, body?: string, ip?: string}} request
      * @returns {Promise<{status: number, headers: Record<string,string>, body: string|Buffer}>}
      */
-    async handle({ method, path, body }) {
+    async handle({ method, path, body, ip }) {
       const [, ...segments] = path.split('?')[0].split('/');
 
       // A shared look is the ONE thing anyone can send here, and it is a
@@ -310,6 +361,49 @@ export const createUnfurlHandler = ({
             error: "Fiddy couldn't save that look just now.",
             why: headerNote(error?.message ?? String(error)),
           });
+        }
+      }
+
+      // Cast translations (`../translate/translate.mjs`). The browser decides a
+      // cast is in another language and asks here; the cast's words are read
+      // FROM THE NODE by this service, translated once per language and kept,
+      // so the answer is the same for every reader afterwards.
+      if (segments[0] === 'api' && segments.length === 2 && (segments[1] === 'translate' || segments[1] === 'translations')) {
+        const one = segments[1] === 'translate';
+        // Whether translating is set up on THIS host. The browser asks before
+        // it draws anything: a host with no model key and a self-hosted copy
+        // with no service at all both answer "no", and no control appears.
+        if (one && (method === 'GET' || method === 'HEAD')) {
+          return json(
+            200,
+            { on: Boolean(translator?.available()) },
+            { 'cache-control': 'public, max-age=300' },
+          );
+        }
+        if (method !== 'POST') {
+          return json(405, { error: 'POST' });
+        }
+        if (!translator) {
+          return json(503, {
+            error: "Translation isn't set up on this host yet.",
+          });
+        }
+        const over = one ? spentOnAsking(ip) : spentOnLooking(ip);
+        if (over) {
+          return json(429, {
+            error: 'Too many translations at once, try again in a few minutes.',
+          });
+        }
+        try {
+          const asked = askedFor(body);
+          return json(
+            200,
+            one
+              ? await translator.translate(asked)
+              : await translator.lookup(asked),
+          );
+        } catch (error) {
+          return translationAnswer(error);
         }
       }
 
@@ -374,6 +468,12 @@ export const createUnfurlHandler = ({
             // failed; the reason is here rather than only in a log nobody kept.
             cardFallbacks: cardFallbacks.length,
             lastCardFallback: cardFallbacks[cardFallbacks.length - 1] ?? null,
+            // Whether cast translations are set up here, and what they hold: a
+            // host with no model key says so in one field instead of looking
+            // like a service whose translate route is broken.
+            translations: translator
+              ? { on: translator.available(), ...translator.sizes() }
+              : 'off',
           })}\n`,
         };
       }

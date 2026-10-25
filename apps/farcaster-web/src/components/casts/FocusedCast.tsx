@@ -84,6 +84,10 @@ const FocusedCastContent: React.FC<FocusedCastProps> = React.memo(
       displayText,
       hasTranslation,
       isTranslationPending,
+      isTranslationOffered,
+      isAsking,
+      notice,
+      offerTranslation,
       showOriginal,
       sourceLanguageName,
       toggleLabel,
@@ -149,9 +153,13 @@ const FocusedCastContent: React.FC<FocusedCastProps> = React.memo(
         )}
       >
         <div className="relative p-4 pt-2">
-          {(hasTranslation || isTranslationPending) && (
+          {(hasTranslation || isTranslationPending || isTranslationOffered) && (
             <CastTranslationTopHat
               isPending={isTranslationPending}
+              isOffered={isTranslationOffered}
+              isAsking={isAsking}
+              notice={notice}
+              onOffer={offerTranslation}
               sourceLanguageName={sourceLanguageName}
               showOriginal={showOriginal}
               toggleLabel={toggleLabel}
