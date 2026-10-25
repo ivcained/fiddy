@@ -521,9 +521,17 @@ node_autoupgrade() {
       # Local node (--local install): edit this machine's crontab.
       sed -i '' 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' "$HOME/snapchain/.env" 2>/dev/null \
         || sed -i 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' "$HOME/snapchain/.env"
-      ( crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade'; echo "$cron $HOME/snapchain/snapchain.sh autoupgrade >> $HOME/snapchain/snapchain-autoupgrade.log 2>&1" ) | crontab -
+      ( crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade' | grep -v 'fiddy self-update'; echo "$cron $HOME/snapchain/snapchain.sh autoupgrade >> $HOME/snapchain/snapchain-autoupgrade.log 2>&1" ) | crontab -
+      # Keep the fiddy CLI itself current too: hourly fast-forward pull of the
+      # checkout this install was made from (ff-only: local edits never get
+      # clobbered — a dirty tree just skips that run).
+      if [ -d "$FIDDY_REPO/.git" ]; then
+        mkdir -p "$FIDDY_HOME"
+        ( crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade' | grep -v 'fiddy self-update'; echo "0 * * * * git -C $FIDDY_REPO pull --ff-only >> $FIDDY_HOME/self-update.log 2>&1 # fiddy self-update" ) | crontab -
+      fi
       crontab -l | grep snapchain \
         && ok "auto-upgrade on (local): $every (cron '$cron'; log: ~/snapchain/snapchain-autoupgrade.log)"
+      [ -d "$FIDDY_REPO/.git" ] && ok "fiddy self-update: hourly git pull --ff-only from $FIDDY_REPO (log: $FIDDY_HOME/self-update.log)"
     fi
   elif [ "$mode" = "off" ]; then
     if [ -n "${FIDDY_TARGET:-}" ]; then
@@ -532,7 +540,7 @@ node_autoupgrade() {
     else
       sed -i '' 's/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/' "$HOME/snapchain/.env" 2>/dev/null \
         || sed -i 's/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/' "$HOME/snapchain/.env"
-      crontab -l 2>/dev/null | grep -v snapchain | crontab -
+      crontab -l 2>/dev/null | grep -v snapchain | grep -v 'fiddy self-update' | crontab -
       ok "auto-upgrade off (local) — upgrade by hand: fiddy node upgrade"
     fi
   else
