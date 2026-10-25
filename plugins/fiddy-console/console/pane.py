@@ -147,7 +147,10 @@ def main():
             print("Could not complete that action: %s" % error)
         if action != "console":
             wait_for_return(single)
-            return 0
+            if single:
+                return 0  # a standalone button pane really does close on Enter
+            action = "console"  # inside the console, Enter returns to the menu
+            continue
         print("\n\033[38;5;154mBUTTONS\033[0m  Open Ovis Command Palette (Cmd/Ctrl+Shift+K), then type Fiddy.")
         print("[1] Refresh  [2] Logs  [3] Grafana  [4] Start  [5] Stop")
         print("[6] Operator FID  [7] Settings  [8] Auto-upgrade  [q] Quit")
