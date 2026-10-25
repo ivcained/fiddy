@@ -207,33 +207,29 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
        would render as "[email protected]" live. -->
 
   <div class="card" style="padding:22px;margin:18px 0">
-    <div class="kicker">Free: your own machine (fiddy node up --local) · then cheapest first: Hetzner ~€120 (new accounts capped at 1024 GB volumes — fine once quota raised) · OVH ~$190 · AWS ~$285 (default) · GCP ~$350</div>
-    <p style="margin-top:0"><strong>AWS — the default cloud.</strong> Open CloudShell (pre-authenticated) and paste one
-    line; the script creates the VM, 2 TB disk and firewall in your account, on your billing. AWS is the default
-    because its root volume can simply be 2 TB — <strong>new Hetzner accounts are capped at 1024 GB of volume
-    storage</strong> (verified by probe: <code class="inline">resource_limit_exceeded</code>), which cannot complete an
-    unmodified node restore. Hetzner (~€120/mo) is fully supported once your quota is raised.</p>
-    <p style="margin:14px 0 4px"><a class="btn" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener" style="display:inline-block;background:var(--lime);color:#1a1c10;font-weight:700;border-radius:999px;padding:10px 20px;text-decoration:none">Open AWS CloudShell ↗</a></p>
-    <pre style="margin:10px 0 0"><span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span></pre>
-    <p class="dim" style="font-size:14px;margin:10px 0 0">~$285/mo at list price. <strong style="color:var(--ink)">New AWS account?</strong> CloudShell can stay
-    locked up to 2 days during account verification — the same line runs from any terminal after <code class="inline">aws configure</code>.</p>
-    <p class="dim" style="font-size:14px;margin:14px 0 0"><strong style="color:var(--ink)">Prefer Google Cloud?</strong> One true click — Cloud Shell opens pre-authenticated with a guided walkthrough (~$350/mo, our own bill; <a href="https://cloud.google.com/free">$300 free credit</a> for new accounts — set a reminder to delete the VM before it ends):</p>
-    <p style="margin:10px 0 4px"><a href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener" style="border:none"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" style="height:36px"></a></p>
-    <p class="dim" style="font-size:14px;margin-bottom:0">This exact GCP path ran our own verified node (914M messages synced). Prefer a guided page? <a href="/client/deploy/">fiddy.fun/client/deploy</a>. Prefer the terminal? <code class="inline">fiddy provision --aws</code> or <code class="inline">--gcp</code>.</p>
-  </div>
+    <div class="kicker">Two ways in — pick the one that matches where you're sitting</div>
 
-  <div class="pane note" style="margin:16px 0">
-    <div class="t">Made your instance by hand? (console, any provider — or you already have a server)</div>
-    <p>Then skip <code class="inline">fiddy provision</code> entirely — it <em>creates</em> a machine, and you already have one.
-    SSH into your server and run these, in order:</p>
-    <pre><span class="c"># on YOUR server (after ssh ubuntu@your-ip):</span>
-<span class="k">git clone https://github.com/ivcained/fiddy && cd fiddy</span>
-<span class="k">export PATH="$PWD/bin:$PATH"</span>
-<span class="k">fiddy node up --local</span>     <span class="c"># installs Docker + the node right here</span>
-<span class="k">fiddy client up --tunnel</span>  <span class="c"># the client, reading from it</span></pre>
-    <p>Running <code class="inline">fiddy provision --aws</code> <em>on</em> the server is the one wrong move — it asks for the AWS CLI
-    because provisioning happens <strong>from</strong> a machine that talks to AWS (your laptop, or CloudShell), not on the
-    machine being provisioned. Rule of thumb: provision from your laptop → node + client on the server.</p>
+    <h3 style="margin:16px 0 6px">Way 1 · From your own terminal (Mac / Windows / Linux)</h3>
+    <p class="dim">Everything runs from your laptop; the CLI drives the server over SSH for you.
+    Create the machine first — one click or one command:</p>
+    <p style="margin:10px 0 4px"><a class="btn" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener" style="display:inline-block;background:var(--lime);color:#1a1c10;font-weight:700;border-radius:999px;padding:10px 20px;text-decoration:none">Open AWS CloudShell ↗</a>&nbsp;&nbsp;<a href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener" style="border:none"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" style="height:36px;vertical-align:middle"></a></p>
+    <pre><span class="c"># in CloudShell, or any terminal with the AWS CLI configured:</span>
+<span class="k">curl -fsSL https://raw.githubusercontent.com/ivcained/fiddy/main/scripts/aws-deploy.sh | bash</span>
+<span class="c"># …then back in your own terminal, inside the cloned repo:</span>
+<span class="k">fiddy provision --ssh ubuntu@<your-new-ip></span>   <span class="c"># register the box the script printed</span>
+<span class="k">fiddy node up</span>       <span class="c"># install + sync the node on it, over SSH</span>
+<span class="k">fiddy client up</span>     <span class="c"># the client on your laptop, tunneled to your node</span></pre>
+
+    <h3 style="margin:22px 0 6px">Way 2 · Inside the VPS terminal (you already made a server and SSH'd in)</h3>
+    <p class="dim">Skip provision entirely — you already have the machine. One line does the rest:</p>
+    <pre><span class="c"># on the server itself:</span>
+<span class="k">curl -fsSL https://fiddy.fun/client/install.sh | bash</span></pre>
+    <p class="dim" style="margin-bottom:0">That clones the repo, puts <code class="inline">fiddy</code> on PATH, installs Docker, and starts
+    the node — then <code class="inline">fiddy client up --tunnel</code> when you want the client. The one wrong move here is
+    <code class="inline">fiddy provision</code> on the server: provisioning runs <em>from</em> a machine that talks to the cloud, never
+    on the machine being provisioned. Rule of thumb: <strong>Way 1 provisions, Way 2 runs.</strong></p>
+
+    <p class="dim" style="font-size:14px;margin:18px 0 0">Prices: your own machine free · Hetzner ~€120/mo (new accounts capped at 1024 GB volumes — fine once quota raised) · OVH ~$190 · AWS ~$285 (default; its root volume can simply be 2 TB, which is why) · GCP ~$350 (tested end to end by us; <a href="https://cloud.google.com/free">$300 new-user credit</a> — set a reminder to delete the VM). New AWS account? CloudShell can stay locked up to 2 days during verification — the same one-liner runs from any terminal after <code class="inline">aws configure</code>. Guided page: <a href="/client/deploy/">fiddy.fun/client/deploy</a>.</p>
   </div>
 
   <details class="pane" style="padding:16px 20px;margin:16px 0">
