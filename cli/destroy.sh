@@ -40,8 +40,9 @@ destroy_main() {
       target="AWS instance $FIDDY_AWS_INSTANCE_ID in ${FIDDY_AWS_REGION:-us-east-1}, its disk, key pair, and security group"
       ;;
     hetzner)
-      [ -n "${FIDDY_HETZNER_SERVER_ID:-}" ] && [ -n "${FIDDY_HETZNER_VOLUME_ID:-}" ] \
-        || die "Hetzner server and volume ids are not both recorded. Delete both in the Hetzner console; the volume keeps billing"
+      if [ -z "${FIDDY_HETZNER_SERVER_ID:-}" ] || [ -z "${FIDDY_HETZNER_VOLUME_ID:-}" ]; then
+        die "Hetzner server and volume ids are not both recorded. Delete both in the Hetzner console; the volume keeps billing"
+      fi
       target="Hetzner server $FIDDY_HETZNER_SERVER_ID and volume $FIDDY_HETZNER_VOLUME_ID"
       ;;
     gcp)

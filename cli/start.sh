@@ -85,7 +85,7 @@ start_main() {
         4) provider=gcp ;;
         5)
           step "BuyVM manual order"
-          printf 'Order Slice 16384 (\$60/mo: 4 cores, 16 GB RAM) plus a 4 TB Performance slab (\$20/mo).\n'
+          printf 'Order Slice 16384 (%s/mo: 4 cores, 16 GB RAM) plus a 4 TB Performance slab (%s/mo).\n' "\$60" "\$20"
           printf 'Confirm the Performance tier and stock before paying; Classic slabs cap at 200 IOPS.\n'
           printf 'Order links: https://buyvm.net/kvm-dedicated-server-slices/ and https://buyvm.net/block-storage-slabs/\n'
           start_manual_path BuyVM "BuyVM costs about \$80/mo before tax. Nothing was ordered or created" || return 0
