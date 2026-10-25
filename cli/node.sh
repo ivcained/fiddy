@@ -215,10 +215,14 @@ node_install_local() {
           && sudo usermod -aG docker "$USER" \
           || die "Docker install failed — see /tmp/fiddy-docker-install.log"
         # Group membership applies to new shells; re-exec ourselves inside one
-        # (sg) so the user never has to run the command twice.
+        # (sg) so the user never has to run the command twice. NOTE: $* here is
+        # this function's own args (the force flag), NOT the user's — rebuild
+        # the command from the flags we actually know.
         warn "Docker installed. Continuing with the docker group active…"
         if command -v sg >/dev/null 2>&1; then
-          exec sg docker -c "'$FIDDY_REPO/bin/fiddy' node up --local $*"
+          local again="--local"
+          [ "$force" = 1 ] && again="$again --force"
+          exec sg docker -c "'$FIDDY_REPO/bin/fiddy' node up $again"
         fi
         warn "log out and back in (or run: newgrp docker), then re-run: fiddy node up --local"
         exit 0
