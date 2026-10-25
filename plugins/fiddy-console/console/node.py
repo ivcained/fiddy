@@ -199,7 +199,7 @@ class NodeManager:
         return output
 
     def start(self):
-        self._apply('cd "$HOME/snapchain" && docker compose up -d snapchain statsd',
+        self._apply('cd "$HOME/snapchain" && docker compose up -d snapchain statsd grafana',
                     "Could not start the node.")
         return {"message": "Node containers started."}
 
