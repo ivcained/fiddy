@@ -23,7 +23,7 @@
   margin: 12px 16px 4px;
   padding: 12px 14px;
   border-radius: 18px;
-  background: color-mix(in oklab, var(--fiddy-glass, #1d1e1c), #fff 5%);
+  background: var(--fiddy-bg-raise, #1d1e1c);
   border: 1px solid var(--fiddy-glass-border, rgba(238, 240, 232, 0.14));
   color: var(--fiddy-ink, #eef0e8);
   font-size: 13.5px;
@@ -55,7 +55,7 @@
    dishonest thing this page could do. */
 .fiddy-public-source {
   margin: 10px 16px 18px;
-  color: var(--fiddy-ink-dim, #9ba193);
+  color: #56604e;
   font-size: 12px;
   line-height: 1.55;
   max-width: 62ch;
@@ -64,14 +64,14 @@
 .fiddy-public-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .fiddy-public-tab {
   padding: 6px 14px;
   border-radius: 999px;
   border: 1px solid transparent;
-  color: var(--fiddy-ink-dim, #9ba193);
+  color: #56604e;
   font-size: 13px;
   font-weight: 700;
 }
@@ -79,21 +79,21 @@
 .fiddy-public-tab[aria-current='page'] {
   color: var(--fiddy-ink, #eef0e8);
   border-color: var(--fiddy-glass-border, rgba(238, 240, 232, 0.14));
-  background: color-mix(in oklab, var(--fiddy-glass, #1d1e1c), #fff 6%);
+  background: var(--fiddy-bg-raise, #1d1e1c);
 }
 
 .fiddy-public-topics {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin: 12px 16px 0;
 }
 
 .fiddy-public-chip {
   padding: 5px 12px;
   border-radius: 999px;
-  border: 1px solid var(--fiddy-glass-border, rgba(238, 240, 232, 0.14));
-  color: var(--fiddy-ink-dim, #9ba193);
+  border: 1px solid rgba(26, 28, 16, 0.18);
+  color: #56604e;
   font-size: 12.5px;
   font-weight: 700;
 }
@@ -113,6 +113,13 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.fiddy-public-loading-copy {
+  padding: 16px 16px 4px;
+  color: #56604e;
+  font-size: 13.5px;
+  font-weight: 650;
 }
 
 .fiddy-public-skeleton {
@@ -188,7 +195,7 @@
   margin: 16px;
   padding: 18px 16px;
   border-radius: 18px;
-  background: color-mix(in oklab, var(--fiddy-glass, #1d1e1c), #fff 5%);
+  background: var(--fiddy-bg-raise, #1d1e1c);
   border: 1px solid var(--fiddy-glass-border, rgba(238, 240, 232, 0.14));
   color: var(--fiddy-ink, #eef0e8);
   display: flex;

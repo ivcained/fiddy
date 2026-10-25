@@ -252,10 +252,45 @@ html.fiddy-dark-shell body {
   opacity: 0;
 }
 
-/* Stillness stays still: a cross-fade is motion too. */
+/* A press gets words as well as the baby's hop. The bubble floats over the
+   stage, so its arrival never pushes the front door down the page. */
+.fiddy-hero-greeting {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  bottom: 8px;
+  max-width: 150px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in oklab, var(--fiddy-accent), white 18%);
+  border-radius: 999px;
+  background: var(--fiddy-accent);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 28%);
+  color: #1a1c10;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: fiddy-hero-greeting-in 180ms ease-out;
+}
+
+@keyframes fiddy-hero-greeting-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Stillness stays still: a cross-fade or a bubble pop is motion too. */
 @media (prefers-reduced-motion: reduce) {
-  .fiddy-hero-stage-still {
+  .fiddy-hero-stage-still,
+  .fiddy-hero-greeting {
     transition: none;
+    animation: none;
   }
 }
 

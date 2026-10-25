@@ -47,6 +47,15 @@ import {
 /** Long enough that the front door is painted and readable first. */
 const AFTER_FIRST_PAINT_MS = 320;
 
+/** A tiny conversation with the baby. The fifth hello is the easter egg. */
+const GREETINGS = [
+  'Hiya, you!',
+  'Boop received.',
+  'Again! Again!',
+  'You made my day.',
+  'Okay, we are friends now.',
+] as const;
+
 export interface FiddyHeroStageProps {
   /**
    * `hero` is the front door's stage: big, listening to the pointer, and
@@ -61,6 +70,7 @@ const FiddyHeroStage = memo<FiddyHeroStageProps>(({ variant = 'hero' }) => {
   const mounted = useRef<{ dispose(): void; react(): void } | null>(null);
   const [moving, setMoving] = useState(false);
   const [motionAllowed, setMotionAllowed] = useState(false);
+  const [greeting, setGreeting] = useState<number | null>(null);
 
   // Rule 3, read before anything is fetched. `null` (no matchMedia) counts as
   // allowed: an absence of the preference is not a request for stillness.
@@ -153,9 +163,24 @@ const FiddyHeroStage = memo<FiddyHeroStageProps>(({ variant = 'hero' }) => {
         data-fiddy-hero={moving ? 'moving' : 'still'}
         data-fiddy-hero-variant="hero"
         aria-label="Play with Fiddy"
-        onClick={() => mounted.current?.react()}
+        onClick={() => {
+          mounted.current?.react();
+          setGreeting((current) => (current === null ? 0 : current + 1));
+        }}
       >
         {contents}
+        {greeting !== null ? (
+          <span
+            key={greeting}
+            className="fiddy-hero-greeting"
+            data-fiddy="hero-reaction"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {GREETINGS[greeting % GREETINGS.length]}
+          </span>
+        ) : null}
       </button>
     );
   }
