@@ -25,12 +25,12 @@ else
   say "Way 1: you are on your own computer. Fiddy will drive a remote node over SSH."
 fi
 
-if ! need git || ! need curl || ! need python3; then
+if ! need git || ! need curl || ! need python3 || ! need unzip; then
   if need apt-get; then
     as_root apt-get update -qq
-    as_root apt-get install -y git curl python3
+    as_root apt-get install -y git curl python3 unzip
   else
-    echo "Install git, curl, and Python 3, then re-run this installer." >&2
+    echo "Install git, curl, Python 3, and unzip, then re-run this installer." >&2
     exit 1
   fi
 fi

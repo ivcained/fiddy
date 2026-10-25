@@ -78,4 +78,3 @@ class ConfigStore:
         has_ssh_key = bool(settings.pop("ssh_key", ""))
         settings["has_ssh_key"] = has_ssh_key
         return settings
-
