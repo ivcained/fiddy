@@ -73,6 +73,11 @@ EOF
   if command -v open >/dev/null 2>&1; then open "$url"
   elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" >/dev/null 2>&1 &
   fi
+  # Open the Fiddy Console pane for them; otherwise the browser lands on a
+  # terminal tab and the sync view is nowhere obvious. Best-effort only.
+  curl -sS -m 10 -X POST "$url/api/plugin/action" \
+    -H 'Content-Type: application/json' -H 'x-herdr-machine: 1' \
+    -d '{"plugin_id":"fun.fiddy.console","action_id":"open-console"}' >/dev/null 2>&1 || true
   ok "Console: $url  (Fiddy Console tab = sync %, Shift-click Grafana = dashboard)"
 }
 
