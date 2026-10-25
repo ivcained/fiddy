@@ -5,6 +5,23 @@
 console_open() {
   config_load 2>/dev/null || true
   local target="${FIDDY_TARGET:-}"
+
+  # A new user on the server sees "fiddy console" in the docs and runs it
+  # here. The console is a browser UI; the useful command runs on the laptop.
+  if [ "${1:-}" != "--here" ] && [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ] && [ -z "$target" ]; then
+    cat <<'EOF'
+▸ You are on the server. Run this on your laptop instead — the console is
+  a browser UI, and your laptop opens it for you (tunnel included):
+
+    fiddy console
+
+  On the laptop, the first time only:
+    fiddy provision --ssh <user>@<this-server-ip>
+
+  To just start the console on this server anyway: fiddy console open --here
+EOF
+    return 0
+  fi
   local url="http://localhost:7317"
 
   if [ -n "$target" ]; then
@@ -71,7 +88,8 @@ console_stop() {
 
 console_main() {
   case "${1:-open}" in
-    open|up|"") console_open ;;
+    open|up) shift; console_open "$@" ;;
+    "") console_open ;;
     stop) console_stop ;;
     *) die "usage: fiddy console [open|stop]" ;;
   esac
