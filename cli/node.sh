@@ -512,6 +512,19 @@ node_autoupgrade() {
   esac
   config_load 2>/dev/null || true
 
+  # crontab is a hard prerequisite; minimal cloud images don't ship it, and a
+  # missing binary used to make this command die with no explanation.
+  if ! command -v crontab >/dev/null 2>&1; then
+    log "cron is missing — installing it first…"
+    if command -v apt-get >/dev/null 2>&1; then
+      sudo -n apt-get update -qq && sudo -n apt-get install -y -qq cron \
+        && sudo -n systemctl enable --now cron \
+        || die "install cron first: sudo apt-get install -y cron && sudo systemctl enable --now cron"
+    else
+      die "cron (crontab) is required for auto-upgrade — install your OS's cron package"
+    fi
+  fi
+
   if [ "$mode" = "on" ]; then
     local line="$cron \$HOME/snapchain/snapchain.sh autoupgrade >> \$HOME/snapchain/snapchain-autoupgrade.log 2>&1"
     if [ -n "${FIDDY_TARGET:-}" ]; then
