@@ -68,11 +68,13 @@ fiddy node — manage your read node.
   dashboard      Open the node's Grafana dashboard (sync height, peers,
                  shard stats) via an SSH tunnel on http://localhost:3000.
                  Grafana ships with the official snapchain.sh install.
-  autoupgrade on|off
-                 Weekly auto-upgrades (Tue 03:00). Default OFF because the
-                 upstream job ends with `docker system prune --volumes -f`
-                 on the whole host — safe on a dedicated box, hostile on a
-                 shared one.
+  autoupgrade on|off [--every weekly|daily|hourly]
+                 Auto-upgrades on a schedule (default: weekly, Tue 03:00).
+                 Works on the provisioned target or a --local node.
+                 Default OFF because the upstream job ends with
+                 `docker system prune --volumes -f` on the whole host —
+                 safe on a dedicated box, hostile on a shared one. Hourly
+                 also restarts the node 24×/day; prefer daily if unsure.
   start | stop   Start / stop the node's containers (non-blocking).
   upgrade        Re-run the official installer, pulling the latest release.
 
@@ -485,19 +487,53 @@ node_dashboard() {
 }
 
 node_autoupgrade() {
-  require_target
-  case "${1:-}" in
-    on)
-      # Safe on a dedicated node box. The weekly job ends with
-      # `docker system prune --volumes -f` against the WHOLE Docker host —
-      # never enable this on a machine that runs other Docker workloads.
-      ssh_run 'sed -i "s/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/" ~/snapchain/.env; (crontab -l 2>/dev/null; echo "0 3 * * 2 $HOME/snapchain/snapchain.sh autoupgrade >> $HOME/snapchain/snapchain-autoupgrade.log 2>&1") | crontab -; crontab -l | grep snapchain' \
-        && ok "auto-upgrade on: weekly, Tuesday 03:00 host time (log: ~/snapchain/snapchain-autoupgrade.log)" ;;
-    off)
-      ssh_run 'sed -i "s/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/" ~/snapchain/.env; crontab -l 2>/dev/null | grep -v snapchain | crontab -' \
-        && ok "auto-upgrade off — upgrade by hand: fiddy node upgrade" ;;
-    *) die "usage: fiddy node autoupgrade on|off" ;;
+  local mode="${1:-}" every="weekly"
+  shift || true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --every) every="${2:?--every needs hourly|daily|weekly}"; shift ;;
+      *) die "unknown option: $1" ;;
+    esac
+    shift
+  done
+  local cron
+  case "$every" in
+    weekly) cron='0 3 * * 2' ;;
+    daily)  cron='0 3 * * *' ;;
+    hourly) cron='0 * * * *'
+            warn "hourly: every run restarts the node AND ends with a host-wide"
+            warn "'docker system prune --volumes -f' — 24 restarts + prunes a day."
+            warn "On a dedicated node box that's survivable; anywhere else, don't." ;;
+    *) die "--every must be hourly, daily or weekly" ;;
   esac
+  config_load 2>/dev/null || true
+
+  if [ "$mode" = "on" ]; then
+    local line="$cron \$HOME/snapchain/snapchain.sh autoupgrade >> \$HOME/snapchain/snapchain-autoupgrade.log 2>&1"
+    if [ -n "${FIDDY_TARGET:-}" ]; then
+      ssh_run "sed -i 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' ~/snapchain/.env; (crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade'; echo \"$line\") | crontab -; crontab -l | grep snapchain" \
+        && ok "auto-upgrade on: $every (cron '$cron', host time; log: ~/snapchain/snapchain-autoupgrade.log)"
+    else
+      # Local node (--local install): edit this machine's crontab.
+      sed -i '' 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' "$HOME/snapchain/.env" 2>/dev/null \
+        || sed -i 's/^SKIP_CRONTAB=true/SKIP_CRONTAB=false/' "$HOME/snapchain/.env"
+      ( crontab -l 2>/dev/null | grep -v 'snapchain.sh autoupgrade'; echo "$cron $HOME/snapchain/snapchain.sh autoupgrade >> $HOME/snapchain/snapchain-autoupgrade.log 2>&1" ) | crontab -
+      crontab -l | grep snapchain \
+        && ok "auto-upgrade on (local): $every (cron '$cron'; log: ~/snapchain/snapchain-autoupgrade.log)"
+    fi
+  elif [ "$mode" = "off" ]; then
+    if [ -n "${FIDDY_TARGET:-}" ]; then
+      ssh_run 'sed -i "s/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/" ~/snapchain/.env; crontab -l 2>/dev/null | grep -v snapchain | crontab -' \
+        && ok "auto-upgrade off — upgrade by hand: fiddy node upgrade"
+    else
+      sed -i '' 's/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/' "$HOME/snapchain/.env" 2>/dev/null \
+        || sed -i 's/^SKIP_CRONTAB=false/SKIP_CRONTAB=true/' "$HOME/snapchain/.env"
+      crontab -l 2>/dev/null | grep -v snapchain | crontab -
+      ok "auto-upgrade off (local) — upgrade by hand: fiddy node upgrade"
+    fi
+  else
+    die "usage: fiddy node autoupgrade on|off [--every weekly|daily|hourly]"
+  fi
 }
 
 node_stop() {
