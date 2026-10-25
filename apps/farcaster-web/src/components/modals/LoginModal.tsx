@@ -133,7 +133,7 @@ const LoginModal: FC<LoginModalProps> = memo(({ onClose }) => {
                 className="text-sm font-semibold text-[#d4ff3f] underline underline-offset-4"
                 onClick={onClose}
               >
-                Already on Farcaster? Let Fiddy post for you
+                Already have an account? Let Fiddy post for you
               </Link>
               <p className="mt-1 text-xs text-[#9ba193]">
                 No fee, no passphrase — you approve it in your Farcaster app.
@@ -146,7 +146,7 @@ const LoginModal: FC<LoginModalProps> = memo(({ onClose }) => {
               data-fiddy="create-account-entry"
               onClick={() => setIsCreatingAccount(true)}
             >
-              New to Farcaster? Make an account
+              New here? Make your Fiddy account
             </button>
           </div>
         </div>

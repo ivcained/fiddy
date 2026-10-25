@@ -33,9 +33,9 @@ export interface FiddySheetProps {
    *
    * Drawn under the primary and styled with the same weight but no highlight,
    * because a screen with two equal primaries says nothing. Used by the front
-   * door for "Look around first": reading the network costs nothing and needs
-   * no account, so it is a way in rather than a footnote. Never a replacement
-   * for the quiet way out, which stays quiet.
+   * door for "Say hi": setting up an agent is a real way forward, but public
+   * reading stays the one primary action. Never a replacement for the quiet
+   * way out, which stays quiet.
    */
   secondary?: FiddySheetAction | null;
   /**
@@ -131,6 +131,7 @@ export const FiddySheet = memo<FiddySheetProps>(
                 type="button"
                 className={`fiddy-primary-btn ${primaryHighlight ? 'fiddy-primary-btn-hot' : ''}`}
                 data-highlighted={primaryHighlight ? 'true' : undefined}
+                data-fiddy={primary.testId}
                 onClick={primary.onClick}
                 disabled={primary.disabled}
               >
