@@ -9,13 +9,13 @@ console_open() {
 
   if [ -n "$target" ]; then
     log "console on $target"
-    ssh_run 'command -v herdr >/dev/null 2>&1' \
+    ssh_run 'command -v herdr >/dev/null 2>&1 || [ -x "$HOME/.local/bin/herdr" ]' \
       || die "herdr is not installed on $target yet — run the installer there first:
   curl -fsSL https://fiddy.fun/client/install.sh | bash"
     if ! ssh_run 'curl -fsS -m 2 http://127.0.0.1:7317 >/dev/null 2>&1'; then
       log "starting the console on the server (detached herdr)…"
       ssh_run 'command -v tmux >/dev/null 2>&1 || { command -v apt-get >/dev/null 2>&1 && sudo -n apt-get install -y -qq tmux; } || true
-               tmux has-session -t fiddy-console 2>/dev/null || tmux new-session -d -s fiddy-console "herdr"' \
+               tmux has-session -t fiddy-console 2>/dev/null || tmux new-session -d -s fiddy-console "export PATH=\$HOME/.local/bin:\$PATH; herdr"' \
         || die "could not start herdr on $target — run: ssh $target, then herdr"
       local i
       for ((i = 1; i <= 30; i++)); do
