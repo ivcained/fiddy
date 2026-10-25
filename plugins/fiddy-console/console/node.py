@@ -11,6 +11,8 @@ import urllib.request
 
 TARGET_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+$")
 CHUNK_PATTERN = re.compile(r"chunk_(\d+)\.bin")
+# Current upstream mainnet snapshot layout; progress is a hint, not a sync proof.
+SNAPSHOT_CHUNK_COUNT = 5690
 
 
 class NodeError(Exception):
@@ -142,7 +144,7 @@ class NodeManager:
         if not chunks:
             return None
         chunk = int(chunks[-1])
-        total = 5690
+        total = SNAPSHOT_CHUNK_COUNT
         return {"chunk": chunk, "total": total, "percent": round(min(100, chunk * 100 / total), 1)}
 
     def status(self):

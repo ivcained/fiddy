@@ -83,6 +83,13 @@ class ProxyTests(unittest.TestCase):
         self.assertIsNone(dashboard.headers.get("X-Frame-Options"))
         self.assertIsNone(dashboard.headers.get("Content-Security-Policy"))
 
+    def test_handoff_token_cannot_be_replayed(self):
+        self.handshake()
+        fresh = urllib.request.build_opener(NoRedirect())
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            fresh.open(self.base + "/?token=test-token", timeout=3)
+        self.assertEqual(caught.exception.code, 403)
+
     def test_real_api_and_post_bodies_pass_through(self):
         self.handshake()
         health = self.browser.open(self.base + "/api/health?orgId=1", timeout=3)

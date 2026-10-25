@@ -18,8 +18,8 @@ proxy. **Shift-click** `[ Open live Grafana ]` in Ovis to embed it beside the
 terminal. To make a plain click embed it, choose Ovis Settings → Web links →
 Beside the pane. Keep the Herdr pane open while using the dashboard.
 
-The proxy is bound to `127.0.0.1`, requires a per-run token exchanged for an
-HttpOnly SameSite cookie, and removes Grafana's frame-denial headers only at
+The proxy is bound to `127.0.0.1`, requires a single-use token exchanged for an
+HttpOnly SameSite session cookie, and removes Grafana's frame-denial headers only at
 that local boundary. It never exposes Grafana on a LAN or public interface.
 Grafana's first login is `admin` / `admin`; change it in Grafana.
 

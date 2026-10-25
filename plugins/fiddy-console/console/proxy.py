@@ -39,6 +39,8 @@ class GrafanaProxy:
             raise ValueError("The console proxy may only listen on loopback.")
         self.upstream = upstream.rstrip("/")
         self.token = token or secrets.token_urlsafe(32)
+        self.session_token = secrets.token_urlsafe(32)
+        self.handoff_lock = threading.Lock()
         self.host = host
         connection_class = http.client.HTTPConnection
         proxy = self
@@ -53,20 +55,26 @@ class GrafanaProxy:
             def _authorised(self):
                 parsed_request = urllib.parse.urlparse(self.path)
                 supplied = urllib.parse.parse_qs(parsed_request.query).get("token", [""])[-1]
-                if supplied and hmac.compare_digest(supplied, proxy.token):
+                with proxy.handoff_lock:
+                    accepted = bool(proxy.token) and hmac.compare_digest(supplied, proxy.token)
+                    if accepted:
+                        # The printed link is single-use. Browser history and the
+                        # Ovis frame title cannot replay it later in the session.
+                        proxy.token = None
+                if accepted:
                     query = [(key, value) for key, values in urllib.parse.parse_qsl(parsed_request.query, keep_blank_values=True) if key != "token" for value in [values]]
                     destination = parsed_request.path or "/"
                     if query:
                         destination += "?" + urllib.parse.urlencode(query)
                     self.send_response(302)
                     self.send_header("Location", destination)
-                    self.send_header("Set-Cookie", "fiddy_console=%s; HttpOnly; SameSite=Strict; Path=/" % proxy.token)
+                    self.send_header("Set-Cookie", "fiddy_console=%s; HttpOnly; SameSite=Strict; Path=/" % proxy.session_token)
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return False
                 cookie = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
                 morsel = cookie.get("fiddy_console")
-                if morsel is not None and hmac.compare_digest(morsel.value, proxy.token):
+                if morsel is not None and hmac.compare_digest(morsel.value, proxy.session_token):
                     return True
                 body = b"Fiddy console: open Grafana from its Herdr pane. This loopback address needs its one-time link.\n"
                 self.send_response(403)

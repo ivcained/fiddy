@@ -37,6 +37,10 @@ fi
 
 say "Installing the Fiddy checkout in $DEST"
 if [ -d "$DEST/.git" ]; then
+  if [ -n "$(git -C "$DEST" status --porcelain)" ]; then
+    echo "$DEST has uncommitted work. Commit, stash, or choose another FIDDY_INSTALL_DIR; the installer will not overwrite it." >&2
+    exit 1
+  fi
   git -C "$DEST" fetch origin "$REPO_REF"
   git -C "$DEST" checkout -B fiddy-installed "FETCH_HEAD"
 else
