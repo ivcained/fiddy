@@ -249,6 +249,13 @@ node_install_local() {
   fi
 
   mkdir -p "$FIDDY_HOME/snapchain"
+  # Upstream reexec_as_root_if_needed() hard-codes `cd ~/snapchain` before sudo.
+  # Our local install lives in ~/.fiddy/snapchain, so without this link the
+  # bootstrap dies instantly with "Failed to switch to ~/snapchain directory"
+  # and the wait loop shows "preparing" forever. Only link when nothing is there.
+  if [ ! -e "$HOME/snapchain" ]; then
+    ln -s "$FIDDY_HOME/snapchain" "$HOME/snapchain"
+  fi
   ( cd "$FIDDY_HOME/snapchain" && fetch_snapchain_script && seed_env_file && start_upgrade_detached )
   wait_for_node "http://127.0.0.1:$SNAP_HTTP_PORT" 120 "node logs: fiddy node logs"
   config_set FIDDY_NODE_HTTP "http://127.0.0.1:$SNAP_HTTP_PORT"
