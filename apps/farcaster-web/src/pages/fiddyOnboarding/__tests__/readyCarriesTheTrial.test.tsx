@@ -105,6 +105,18 @@ describe('the ready sheet', () => {
     expect(primary()?.getAttribute('data-highlighted')).toBeNull();
   });
 
+  it('calls account creation a Fiddy account, not a network prompt', () => {
+    renderReady();
+
+    expect(
+      document.querySelector('[data-fiddy="create-account-entry"]')
+        ?.textContent,
+    ).toBe('New here? Make your Fiddy account');
+    expect(
+      screen.getByText(/Your Fiddy account is what keeps your agent/),
+    ).toBeTruthy();
+  });
+
   it('makes the sign-in the named one, and loud, once a real reply lands', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(

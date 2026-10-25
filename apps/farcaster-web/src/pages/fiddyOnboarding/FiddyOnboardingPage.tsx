@@ -5,8 +5,8 @@
  * unauthenticated visitor saw at `/`. Signing in is still required to open the
  * client — that has not changed and this page does not pretend otherwise — but
  * it is now the last step of a short, friendly setup instead of the first thing
- * anyone meets. Posting to Farcaster is the opt-in "Go social" action, not the
- * price of entry.
+ * anyone meets. Reading publicly needs no account, and signing in is an action
+ * the visitor chooses rather than the price of entry.
  *
  * THREE STEPS, AND WHAT THE THIRD ONE IS FOR
  * Say hi, then one screen that names your agent and picks what thinks for it,
@@ -275,7 +275,7 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
               label: 'Do this later',
               onClick: () => go('fiddyWelcome'),
             }}
-            note="Fiddy opens with your Farcaster account. Already have one? Sign in. New here? Make one right here — Fiddy does the whole thing on this device, and the words that own it never leave your browser."
+            note="Your Fiddy account is what keeps your agent. It lives on Farcaster, the network Fiddy posts to. Already have one? Sign in. New here? Make one right here. Fiddy does the whole thing on this device, and the words that own it never leave your browser."
             titleRef={titleRef}
           >
             <TrialChat
@@ -323,7 +323,7 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
               data-fiddy="create-account-entry"
               onClick={() => setIsCreatingAccount(true)}
             >
-              New to Farcaster? Make an account
+              New here? Make your Fiddy account
             </button>
           </FiddySheet>
         );
@@ -337,24 +337,24 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
             title="Meet Fiddy — your agent, living in your pocket."
             sub="Chat like you message a friend. Fiddy does the busywork, and asks before it acts."
             primary={{
+              label: 'Look around first',
+              onClick: () => go('publicFeed'),
+              testId: 'browse-cta',
+            }}
+            // Reading is not a commitment: no name, no brain, no account. It is
+            // the primary action because a visitor can see Fiddy's public posts
+            // before deciding whether to set anything up.
+            secondary={{
               label: setup.completedAt
                 ? `Continue as ${setup.agentName}`
                 : 'Say hi',
               onClick: () => go('fiddyWelcomeName'),
             }}
-            // Reading is not a commitment: no name, no brain, no account. This
-            // is the one press that shows a visitor the network itself, and it
-            // sits with the primary action so it is visible before any scroll.
-            secondary={{
-              label: 'Look around first',
-              onClick: () => go('publicFeed'),
-              testId: 'browse-cta',
-            }}
             quiet={{
-              label: 'Already on Farcaster? Go social',
+              label: 'Already have an account? Sign in',
               onClick: () => setIsSigningIn(true),
             }}
-            note="No account needed for this part, and none for reading either: 'Look around first' opens the network as it is right now. Fiddy only asks for Farcaster when you want to post to it, and it can make you one if you don't have it."
+            note="No account needed to look around or say hi. Your Fiddy account lives on Farcaster, the network Fiddy posts to. You only need one when you want to post."
             titleRef={titleRef}
           >
             <ul className="fiddy-promise">
@@ -362,14 +362,6 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
               <li>It connects to the apps you already use.</li>
               <li>You stay in control: it asks first, and you can pause it.</li>
             </ul>
-            <button
-              type="button"
-              className="fiddy-quiet-btn"
-              data-fiddy="create-account-entry"
-              onClick={() => setIsCreatingAccount(true)}
-            >
-              New to Farcaster? Make an account
-            </button>
           </FiddySheet>
         );
     }
