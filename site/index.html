@@ -222,6 +222,20 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
     <p class="dim" style="font-size:14px;margin-bottom:0">This exact GCP path ran our own verified node (914M messages synced). Prefer a guided page? <a href="/client/deploy/">fiddy.fun/client/deploy</a>. Prefer the terminal? <code class="inline">fiddy provision --aws</code> or <code class="inline">--gcp</code>.</p>
   </div>
 
+  <div class="pane note" style="margin:16px 0">
+    <div class="t">Made your instance by hand? (console, any provider — or you already have a server)</div>
+    <p>Then skip <code class="inline">fiddy provision</code> entirely — it <em>creates</em> a machine, and you already have one.
+    SSH into your server and run these, in order:</p>
+    <pre><span class="c"># on YOUR server (after ssh ubuntu@your-ip):</span>
+<span class="k">git clone https://github.com/ivcained/fiddy && cd fiddy</span>
+<span class="k">export PATH="$PWD/bin:$PATH"</span>
+<span class="k">fiddy node up --local</span>     <span class="c"># installs Docker + the node right here</span>
+<span class="k">fiddy client up --tunnel</span>  <span class="c"># the client, reading from it</span></pre>
+    <p>Running <code class="inline">fiddy provision --aws</code> <em>on</em> the server is the one wrong move — it asks for the AWS CLI
+    because provisioning happens <strong>from</strong> a machine that talks to AWS (your laptop, or CloudShell), not on the
+    machine being provisioned. Rule of thumb: provision from your laptop → node + client on the server.</p>
+  </div>
+
   <details class="pane" style="padding:16px 20px;margin:16px 0">
     <summary style="cursor:pointer;color:var(--ink)"><strong>Other providers</strong> — same three commands, your pick</summary>
     <pre style="margin-bottom:4px"><span class="c"># AWS (needs the aws CLI configured, ~$285/mo list):</span>
