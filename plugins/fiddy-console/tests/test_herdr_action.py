@@ -24,9 +24,9 @@ class HerdrActionTests(unittest.TestCase):
     def test_opened_tab_gets_a_real_name(self, run):
         run.return_value.returncode = 0
         run.return_value.stdout = '{"result":{"panes":[{"pane_id":"w1:p9","tab_id":"w1:t9","focused":true}]}}'
-        herdr_action.open_pane("sync", herdr_bin="/opt/herdr")
+        herdr_action.open_pane("status", herdr_bin="/opt/herdr")
         rename = run.call_args_list[-1].args[0]
-        self.assertEqual(rename, ["/opt/herdr", "tab", "rename", "w1:t9", "Sync Progress"])
+        self.assertEqual(rename, ["/opt/herdr", "tab", "rename", "w1:t9", "Node Status"])
 
 
 if __name__ == "__main__":

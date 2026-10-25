@@ -4,8 +4,7 @@ import subprocess
 
 
 TITLES = {
-    "console": "Fiddy Console", "status": "Node Status", "sync": "Sync Progress",
-    "logs": "Node Logs", "start": "Start Node", "stop": "Stop Node",
+    "console": "Fiddy Console", "status": "Node Status", "logs": "Node Logs", "start": "Start Node", "stop": "Stop Node",
     "grafana": "Grafana", "fid-setup": "Operator FID", "settings": "Node Settings",
     "auto-upgrade": "Auto-upgrade",
 }
@@ -13,7 +12,6 @@ TITLES = {
 ACTIONS = {
     "console": "console",
     "status": "console",
-    "sync": "console",
     "logs": "console",
     "start": "console",
     "stop": "console",

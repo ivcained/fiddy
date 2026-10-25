@@ -6,27 +6,6 @@ description = "Your Snapchain node, one button away: live status, sync, logs, li
 platforms = ["macos", "linux", "windows"]
 
 [[actions]]
-id = "open-console"
-title = "Fiddy: Open node console"
-contexts = ["workspace"]
-command = ["python3", "console/herdr_action.py", "console"]
-platforms = ["macos", "linux"]
-
-[[actions]]
-id = "status"
-title = "Fiddy: Live node status"
-contexts = ["workspace"]
-command = ["python3", "console/herdr_action.py", "status"]
-platforms = ["macos", "linux"]
-
-[[actions]]
-id = "sync"
-title = "Fiddy: Sync progress"
-contexts = ["workspace"]
-command = ["python3", "console/herdr_action.py", "sync"]
-platforms = ["macos", "linux"]
-
-[[actions]]
 id = "logs"
 title = "Fiddy: Node logs"
 contexts = ["workspace"]
@@ -74,27 +53,6 @@ title = "Fiddy: Auto-upgrade schedule"
 contexts = ["workspace"]
 command = ["python3", "console/herdr_action.py", "auto-upgrade"]
 platforms = ["macos", "linux"]
-
-[[actions]]
-id = "open-console-windows"
-title = "Fiddy: Open node console"
-contexts = ["workspace"]
-command = ["python", "console/herdr_action.py", "console"]
-platforms = ["windows"]
-
-[[actions]]
-id = "status-windows"
-title = "Fiddy: Live node status"
-contexts = ["workspace"]
-command = ["python", "console/herdr_action.py", "status"]
-platforms = ["windows"]
-
-[[actions]]
-id = "sync-windows"
-title = "Fiddy: Sync progress"
-contexts = ["workspace"]
-command = ["python", "console/herdr_action.py", "sync"]
-platforms = ["windows"]
 
 [[actions]]
 id = "logs-windows"
