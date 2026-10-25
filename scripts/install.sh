@@ -48,7 +48,15 @@ else
 fi
 
 say "Putting fiddy on PATH"
-"$DEST/bin/fiddy" install || as_root ln -sf "$DEST/bin/fiddy" /usr/local/bin/fiddy
+BIN_DIR="${FIDDY_BIN_DIR:-$HOME/.local/bin}"
+mkdir -p "$BIN_DIR"
+ln -sf "$DEST/bin/fiddy" "$BIN_DIR/fiddy"
+export PATH="$BIN_DIR:$HOME/.local/bin:$PATH"
+case "${SHELL:-}" in *zsh) USER_PROFILE="$HOME/.zprofile" ;; *) USER_PROFILE="$HOME/.profile" ;; esac
+touch "$USER_PROFILE"
+if ! grep -q 'fiddy-installer PATH' "$USER_PROFILE"; then
+  printf '\n# fiddy-installer PATH\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$USER_PROFILE"
+fi
 
 if [ "$INSTALL_CONSOLE" = 1 ]; then
   export PATH="$HOME/.local/bin:$PATH"
