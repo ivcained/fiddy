@@ -31,15 +31,9 @@ def main():
     print("")
     print(hyperlink(proxy.url, "[ Open live Grafana ]"))
     print("")
-    # One click should be the whole flow: open the tokened URL in the local
-    # browser ourselves. Headless servers just keep the printed link.
-    import webbrowser
-    try:
-        opened = webbrowser.open(proxy.url)
-    except Exception:
-        opened = False
-    print("Grafana is opening in your browser…" if opened else
-          "No browser on this machine — click [ Open live Grafana ] above, or open the link from your laptop.")
+    print("EMBED IT HERE: Shift-click the link above and Grafana opens beside")
+    print("this pane, inside Ovis. No second browser tab.")
+    print("To make a plain click embed too, set Ovis Settings > Web links > Beside the pane.")
     print("Grafana's first login is admin / admin; change that password in Grafana.")
     print("Keep this pane open: closing it closes the dashboard tunnel.")
     print("")
