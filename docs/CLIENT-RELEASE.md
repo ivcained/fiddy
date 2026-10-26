@@ -403,13 +403,13 @@ the first client release (`89cdd01…`) are both still on disk and byte-intact; 
 symlink is the whole switch. The vhost change is backed up at
 `/root/nginx-backups/fiddy.fun.*.bak`.
 
-## The client's CSP: `script-src 'self'`, plus one host for Cloudflare's beacon
+## The client's CSP: `script-src 'self'`, with no CDN rewrites
 
 As served — `curl -sSI https://fiddy.fun/` on 2026-10-21, from `location /` in
 `/etc/nginx/sites-available/fiddy.fun`:
 
 ```
-default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https: wss:; frame-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self'
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https: wss:; frame-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self'
 ```
 
 One token of that header changed on 2026-10-21 (vhost backed up at
@@ -417,7 +417,7 @@ One token of that header changed on 2026-10-21 (vhost backed up at
 
 ```diff
 - script-src 'self' 'unsafe-inline';
-+ script-src 'self' https://static.cloudflareinsights.com;
++ script-src 'self';
 ```
 
 Nothing else in the header moved.
@@ -439,16 +439,17 @@ Two things in `apps/farcaster-web/index.html` used to need it, and both are gone
    CSP just as wide. The Inter sheet is now a normal render-blocking stylesheet;
    the two preconnects above it are what keep the third-party fetch cheap.
 
-### The one third-party allowance, and why it is written down
+### HTML is delivered exactly as built
 
-Cloudflare's zone injects `<script src="https://static.cloudflareinsights.com/beacon.min.js/…">`
-into the HTML at the edge (measured: present on `/` for a browser-like request,
-absent for curl's default UA; the injected tag carries its own `integrity=` SRI
-hash and `crossorigin`). With `'self'` alone the browser refuses it and
-logs a console error on every single load. The decision is to **allow that one
-host** by name rather than keep a permanent console error, and it is measured in
-a browser rather than assumed: the beacon is fetched and nothing about it is
-refused (probe check 6b below).
+Every client HTML answer carries `no-transform`: the page is delivered exactly as
+we built it, and the CDN may not add scripts to it. This covers `/`, the per-page
+cast/profile/look answers and `/client`; JSON, images and hashed assets keep their
+existing cache policy. Cloudflare used to inject a Web Analytics beacon, which was
+the only reason `script-src` allowed `static.cloudflareinsights.com`. A real-browser
+check on 2026-10-26 found no beacon tag or request on any of those routes, so that
+host allowance was removed. `verify-csp-script-src.mjs` now requires exactly
+`script-src 'self'`; its `--beacon` local mode injects the old tag on purpose and
+requires the browser to refuse it.
 
 ### Why the rest of the header stays as wide as it is
 
@@ -477,9 +478,9 @@ Each allowance was measured, not guessed:
   browser: refuses a shell with an inline `<script>` or an inline `on*=`
   handler. Runs in the ritual at step 3 **and** on the served page at step 8.
 - `apps/farcaster-web/scripts/verify-csp-script-src.mjs` — a real browser, ten
-  checks: no inline script, no inline handler, `script-src` exactly `'self'` +
-  the beacon host with no `unsafe-inline`/`unsafe-eval`, the bootstrap fetched
-  200, the beacon not refused, nothing of the page's own refused, nothing newly
+  checks: no inline script, no inline handler, `script-src` exactly `'self'`,
+  the bootstrap fetched 200, no beacon in the live document or requests (or a
+  deliberately injected local beacon refused), nothing of the page's own refused, nothing newly
   refused hiding among the documented pre-existing refusals, and — with the app
   bundle blocked, so only the document can run — the shell still paints dark,
   and light for a reader who saved `light`.

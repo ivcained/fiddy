@@ -61,13 +61,15 @@ const metaTag = (attribute, key, value) =>
  * rather than only at the front door: a mini app host that opens this URL lands
  * on the cast it named. The manifest at `/.well-known/farcaster.json` is what
  * names the app; nothing here claims anything the manifest does not.
+ * Per-page 3:2 mini-app art adapted from backmeupplz/quilcast commit
+ * d0a87cce7fd7 (MIT): https://github.com/backmeupplz/quilcast/commit/d0a87cce7fd7
  */
-const miniAppTag = (origin, url) =>
+const miniAppTag = (origin, url, embedImageUrl, buttonTitle) =>
   `<meta name="fc:miniapp" content='${JSON.stringify({
     version: '1',
-    imageUrl: `${origin}/image.png`,
+    imageUrl: embedImageUrl,
     button: {
-      title: 'Open fiddy',
+      title: buttonTitle,
       action: {
         type: 'launch_miniapp',
         name: 'fiddy',
@@ -84,6 +86,8 @@ export const pageTags = ({
   description,
   url,
   imageUrl,
+  embedImageUrl,
+  buttonTitle,
   imageAlt,
   type,
   origin,
@@ -106,7 +110,7 @@ export const pageTags = ({
     metaTag('name', 'twitter:title', title),
     metaTag('name', 'twitter:description', description),
     metaTag('name', 'twitter:image', imageUrl),
-    miniAppTag(origin, url),
+    miniAppTag(origin, url, embedImageUrl, buttonTitle),
   ].join('\n    ');
 
 /**
@@ -132,6 +136,6 @@ export const renderPageHtml = (shell, tags) => {
   return `${stripped.slice(0, head)}    ${tags}\n  ${stripped.slice(head)}`;
 };
 
-/** The three assets the per-page tags describe, all served from this origin. */
-export const cardUrl = (origin, kind, id) =>
-  `${origin}/unfurl/cards/${kind}/${encodeURIComponent(id)}.png`;
+/** The card assets the per-page tags describe, all served from this origin. */
+export const cardUrl = (origin, kind, id, miniApp = false) =>
+  `${origin}/unfurl/cards/${kind}/${encodeURIComponent(id)}${miniApp ? '.3x2' : ''}.png`;

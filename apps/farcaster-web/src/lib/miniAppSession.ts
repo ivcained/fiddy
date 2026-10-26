@@ -84,6 +84,10 @@ type MiniAppHostSdk = {
     signIn: (options: {
       nonce: string;
     }) => Promise<{ message: string; signature: `0x${string}` }>;
+    openUrl?: (url: string) => Promise<void>;
+  };
+  back?: {
+    enableWebNavigation: () => Promise<void>;
   };
 };
 
@@ -145,7 +149,15 @@ const isInsideMiniAppHost = async ({
   timeoutMs?: number;
 }): Promise<boolean> => {
   try {
-    return await sdk.isInMiniApp(timeoutMs);
+    const inside = await sdk.isInMiniApp(timeoutMs);
+    if (inside) {
+      // Host-only code stays out of the ordinary browser's bundle. A refused
+      // back-button setup is recorded by the helper, never fatal to the app.
+      const { enableMiniAppHostNavigation } =
+        await import('~/lib/miniAppHostNavigation');
+      await enableMiniAppHostNavigation({ sdk });
+    }
+    return inside;
   } catch (error) {
     return false;
   }

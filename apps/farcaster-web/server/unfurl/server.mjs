@@ -44,6 +44,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { callerAddress } from './callerAddress.mjs';
 import { createCardRenderer } from './cards.mjs';
 import { carriesApiBody, LOOK_SHARE_PATH, readLookBody } from './lookBody.mjs';
 import { createLookStore, LOOK_LIMITS } from './looks.mjs';
@@ -180,19 +181,11 @@ const handler = createUnfurlHandler({
 /**
  * Who to count a request against.
  *
- * nginx is the only caller that matters and it forwards the reader's address in
- * `x-forwarded-for`; a call straight to the loopback port has only its socket
- * address. Neither is trusted for anything but a rate-limit key: the limit
- * exists so one address cannot spend the free model tier for everyone, and a
- * shared address shares a window rather than escaping one.
+ * nginx is the only caller that matters and it forwards the proxy hop it saw in
+ * `x-forwarded-for`. When that hop is Cloudflare, `callerAddress` uses the
+ * visitor address Cloudflare proves; otherwise a forwarded visitor header is
+ * ignored. This is only a rate-limit key, never identity or a log field.
  */
-const callerOf = (request) =>
-  String(request.headers['x-forwarded-for'] ?? '')
-    .split(',')[0]
-    .trim() ||
-  request.socket?.remoteAddress ||
-  'unknown';
-
 const server = createServer(async (request, response) => {
   const path = request.url ?? '/';
   let answer;
@@ -213,7 +206,7 @@ const server = createServer(async (request, response) => {
       method,
       path,
       body,
-      ip: callerOf(request),
+      ip: callerAddress(request),
     });
   } catch (error) {
     // Nothing a request can do should reach here; if something does, the answer

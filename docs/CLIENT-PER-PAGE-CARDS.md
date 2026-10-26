@@ -18,7 +18,8 @@ agent" and showed the site card. t_1e01f488 made that front door a real card
 | --- | --- |
 | `GET /~/conversations/<hash>` | the release's own shell, with that cast's `og:`/`twitter:` tags and a 1200×630 card drawn for it |
 | `GET /~/profiles/<fid>` | the same, for that account: display name, handle, bio |
-| `GET /unfurl/cards/{cast/<hash>,profile/<fid>}.png` | the card itself, 1200×630, drawn on demand |
+| `GET /unfurl/cards/{cast/<hash>,profile/<fid>,look/<id>}.png` | the social card itself, 1200×630, drawn on demand |
+| `GET /unfurl/cards/{cast/<hash>,profile/<fid>,look/<id>}.3x2.png` | the same page drawn at 1200×800 for its mini-app card |
 | `GET /unfurl/cast-author/<hash>` | `{"hash":…,"fid":…}` — the index the CLIENT reads (below) |
 | `GET /unfurl/health` | what the service loaded: shell size, whether the site card is there, cache sizes |
 | anything else under `/~/` | the shell, unchanged (the client owns the rest of that prefix) |
@@ -100,10 +101,13 @@ Local, no network (and inside the release ritual, step 3):
     cd apps/farcaster-web
     node server/unfurl/self-check.mjs dist/index.html /tmp/unfurl-self-check
 
-It renders both pages from the build with fixture data (a cast whose text holds
-quotes and angle brackets, a profile with a bio) and asserts the page's own tags
-exactly once, the site's tags gone, `</head>` onward byte-identical, no inline
-script, and the hostile values escaped.
+It renders cast, profile and look pages from the build with fixture data and
+asserts each page's own tags exactly once, the site's tags gone, `</head>` onward
+byte-identical, no inline script, and hostile values escaped. Every page's
+`fc:miniapp` names its own `.3x2.png` card and a plain per-kind button, while
+`og:image` and `twitter:image` stay 1200×630. The real renderer draws both sizes
+for all three kinds; the gate requires 1200×800 for mini-app cards, distinct bytes
+per page and size, and `no-transform` on HTML.
 
 Live, the way a crawler asks:
 

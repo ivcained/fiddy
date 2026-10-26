@@ -19,6 +19,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 
 export const CARD_WIDTH = 1200;
 export const CARD_HEIGHT = 630;
+export const MINI_APP_CARD_HEIGHT = 800;
 
 /** PNG magic, IHDR width/height, and nothing else assumed about the bytes. */
 export const pngSize = (buffer) => {
@@ -98,7 +99,13 @@ export const createCardRenderer = ({
         }
         const png = Buffer.concat(chunks);
         const size = pngSize(png);
-        if (!size || size.width !== CARD_WIDTH || size.height !== CARD_HEIGHT) {
+        const expectedHeight =
+          payload?.aspect === '3x2' ? MINI_APP_CARD_HEIGHT : CARD_HEIGHT;
+        if (
+          !size ||
+          size.width !== CARD_WIDTH ||
+          size.height !== expectedHeight
+        ) {
           fail(
             new Error(
               `the card renderer answered ${size ? `${size.width}x${size.height}` : 'not a PNG'}`,

@@ -1,5 +1,5 @@
 /**
- * The two pages this service serves, rendered from the build under release and
+ * The three pages this service serves, rendered from the build under release and
  * checked against the rules the shell itself is held to.
  *
  *   node server/unfurl/self-check.mjs dist/index.html [outDir]
@@ -43,14 +43,11 @@ import {
   pngSize,
   CARD_WIDTH,
   CARD_HEIGHT,
+  MINI_APP_CARD_HEIGHT,
 } from './cards.mjs';
 
 const selfPath = fileURLToPath(import.meta.url);
-const webRoot = path.resolve(
-  path.dirname(selfPath),
-  '..',
-  '..',
-);
+const webRoot = path.resolve(path.dirname(selfPath), '..', '..');
 const shellPath = process.argv[2] ?? path.join(webRoot, 'dist', 'index.html');
 const outDir = path.resolve(
   process.argv[3] ?? path.join(webRoot, 'unfurl-self-check'),
@@ -73,6 +70,18 @@ const shell = readFileSync(shellPath, 'utf8');
 // WHAT A PAGE IS, built here rather than fetched: the fixtures carry the shapes
 // a hostile one takes (a quote, an angle bracket, a long body, no text at all).
 const CAST_HASH = `0x${'a'.repeat(40)}`;
+const LOOK_ID = '0123456789';
+const LOOK = {
+  name: 'Fiddy dark',
+  bg: '#161715',
+  card: '#1d1e1c',
+  ink: '#eef0e8',
+  muted: '#9ba193',
+  accent: '#d4ff3f',
+  round: 18,
+  borderWidth: 1,
+  font: 'rounded',
+};
 const fixtures = {
   cast: {
     cast: {
@@ -119,6 +128,9 @@ const handler = createUnfurlHandler({
       String(fid) === '3' ? fixtures.profile : undefined,
     size: () => 0,
   },
+  looks: {
+    get: async (id) => (id === LOOK_ID ? LOOK : undefined),
+  },
 });
 
 const pages = {
@@ -129,6 +141,10 @@ const pages = {
   'profile.html': await handler.handle({
     method: 'GET',
     path: '/~/profiles/3',
+  }),
+  'look.html': await handler.handle({
+    method: 'GET',
+    path: `/look/${LOOK_ID}`,
   }),
 };
 
@@ -141,23 +157,41 @@ for (const [file, answer] of Object.entries(pages)) {
   const html = String(answer.body);
   writeFileSync(path.join(outDir, file), html);
 
-  const isCast = file === 'cast.html';
-  const url = isCast
-    ? `${origin}/~/conversations/${CAST_HASH}`
-    : `${origin}/~/profiles/3`;
-  const image = isCast
-    ? `${origin}/unfurl/cards/cast/${CAST_HASH}.png`
-    : `${origin}/unfurl/cards/profile/3.png`;
+  const kind = file.replace('.html', '');
+  const isCast = kind === 'cast';
+  const url =
+    kind === 'cast'
+      ? `${origin}/~/conversations/${CAST_HASH}`
+      : kind === 'profile'
+        ? `${origin}/~/profiles/3`
+        : `${origin}/look/${LOOK_ID}`;
+  const cardId =
+    kind === 'cast' ? CAST_HASH : kind === 'profile' ? '3' : LOOK_ID;
+  const image = `${origin}/unfurl/cards/${kind}/${cardId}.png`;
+  const miniAppImage = `${origin}/unfurl/cards/${kind}/${cardId}.3x2.png`;
 
   check(
     `${file} answers 200 with the page's own tags`,
-    answer.status === 200 &&
-      answer.headers['x-unfurl'] === `page:${isCast ? 'cast' : 'profile'}`,
+    answer.status === 200 && answer.headers['x-unfurl'] === `page:${kind}`,
     answer.headers['x-unfurl'],
   );
   check(
     `${file} og:url is this page`,
     html.includes(`<meta property="og:url" content="${url}" />`),
+  );
+  check(
+    `${file} is delivered exactly as built`,
+    answer.headers['cache-control'] === 'public, max-age=300, no-transform',
+    answer.headers['cache-control'],
+  );
+  const miniApp = JSON.parse(
+    /<meta\s+name="fc:miniapp"\s+content='([^']*)'/.exec(html)?.[1] ?? 'null',
+  );
+  check(
+    `${file} mini-app card is this page's own 3:2 card`,
+    miniApp?.imageUrl === miniAppImage &&
+      miniApp?.button?.title === `Open this ${kind} in fiddy` &&
+      miniApp?.button?.action?.url === url,
   );
   check(
     `${file} og:image is this page's card`,
@@ -222,22 +256,31 @@ for (const [file, answer] of Object.entries(pages)) {
 // measured 2026-10-22 (card t_1efd7e2e), the handler handed the renderer an
 // unresolved promise, every card fell back to the site card, and the release
 // gate (pixels, and this file's own card-free self-check) let it ship.
-const cards = {
-  cast: await handler.handle({
+const cards = {};
+for (const [kind, id] of [
+  ['cast', CAST_HASH],
+  ['profile', '3'],
+  ['look', LOOK_ID],
+]) {
+  cards[kind] = await handler.handle({
     method: 'GET',
-    path: `/unfurl/cards/cast/${CAST_HASH}.png`,
-  }),
-  profile: await handler.handle({
+    path: `/unfurl/cards/${kind}/${id}.png`,
+  });
+  cards[`${kind}:3x2`] = await handler.handle({
     method: 'GET',
-    path: '/unfurl/cards/profile/3.png',
-  }),
-};
+    path: `/unfurl/cards/${kind}/${id}.3x2.png`,
+  });
+}
 const cardBytes = {};
 for (const [kind, answer] of Object.entries(cards)) {
   cardBytes[kind] = answer.body;
   const cause = answer.headers['x-unfurl-note'];
+  const baseKind = kind.split(':')[0];
+  const expectedHeight = kind.endsWith(':3x2')
+    ? MINI_APP_CARD_HEIGHT
+    : CARD_HEIGHT;
   const ownCard =
-    answer.status === 200 && answer.headers['x-unfurl'] === `card:${kind}`;
+    answer.status === 200 && answer.headers['x-unfurl'] === `card:${baseKind}`;
   check(
     `${kind} card is that page's own card`,
     ownCard,
@@ -251,7 +294,9 @@ for (const [kind, answer] of Object.entries(cards)) {
   // checked: a card that falls back without saying why is a failure of this
   // service, not only of this build.
   if (!ownCard) {
-    note(`  ${kind} card did not draw for this page — the handler's own reason:`);
+    note(
+      `  ${kind} card did not draw for this page — the handler's own reason:`,
+    );
     note(
       `    ${cause ?? 'NONE RECORDED (the card route fell back without a reason)'}`,
     );
@@ -263,8 +308,8 @@ for (const [kind, answer] of Object.entries(cards)) {
   );
   const size = pngSize(answer.body);
   check(
-    `${kind} card is ${CARD_WIDTH}x${CARD_HEIGHT}`,
-    size?.width === CARD_WIDTH && size?.height === CARD_HEIGHT,
+    `${kind} card is ${CARD_WIDTH}x${expectedHeight}`,
+    size?.width === CARD_WIDTH && size?.height === expectedHeight,
     size ? `${size.width}x${size.height}` : 'not a PNG',
   );
   check(
@@ -272,14 +317,28 @@ for (const [kind, answer] of Object.entries(cards)) {
     Buffer.isBuffer(answer.body) && !answer.body.equals(siteCardBytes),
   );
   if (Buffer.isBuffer(answer.body)) {
-    writeFileSync(path.join(outDir, `card-${kind}.png`), answer.body);
+    writeFileSync(
+      path.join(outDir, `card-${kind.replace(':', '-')}.png`),
+      answer.body,
+    );
   }
 }
+for (const kind of ['cast', 'profile', 'look']) {
+  check(
+    `${kind} social and mini-app cards are different renders`,
+    Buffer.isBuffer(cardBytes[kind]) &&
+      Buffer.isBuffer(cardBytes[`${kind}:3x2`]) &&
+      !cardBytes[kind].equals(cardBytes[`${kind}:3x2`]),
+  );
+}
 check(
-  'the two pages do not draw the same picture',
-  Buffer.isBuffer(cardBytes.cast) &&
-    Buffer.isBuffer(cardBytes.profile) &&
-    !cardBytes.cast.equals(cardBytes.profile),
+  'the three pages do not draw the same mini-app picture',
+  Buffer.isBuffer(cardBytes['cast:3x2']) &&
+    Buffer.isBuffer(cardBytes['profile:3x2']) &&
+    Buffer.isBuffer(cardBytes['look:3x2']) &&
+    !cardBytes['cast:3x2'].equals(cardBytes['profile:3x2']) &&
+    !cardBytes['cast:3x2'].equals(cardBytes['look:3x2']) &&
+    !cardBytes['profile:3x2'].equals(cardBytes['look:3x2']),
 );
 
 // The size the tags PROMISE, read out of a PNG the same way the service reads it.
@@ -290,7 +349,9 @@ check(
   cardSize ? `${cardSize.width}x${cardSize.height}` : 'not a PNG',
 );
 
-note(`wrote ${Object.keys(pages).join(', ')}, both cards to ${outDir}`);
+note(
+  `wrote ${Object.keys(pages).join(', ')}, both card sizes for every page to ${outDir}`,
+);
 
 if (failures.length > 0) {
   console.error('unfurl self-check failed:');
@@ -314,5 +375,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  "  unfurl self-check ok: both pages carry their own card and their own tags, drawn over this build's own shell",
+  "  unfurl self-check ok: all three pages carry their own cards and tags in both sizes, drawn over this build's own shell",
 );
