@@ -243,6 +243,7 @@ class NodeManager:
             }
             tip = tips.get(int(entry["id"])) if isinstance(entry["id"], int) else None
             entry["sync_percent"] = round(min(100, height * 100 / tip), 1) if tip and height else None
+            entry["lag_blocks"] = (tip - height) if tip and height and tip >= height else None
             result["shards"].append(entry)
         return result
 

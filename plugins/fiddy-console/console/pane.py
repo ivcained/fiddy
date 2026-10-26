@@ -25,11 +25,13 @@ def status_text(status):
         lines.append("SNAPSHOT  chunk %(chunk)s / %(total)s  (%(percent)s%%)" % snapshot)
     if status.get("shards"):
         lines.append("")
-        lines.append("SHARD     HEIGHT             SYNC        BEHIND")
+        lines.append("SHARD     HEIGHT             SYNC        LAG BEHIND TIP")
         for shard in status["shards"]:
             progress = shard.get("sync_percent")
             progress_text = ("%.1f%%" % progress) if progress is not None else "---"
-            lines.append("%-9s %-18s %-11s %s" % (shard.get("id"), shard.get("max_height"), progress_text, humanize_delay(shard.get("block_delay_seconds"))))
+            lag = shard.get("lag_blocks")
+            lag_text = "caught up" if lag is not None and lag <= 1 else ("%d blocks" % lag if lag is not None else "---")
+            lines.append("%-9s %-18s %-11s %s" % (shard.get("id"), shard.get("max_height"), progress_text, lag_text))
     if status.get("notice"):
         lines.extend(["", status["notice"]])
     lines.extend(["", "Read directly from the node and Docker. No agent interpretation."])
