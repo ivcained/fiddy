@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Draw the 1200x630 card a CAST or PROFILE url unfurls as.
+"""Draw the 1200x630 social card or 1200x800 mini-app card for a page.
+
+The 3:2 variant is adapted from backmeupplz/quilcast commit d0a87cce7fd7
+(MIT), with this renderer's own centred layout, mascot and glow preserved.
 
     python3 render-card.py < payload.json > card.png
 
@@ -42,6 +45,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 WIDTH = 1200
 HEIGHT = 630
+MINI_APP_HEIGHT = 800
 PAD_LEFT = 92
 TEXT_WIDTH = 700  # the mascot owns everything to the right of this
 
@@ -86,8 +90,9 @@ def font_path(weight):
 class Card:
     """The frame every card shares: ground, glow, mascot, the address."""
 
-    def __init__(self, mascot_path):
-        self.image = Image.new("RGB", (WIDTH, HEIGHT), BG)
+    def __init__(self, mascot_path, height=HEIGHT):
+        self.offset = (height - HEIGHT) // 2
+        self.image = Image.new("RGB", (WIDTH, height), BG)
         self.draw = ImageDraw.Draw(self.image)
         self._glow()
         self._mascot(mascot_path)
@@ -114,9 +119,9 @@ class Card:
         and smooth.
         """
         scale = 3
-        mask_w, mask_h = WIDTH // scale, HEIGHT // scale
+        mask_w, mask_h = WIDTH // scale, self.image.height // scale
         radius = 560 / scale
-        cx, cy = 0.81 * mask_w, 0.72 * mask_h
+        cx, cy = 0.81 * mask_w, (0.72 * HEIGHT + self.offset) / scale
         mask = Image.new("L", (mask_w, mask_h), 0)
         pixels = mask.load()
         falloff = radius * 0.66
@@ -126,8 +131,8 @@ class Card:
                 distance = ((x - cx) ** 2 + dy**2) ** 0.5
                 if distance < falloff:
                     pixels[x, y] = int(round(51 * (1 - distance / falloff)))
-        mask = mask.resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
-        self.image.paste(Image.new("RGB", (WIDTH, HEIGHT), ACCENT), (0, 0), mask)
+        mask = mask.resize(self.image.size, Image.Resampling.LANCZOS)
+        self.image.paste(Image.new("RGB", self.image.size, ACCENT), (0, 0), mask)
 
     def _mascot(self, mascot_path):
         mascot = Image.open(mascot_path).convert("RGBA")
@@ -135,15 +140,15 @@ class Card:
         mascot.thumbnail((box, box), Image.Resampling.LANCZOS)
         self.image.paste(
             mascot,
-            (WIDTH - 60 - mascot.width, HEIGHT - 24 - mascot.height),
+            (WIDTH - 60 - mascot.width, HEIGHT - 24 - mascot.height + self.offset),
             mascot,
         )
 
     def text(self, value, xy, font, fill):
-        self.draw.text(xy, value, font=font, fill=fill)
+        self.draw.text((xy[0], xy[1] + self.offset), value, font=font, fill=fill)
 
     def line(self, value, xy, font, fill):
-        self.draw.text(xy, value, font=font, fill=fill)
+        self.draw.text((xy[0], xy[1] + self.offset), value, font=font, fill=fill)
 
     def wrap(self, value, font, max_width, max_lines, max_chars=280):
         """Greedy wrap with an honest ellipsis, and never an unbounded block."""
@@ -196,8 +201,8 @@ def keep_glyphs(value):
     return "".join(kept)
 
 
-def draw_cast_card(payload, mascot_path):
-    card = Card(mascot_path)
+def draw_cast_card(payload, mascot_path, height=HEIGHT):
+    card = Card(mascot_path, height)
     username = payload.get("username")
     handle = f"@{username}" if username else f"fid {payload.get('fid', '')}".strip()
     card.text("fiddy", (PAD_LEFT, 74), card.bold[40], ACCENT)
@@ -222,8 +227,8 @@ def draw_cast_card(payload, mascot_path):
     return card.image
 
 
-def draw_profile_card(payload, mascot_path):
-    card = Card(mascot_path)
+def draw_profile_card(payload, mascot_path, height=HEIGHT):
+    card = Card(mascot_path, height)
     username = payload.get("username")
     handle = f"@{username}" if username else f"fid {payload.get('fid', '')}".strip()
     card.text("fiddy", (PAD_LEFT, 74), card.bold[40], ACCENT)
@@ -248,7 +253,7 @@ def draw_profile_card(payload, mascot_path):
     return card.image
 
 
-def draw_look_card(payload, mascot_path):
+def draw_look_card(payload, mascot_path, height=HEIGHT):
     """A shared look, drawn IN THE LOOK'S OWN COLOURS.
 
     This card is the one thing upstream's theme card cannot be: a picture of the
@@ -285,8 +290,9 @@ def draw_look_card(payload, mascot_path):
     radius = max(0, min(int(payload.get("round") or 18), 40))
     border = max(0, min(int(payload.get("borderWidth") or 1, ), 4))
 
-    image = Image.new("RGB", (WIDTH, HEIGHT), bg)
+    image = Image.new("RGB", (WIDTH, height), bg)
     draw = ImageDraw.Draw(image)
+    offset = (height - HEIGHT) // 2
     bold = {
         size: ImageFont.truetype(font_path("bold"), size) for size in (40, 62, 30)
     }
@@ -296,30 +302,30 @@ def draw_look_card(payload, mascot_path):
 
     # The panel: a look's own card colour, its own corners, its own edges.
     draw.rounded_rectangle(
-        [PAD_LEFT - 44, 62, WIDTH - 68, HEIGHT - 62],
+        [PAD_LEFT - 44, 62 + offset, WIDTH - 68, HEIGHT - 62 + offset],
         radius=radius * 2,
         fill=card_colour,
         outline=line,
         width=border,
     )
 
-    draw.text((PAD_LEFT, 108), "fiddy", font=bold[40], fill=accent)
-    draw.text((PAD_LEFT + 132, 122), "· a look", font=regular[26], fill=muted)
+    draw.text((PAD_LEFT, 108 + offset), "fiddy", font=bold[40], fill=accent)
+    draw.text((PAD_LEFT + 132, 122 + offset), "· a look", font=regular[26], fill=muted)
 
     name = payload.get("name") or "A look for Fiddy"
     kept = keep_glyphs(" ".join(str(name).split())[:60])
     lines = wrap_text(draw, kept, bold[62], TEXT_WIDTH + 220, 1)
-    draw.text((PAD_LEFT, 196), lines[0] if lines else kept, font=bold[62], fill=ink)
+    draw.text((PAD_LEFT, 196 + offset), lines[0] if lines else kept, font=bold[62], fill=ink)
 
     draw.text(
-        (PAD_LEFT, 292),
+        (PAD_LEFT, 292 + offset),
         "colours, corners and type — put it on in one press",
         font=regular[30],
         fill=muted,
     )
 
     # The palette, as the object it is: one swatch per token a look carries.
-    swatch_y = HEIGHT - 214
+    swatch_y = HEIGHT - 214 + offset
     swatch = 84
     gap = 18
     swatches = [
@@ -344,7 +350,7 @@ def draw_look_card(payload, mascot_path):
         x += swatch + gap
 
     draw.text(
-        (PAD_LEFT, HEIGHT - 96),
+        (PAD_LEFT, HEIGHT - 96 + offset),
         f"fiddy.fun/look/{payload.get('id', '')}",
         font=regular[26],
         fill=muted,
@@ -377,12 +383,13 @@ def main():
     if not os.path.exists(mascot_path):
         raise SystemExit(f"no mascot at {mascot_path}")
     kind = payload.get("kind")
+    height = MINI_APP_HEIGHT if payload.get("aspect") == "3x2" else HEIGHT
     if kind == "cast":
-        image = draw_cast_card(payload, mascot_path)
+        image = draw_cast_card(payload, mascot_path, height)
     elif kind == "profile":
-        image = draw_profile_card(payload, mascot_path)
+        image = draw_profile_card(payload, mascot_path, height)
     elif kind == "look":
-        image = draw_look_card(payload, mascot_path)
+        image = draw_look_card(payload, mascot_path, height)
     else:
         raise SystemExit(f"unknown card kind: {kind!r}")
     image.save(sys.stdout.buffer, format="PNG", optimize=True)

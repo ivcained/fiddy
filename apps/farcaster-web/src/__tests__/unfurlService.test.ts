@@ -45,9 +45,10 @@ const shell = readFileSync(path.join(webRoot, 'index.html'), 'utf8');
  * it no card can be drawn on this machine, and this file must not claim one
  * was. The answer is decided once, here, so the skip shows up as a named test.
  */
+const PYTHON = process.env.PYTHON ?? 'python3';
 const pillowReady = (() => {
   try {
-    execFileSync('python3', ['-c', 'import PIL.Image'], { stdio: 'ignore' });
+    execFileSync(PYTHON, ['-c', 'import PIL.Image'], { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -122,6 +123,7 @@ describe('what a cast page tells a crawler', () => {
     expect(status).toBe(200);
     expect(headers['content-type']).toBe('text/html; charset=utf-8');
     expect(headers['x-unfurl']).toBe('page:cast');
+    expect(headers['cache-control']).toBe('public, max-age=300, no-transform');
 
     // The page's own words, and its own URL — the shell deliberately carries no
     // static og:url, and this is the page that can carry a real one.
@@ -189,6 +191,15 @@ describe('what a cast page tells a crawler', () => {
     );
     expect(embed.button.action.name).toBe('fiddy');
     expect(embed.button.action.splashBackgroundColor).toBe('#161715');
+    expect(embed.imageUrl).toBe(
+      `${ORIGIN}/unfurl/cards/cast/${DW_R.cast.hash}.3x2.png`,
+    );
+    expect(embed.button.title).toBe('Open this cast in fiddy');
+    // The social preview stays the existing 1200x630 card.
+    expect(metaContent(html, 'property', 'og:image')).toBe(
+      `${ORIGIN}/unfurl/cards/cast/${DW_R.cast.hash}.png`,
+    );
+    expect(metaContent(html, 'property', 'og:image:height')).toBe('630');
   });
 
   it('injects no inline script and no event handler (script-src is self)', async () => {
@@ -257,6 +268,7 @@ describe('what a profile page tells a crawler', () => {
     const html = body as string;
 
     expect(headers['x-unfurl']).toBe('page:profile');
+    expect(headers['cache-control']).toBe('public, max-age=300, no-transform');
     expect(metaContent(html, 'property', 'og:title')).toBe('Dan Romero (@dwr)');
     expect(metaContent(html, 'property', 'og:description')).toBe(
       'Interested in technology and other stuff.',
@@ -268,6 +280,10 @@ describe('what a profile page tells a crawler', () => {
       `${ORIGIN}/~/profiles/3`,
     );
     expect(metaContent(html, 'property', 'og:type')).toBe('profile');
+    const embed = JSON.parse(metaContent(html, 'name', 'fc:miniapp') as string);
+    expect(embed.imageUrl).toBe(`${ORIGIN}/unfurl/cards/profile/3.3x2.png`);
+    expect(embed.button.title).toBe('Open this profile in fiddy');
+    expect(embed.button.action.url).toBe(`${ORIGIN}/~/profiles/3`);
   });
 });
 
@@ -339,6 +355,26 @@ describe('the pages this service cannot read', () => {
       expect(headers['x-unfurl']).toBe('shell');
       expect(body).toBe(shell);
     }
+  });
+});
+
+describe('HTML is delivered exactly as built', () => {
+  it('marks page and shell responses no-transform, never JSON or images', async () => {
+    for (const url of ['/~/settings', '/~/profiles/3']) {
+      const answer = await read(url);
+      expect(answer.headers['content-type']).toContain('text/html');
+      expect(answer.headers['cache-control']).toBe(
+        'public, max-age=300, no-transform',
+      );
+    }
+    const json = await read(`/unfurl/cast-author/${DW_R.cast.hash}`, {
+      reader: fakeReader({ cast: () => DW_R }),
+    });
+    expect(json.headers['cache-control']).toBe('no-store');
+    const image = await read('/unfurl/cards/profile/3.png', {
+      reader: fakeReader({ profile: () => ({ author: { fid: 3 } }) }),
+    });
+    expect(image.headers['cache-control']).toBe('public, max-age=3600');
   });
 });
 
@@ -430,6 +466,46 @@ describe('the payload the card renderer is handed', () => {
     expect(card.kind).toBe('profile');
     expect(card.fid).toBe('3');
     expect(card.displayName).toBe('Dan Romero');
+  });
+
+  it('draws a separate 1200x800 payload for the mini-app card', async () => {
+    const seen: Record<string, unknown>[] = [];
+    const tall = Buffer.from(
+      '89504e470d0a1a0a0000000d49484452000004b000000320',
+      'hex',
+    );
+    const answer = await read(`/unfurl/cards/cast/${DW_R.cast.hash}.3x2.png`, {
+      reader: fakeReader({ cast: () => DW_R }),
+      renderCard: async (payload: Record<string, unknown>) => {
+        seen.push(payload);
+        return tall;
+      },
+    });
+    expect(answer.headers['x-unfurl']).toBe('card:cast');
+    expect(answer.body).toEqual(tall);
+    expect(seen[0]).toMatchObject({ kind: 'cast', aspect: '3x2' });
+  });
+
+  it('does not let the two card sizes evict each other', async () => {
+    const seen: Record<string, unknown>[] = [];
+    const h = handler({
+      reader: fakeReader({ cast: () => DW_R }),
+      renderCard: async (payload: Record<string, unknown>) => {
+        seen.push(payload);
+        return payload.aspect === '3x2'
+          ? Buffer.from('mini-app')
+          : Buffer.from('social');
+      },
+    });
+    const ask = async (suffix: string) =>
+      (await h.handle({
+        method: 'GET',
+        path: `/unfurl/cards/cast/${DW_R.cast.hash}${suffix}`,
+      })) as { body: Buffer };
+    expect((await ask('.png')).body.toString()).toBe('social');
+    expect((await ask('.3x2.png')).body.toString()).toBe('mini-app');
+    expect((await ask('.png')).body.toString()).toBe('social');
+    expect(seen).toHaveLength(2);
   });
 });
 
@@ -646,56 +722,85 @@ describe('the reason a card fell back, and the one retry before it does', () => 
 
 describe('the card renderer, against the real thing', () => {
   const render = createCardRenderer({
-    pythonPath: 'python3',
+    pythonPath: PYTHON,
     scriptPath: path.join(webRoot, 'server', 'unfurl', 'render-card.py'),
     mascotPath: path.join(webRoot, 'public', 'fiddy-mark-poster.png'),
   }).render;
 
-  // Three cards, three python3 processes, and a Pillow check: this one is a
+  // Six cards, six python3 processes, and a Pillow check: this one is a
   // subprocess test, not a unit test, and it gets its own budget. Without
   // Pillow no card can be drawn at all, so the test is skipped BY NAME rather
   // than passing quietly — a green run must never mean "did not run".
   it.skipIf(!pillowReady)(
-    'draws 1200x630 for two different casts and one profile, and they differ',
+    'draws both sizes for a cast, a profile and a look, with distinct art and the brand palette',
     async () => {
-      const casthash = '0xec0c8a227d7f34ad3e2243ae098b46459b7d1847';
-      const other = '0x' + 'e'.repeat(40);
-      const cards = [
-        await render({
+      const payloads = [
+        {
           kind: 'cast',
-          hash: casthash,
+          hash: '0xec0c8a227d7f34ad3e2243ae098b46459b7d1847',
           text: 'Neat',
           username: 'dwr',
           displayName: 'Dan Romero',
           fid: 3,
-        }),
-        await render({
-          kind: 'cast',
-          hash: other,
-          text: 'A different cast, with different words in it.',
-          username: 'someone',
-          fid: 12,
-        }),
-        await render({
+        },
+        {
           kind: 'profile',
           fid: 3,
           username: 'dwr',
           displayName: 'Dan Romero',
           bio: 'Interested in technology and other stuff.',
-        }),
+        },
+        {
+          kind: 'look',
+          id: '0123456789',
+          name: 'Fiddy dark',
+          palette: {
+            bg: '#161715',
+            card: '#1d1e1c',
+            ink: '#eef0e8',
+            muted: '#9ba193',
+            accent: '#d4ff3f',
+          },
+        },
       ];
-      for (const png of cards) {
-        expect(pngSize(png)).toEqual({ width: 1200, height: 630 });
+      const cards: Record<string, string> = {};
+      for (const payload of payloads) {
+        for (const aspect of ['og', '3x2'] as const) {
+          const png = await render(
+            aspect === '3x2' ? { ...payload, aspect } : payload,
+          );
+          cards[`${payload.kind}:${aspect}`] = png.toString('base64');
+          expect(pngSize(png)).toEqual({
+            width: 1200,
+            height: aspect === '3x2' ? 800 : 630,
+          });
+          const colours = JSON.parse(
+            execFileSync(
+              PYTHON,
+              [
+                '-c',
+                "import json,sys; from PIL import Image; import io; im=Image.open(io.BytesIO(sys.stdin.buffer.read())).convert('RGB'); colours={c for _,c in im.getcolors(2000000)}; print(json.dumps({'bg':im.getpixel((0,0)),'accent':(212,255,63) in colours}))",
+              ],
+              { input: png, encoding: 'utf8' },
+            ),
+          ) as { bg: number[]; accent: boolean };
+          expect(colours.bg).toEqual([22, 23, 21]);
+          expect(colours.accent).toBe(true);
+        }
+        expect(cards[`${payload.kind}:og`]).not.toBe(
+          cards[`${payload.kind}:3x2`],
+        );
       }
-      expect(cards[0].equals(cards[1])).toBe(false);
-      expect(cards[0].equals(cards[2])).toBe(false);
+      expect(cards['cast:3x2']).not.toBe(cards['profile:3x2']);
+      expect(cards['cast:3x2']).not.toBe(cards['look:3x2']);
+      expect(cards['profile:3x2']).not.toBe(cards['look:3x2']);
     },
     60_000,
   );
 
   it('refuses a card that is not 1200x630', async () => {
     const render = createCardRenderer({
-      pythonPath: 'python3',
+      pythonPath: PYTHON,
       scriptPath: path.join(webRoot, 'server', 'unfurl', 'cards.mjs'),
       mascotPath: path.join(webRoot, 'public', 'fiddy-mark-poster.png'),
     }).render;

@@ -56,6 +56,16 @@ const webRoot = path.resolve(__dirname, '../..');
 const shell = readFileSync(path.join(webRoot, 'index.html'), 'utf8');
 const ORIGIN = 'https://fiddy.fun';
 
+const miniAppEmbed = (html: string) => {
+  const content = /<meta\s+name="fc:miniapp"\s+content='([^']*)'/.exec(
+    html,
+  )?.[1];
+  return JSON.parse(content ?? 'null') as {
+    imageUrl: string;
+    button: { title: string; action: { url: string } };
+  };
+};
+
 const store = () =>
   createLookStore({ dir: mkdtempSync(path.join(os.tmpdir(), 'fiddy-looks-')) });
 
@@ -317,6 +327,13 @@ describe('the page a look link unfurls as', () => {
 
     expect(answer.status).toBe(200);
     expect(answer.headers['x-unfurl']).toBe('page:look');
+    expect(answer.headers['cache-control']).toBe(
+      'public, max-age=300, no-transform',
+    );
+    const embed = miniAppEmbed(html);
+    expect(embed.imageUrl).toBe(`${ORIGIN}/unfurl/cards/look/${id}.3x2.png`);
+    expect(embed.button.title).toBe('Open this look in fiddy');
+    expect(embed.button.action.url).toBe(`${ORIGIN}/look/${id}`);
     expect(html).toContain('<title>Mossy — a look for Fiddy</title>');
     expect(html).toContain(`og:url" content="${ORIGIN}/look/${id}"`);
     expect(html).toContain(`/unfurl/cards/look/${id}.png`);
@@ -387,6 +404,26 @@ describe('the card a look unfurls as', () => {
       '#b8ff3f',
     );
     expect((rendered[0].palette as Record<string, string>).bg).toBe('#101418');
+  });
+
+  it('draws the look again at 1200x800 for its mini-app card', async () => {
+    const rendered: Record<string, unknown>[] = [];
+    const looks = store();
+    const { id } = (await looks.put(
+      JSON.stringify(cleanLookOnHost(A_LOOK)),
+    )) as { id: string };
+    const answer = await ask(
+      { method: 'GET', path: `/unfurl/cards/look/${id}.3x2.png` },
+      {
+        looks,
+        renderCard: async (payload: Record<string, unknown>) => {
+          rendered.push(payload);
+          return Buffer.from('1200x800');
+        },
+      },
+    );
+    expect(answer.headers['x-unfurl']).toBe('card:look');
+    expect(rendered[0]).toMatchObject({ kind: 'look', id, aspect: '3x2' });
   });
 
   it('falls back to the site card for a look nobody stored, and says why', async () => {

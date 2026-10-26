@@ -23,7 +23,10 @@ import { cardUrl, pageTags, renderPageHtml } from './shellMeta.mjs';
 import { castPage, lookPage, profilePage } from './pages.mjs';
 import { lookFacts, shareableLook } from './looks.mjs';
 import { CARD_HEIGHT, CARD_WIDTH } from './cards.mjs';
-import { createRateLimiter, translationRefusal } from '../translate/translate.mjs';
+import {
+  createRateLimiter,
+  translationRefusal,
+} from '../translate/translate.mjs';
 
 const HTML_TTL_MS = 5 * 60 * 1000;
 const MISS_TTL_MS = 30 * 1000;
@@ -188,8 +191,8 @@ export const createUnfurlHandler = ({
    * refuses on the cards now says whether the reader, the renderer or neither
    * was at fault.
    */
-  const card = async (kind, id, buildPayload) => {
-    const key = `${kind}:${id}`;
+  const card = async (kind, id, buildPayload, aspect = 'og') => {
+    const key = `${kind}:${id}${aspect === '3x2' ? ':3x2' : ''}`;
     const entry = await cached(cardCache, key, cardTtlMs, async () => {
       let payload;
       try {
@@ -212,7 +215,13 @@ export const createUnfurlHandler = ({
       const attempts = [];
       for (let attempt = 1; attempt <= CARD_ATTEMPTS; attempt += 1) {
         try {
-          return { ok: true, png: await renderCard(payload), attempt };
+          return {
+            ok: true,
+            png: await renderCard(
+              aspect === '3x2' ? { ...payload, aspect: '3x2' } : payload,
+            ),
+            attempt,
+          };
         } catch (error) {
           attempts.push(error.message);
           if (attempt < CARD_ATTEMPTS) {
@@ -251,20 +260,20 @@ export const createUnfurlHandler = ({
         if (!facts) {
           return { ok: false };
         }
+        const cardId =
+          // One place, three kinds: a cast is its hash, a profile its fid, a
+          // look the id of the checked body it was stored under.
+          facts.kind === 'look'
+            ? facts.card.id
+            : facts.kind === 'cast'
+              ? facts.card.hash
+              : facts.card.fid;
         const tags = pageTags({
           ...facts,
           origin,
-          imageUrl: cardUrl(
-            origin,
-            facts.kind,
-            // One place, three kinds: a cast is its hash, a profile its fid, a
-            // look the id of the checked body it was stored under.
-            facts.kind === 'look'
-              ? facts.card.id
-              : facts.kind === 'cast'
-                ? facts.card.hash
-                : facts.card.fid,
-          ),
+          imageUrl: cardUrl(origin, facts.kind, cardId),
+          embedImageUrl: cardUrl(origin, facts.kind, cardId, true),
+          buttonTitle: `Open this ${facts.kind} in fiddy`,
         });
         return {
           ok: true,
@@ -282,7 +291,7 @@ export const createUnfurlHandler = ({
         status: 200,
         headers: {
           'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'public, max-age=300',
+          'cache-control': 'public, max-age=300, no-transform',
           'x-unfurl': `page:${entry.kind ?? 'page'}`,
         },
         body: entry.html,
@@ -292,7 +301,7 @@ export const createUnfurlHandler = ({
       status: 200,
       headers: {
         'content-type': 'text/html; charset=utf-8',
-        'cache-control': 'public, max-age=300',
+        'cache-control': 'public, max-age=300, no-transform',
         'x-unfurl': 'shell',
       },
       body: shellSource(),
@@ -303,7 +312,10 @@ export const createUnfurlHandler = ({
   // the address nginx forwarded; a caller behind a shared address shares a
   // window, which is the honest reading of a limit that cannot know better.
   const spentOnAsking = createRateLimiter({ ...translationLimits.ask, now });
-  const spentOnLooking = createRateLimiter({ ...translationLimits.lookup, now });
+  const spentOnLooking = createRateLimiter({
+    ...translationLimits.lookup,
+    now,
+  });
 
   /** A refused ask, in the app's own voice, whatever went wrong inside. */
   const translationAnswer = (error) => {
@@ -340,7 +352,11 @@ export const createUnfurlHandler = ({
       // (capped) so this stays testable without a socket.
       // (`segments` is the path's parts after the leading slash: `/look` is
       // one part, `/look/<id>` is two.)
-      if (method === 'POST' && segments[0] === 'look' && segments.length === 1) {
+      if (
+        method === 'POST' &&
+        segments[0] === 'look' &&
+        segments.length === 1
+      ) {
         if (!looks) {
           return json(503, {
             error: "Fiddy can't save looks on this host right now.",
@@ -368,7 +384,11 @@ export const createUnfurlHandler = ({
       // cast is in another language and asks here; the cast's words are read
       // FROM THE NODE by this service, translated once per language and kept,
       // so the answer is the same for every reader afterwards.
-      if (segments[0] === 'api' && segments.length === 2 && (segments[1] === 'translate' || segments[1] === 'translations')) {
+      if (
+        segments[0] === 'api' &&
+        segments.length === 2 &&
+        (segments[1] === 'translate' || segments[1] === 'translations')
+      ) {
         const one = segments[1] === 'translate';
         // Whether translating is set up on THIS host. The browser asks before
         // it draws anything: a host with no model key and a self-hosted copy
@@ -527,35 +547,50 @@ export const createUnfurlHandler = ({
         segments[3]
       ) {
         const kind = segments[2];
-        const id = decodeURIComponent(segments[3].replace(/\.png$/i, ''));
+        const match = /^(.*?)(\.3x2)?\.png$/i.exec(segments[3]);
+        const id = decodeURIComponent(match?.[1] ?? segments[3]);
+        const aspect = match?.[2] ? '3x2' : 'og';
         if (kind === 'cast') {
-          return card('cast', id.toLowerCase(), () =>
-            reader.cast(id).then((facts) => {
-              if (!facts) {
-                throw new Error('that cast could not be read');
-              }
-              return castPage({ origin, hash: id, ...facts }).card;
-            }),
+          return card(
+            'cast',
+            id.toLowerCase(),
+            () =>
+              reader.cast(id).then((facts) => {
+                if (!facts) {
+                  throw new Error('that cast could not be read');
+                }
+                return castPage({ origin, hash: id, ...facts }).card;
+              }),
+            aspect,
           );
         }
         if (kind === 'profile') {
-          return card('profile', id, () =>
-            reader.profile(id).then((facts) => {
-              if (!facts) {
-                throw new Error('that profile could not be read');
-              }
-              return profilePage({ origin, fid: id, ...facts }).card;
-            }),
+          return card(
+            'profile',
+            id,
+            () =>
+              reader.profile(id).then((facts) => {
+                if (!facts) {
+                  throw new Error('that profile could not be read');
+                }
+                return profilePage({ origin, fid: id, ...facts }).card;
+              }),
+            aspect,
           );
         }
         if (kind === 'look') {
-          return card('look', id, async () => {
-            const look = looks ? await looks.get(id) : undefined;
-            if (!look) {
-              throw new Error('that look is not stored here');
-            }
-            return { kind: 'look', ...lookFacts({ id, look }) };
-          });
+          return card(
+            'look',
+            id,
+            async () => {
+              const look = looks ? await looks.get(id) : undefined;
+              if (!look) {
+                throw new Error('that look is not stored here');
+              }
+              return { kind: 'look', ...lookFacts({ id, look }) };
+            },
+            aspect,
+          );
         }
       }
 
@@ -593,7 +628,7 @@ export const createUnfurlHandler = ({
           status: 200,
           headers: {
             'content-type': 'text/html; charset=utf-8',
-            'cache-control': 'public, max-age=300',
+            'cache-control': 'public, max-age=300, no-transform',
             'x-unfurl': 'shell',
           },
           body: shellSource(),

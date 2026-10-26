@@ -28,7 +28,7 @@ location = /client {                 # the README/SPEC/bin-fiddy link target: 20
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
     add_header Content-Security-Policy "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'" always;
-    add_header Cache-Control "public, max-age=300" always;
+    add_header Cache-Control "public, max-age=300, no-transform" always;
 }
 location ^~ /client/ {               # directory form kept for any future assets
     alias /var/www/fiddy-client/;

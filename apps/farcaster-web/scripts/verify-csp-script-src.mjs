@@ -20,14 +20,15 @@
 // WHAT IT ASSERTS
 //   1. the served HTML carries no inline <script> (an element with no src)
 //   2. the served HTML carries no inline event-handler attribute (on*=…)
-//   3. script-src is 'self' plus the beacon host only — no 'unsafe-inline',
+//   3. script-src is exactly 'self' — no beacon host, no 'unsafe-inline',
 //      no 'unsafe-eval'
 //   4. the browser actually fetches the shell bootstrap (a same-origin classic
 //      script, 200), so the theme is the document's own to set
 //   5. a real load raises no CSP violation for the page's OWN script (nothing
-//      inline, nothing same-origin refused) and none for the beacon
+//      inline, nothing same-origin refused)
 //   6. everything the load still refuses is on the documented pre-existing
-//      list (Privy/app `eval`, one `wasm-eval`, PostHog's placeholder config) —
+//      list (Privy/app `eval`, one `wasm-eval`, PostHog's placeholder config;
+//      the deliberately injected local beacon is expected to be refused) —
 //      a refusal that is not on that list fails the check, so this cannot pass
 //      by being quiet about a new one
 //   7. with the app bundle blocked — so only the document itself can run — the
@@ -59,10 +60,9 @@ const CSP = arg('csp', null);
 const WITH_BEACON = argv.includes('--beacon');
 const TARGET = arg('target', LOCAL_DIR ? null : 'https://fiddy.fun');
 
-// Cloudflare's zone injects this into HTML at the edge (measured 2026-10-21: on
-// /, /preview/ and /farcaster for a browser-like request, absent for curl's
-// default UA). It is a third-party script, so it needs a deliberate CSP
-// allowance — that is the decision this probe checks is written down.
+// Cloudflare used to inject this into HTML at the edge. HTML now carries
+// no-transform, so the live page must not contain or request it. --beacon
+// injects it locally on purpose and requires script-src 'self' to refuse it.
 const BEACON_HOST = 'https://static.cloudflareinsights.com';
 const BEACON_TAG =
   '<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon=\'{"version":"2024.11.0","token":"412e3d7cd3fe4c678fac4ea3306a6950","r":1,"spa":2}\' crossorigin="anonymous"></script>';
@@ -73,9 +73,18 @@ const BEACON_TAG =
 // hosted-call and cryptography gaps docs/CLIENT-RELEASE.md already lists); they
 // are here so that a NEW refusal cannot hide among them.
 const PREEXISTING_BLOCKED = [
-  { why: "the app's own eval (no 'unsafe-eval' in the CSP, by design)", match: (b) => b === 'eval' },
-  { why: "a wasm compile (no 'wasm-unsafe-eval'; pre-existing, measured)", match: (b) => b === 'wasm-eval' },
-  { why: 'PostHog with the fork\'s REPLACE_ME key', match: (b) => b.includes('ph.neynar.com') },
+  {
+    why: "the app's own eval (no 'unsafe-eval' in the CSP, by design)",
+    match: (b) => b === 'eval',
+  },
+  {
+    why: "a wasm compile (no 'wasm-unsafe-eval'; pre-existing, measured)",
+    match: (b) => b === 'wasm-eval',
+  },
+  {
+    why: "PostHog with the fork's REPLACE_ME key",
+    match: (b) => b.includes('ph.neynar.com'),
+  },
 ];
 
 const MIME = {
@@ -112,9 +121,7 @@ const serve = (dir) =>
       let body = fs.readFileSync(file);
       const type = MIME[path.extname(file)] ?? 'application/octet-stream';
       if (type.startsWith('text/html') && WITH_BEACON) {
-        body = body
-          .toString('utf8')
-          .replace('</body>', `${BEACON_TAG}</body>`);
+        body = body.toString('utf8').replace('</body>', `${BEACON_TAG}</body>`);
       }
       const headers = {
         'content-type': type,
@@ -144,9 +151,9 @@ const inlineScripts = (html) => {
 /** Inline event handlers: also inline script, also blocked without it. */
 const inlineHandlers = (html) => {
   const stripped = html.replace(/<!--[\s\S]*?-->/g, '');
-  return [...stripped.matchAll(/<([a-z][a-z0-9]*)\b[^>]*\son([a-z]+)\s*=/gi)].map(
-    (m) => `on${m[2]} on <${m[1]}>`,
-  );
+  return [
+    ...stripped.matchAll(/<([a-z][a-z0-9]*)\b[^>]*\son([a-z]+)\s*=/gi),
+  ].map((m) => `on${m[2]} on <${m[1]}>`);
 };
 
 const scriptSrcOf = (csp) => {
@@ -207,7 +214,14 @@ const load = async (ctx, url, { blockBundle = false, theme = null } = {}) => {
     pageErrors.push(`navigation: ${e}`);
   });
   const violations = await page.evaluate(() => window.__cspViolations ?? []);
-  return { page, violations, consoleErrors, pageErrors, beaconRequests, served };
+  return {
+    page,
+    violations,
+    consoleErrors,
+    pageErrors,
+    beaconRequests,
+    served,
+  };
 };
 
 let origin = TARGET;
@@ -232,7 +246,8 @@ const run = async () => {
       headers: {
         'user-agent':
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'accept-language': 'en-US,en;q=0.9',
       },
     });
@@ -247,28 +262,30 @@ const run = async () => {
   record(
     '1. no inline <script> in the served shell',
     inl.length === 0,
-    inl.length ? `found ${inl.length}: ${inl.join(' ').slice(0, 120)}` : 'every script carries src=',
+    inl.length
+      ? `found ${inl.length}: ${inl.join(' ').slice(0, 120)}`
+      : 'every script carries src=',
   );
   const handlers = inlineHandlers(servedHtml);
   record(
     '2. no inline event-handler attribute in the served shell',
     handlers.length === 0,
-    handlers.length ? `found ${handlers.length}: ${handlers.slice(0, 4).join(', ')}` : 'none',
+    handlers.length
+      ? `found ${handlers.length}: ${handlers.slice(0, 4).join(', ')}`
+      : 'none',
   );
   const scriptSrc = scriptSrcOf(servedCsp);
-  const beaconAllowed = (scriptSrc ?? '').includes('cloudflareinsights.com');
   const tokens = (scriptSrc ?? '').split(/\s+/).filter(Boolean);
   record(
-    "3. script-src is 'self' + the beacon host, with no unsafe-inline/unsafe-eval",
-    tokens.length > 0 &&
-      tokens.includes("'self'") &&
-      tokens.every((t) => t === "'self'" || t.startsWith('https://')) &&
-      !tokens.some((t) => t.includes('unsafe-')),
+    "3. script-src is exactly 'self', with no beacon host or unsafe-inline/unsafe-eval",
+    tokens.length === 1 && tokens[0] === "'self'",
     `script-src${scriptSrc ?? ' (absent)'}`,
   );
 
   const browser = await chromium.launch({ channel: 'chrome' });
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const ctx = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+  });
 
   console.log('\n── a real load of it, in a real browser ──');
   const full = await load(ctx, origin);
@@ -286,20 +303,24 @@ const run = async () => {
       v.blocked.startsWith(ownOrigin) ||
       v.blocked.startsWith('about:'),
   );
-  const refusedBeacon = full.violations.filter((v) => v.blocked.startsWith(BEACON_HOST));
+  const refusedBeacon = full.violations.filter((v) =>
+    v.blocked.startsWith(BEACON_HOST),
+  );
   record(
     "5. nothing the page does itself is refused ('unsafe-inline' is gone, and the shell still runs)",
-    refusedOurScript.length === 0 && refusedBeacon.length === 0,
-    refusedOurScript.length || refusedBeacon.length
-      ? [...refusedOurScript, ...refusedBeacon]
+    refusedOurScript.length === 0,
+    refusedOurScript.length
+      ? refusedOurScript
           .map((v) => `${v.directive} <- ${v.blocked}`)
           .join(' | ')
           .slice(0, 240)
-      : 'no inline/same-origin refusal, no beacon refusal',
+      : 'no inline or same-origin refusal',
   );
 
   const unexplained = full.violations.filter(
-    (v) => !PREEXISTING_BLOCKED.some((p) => p.match(v.blocked)),
+    (v) =>
+      !PREEXISTING_BLOCKED.some((p) => p.match(v.blocked)) &&
+      !(WITH_BEACON && v.blocked.startsWith(BEACON_HOST)),
   );
   const counts = {};
   for (const v of full.violations) {
@@ -314,24 +335,32 @@ const run = async () => {
       .join(' | ')
       .slice(0, 300) || 'none',
   );
-  if (!LOCAL_DIR) {
-    record(
-      "6b. Cloudflare's beacon is fetched and not refused",
-      beaconAllowed && full.beaconRequests.length > 0 && refusedBeacon.length === 0,
-      `${full.beaconRequests.length} request(s) to the beacon, ${
-        beaconAllowed ? 'allowed by script-src' : 'NOT in script-src'
-      }`,
-    );
-  }
-  const cspConsole = full.consoleErrors.filter((c) => /Content Security Policy/.test(c));
+  const beaconProof = WITH_BEACON
+    ? refusedBeacon.length > 0
+    : !servedHtml.includes(BEACON_HOST) &&
+      full.beaconRequests.length === 0 &&
+      refusedBeacon.length === 0;
+  record(
+    "6b. Cloudflare's beacon is absent, or refused when injected locally",
+    beaconProof,
+    `${full.beaconRequests.length} request(s), ${refusedBeacon.length} refusal(s), in served HTML: ${servedHtml.includes(BEACON_HOST)}`,
+  );
+  const cspConsole = full.consoleErrors.filter((c) =>
+    /Content Security Policy/.test(c),
+  );
   const cspConsoleUnexplained = cspConsole.filter(
-    (c) => !/ph\.neynar\.com/.test(c) && !c.startsWith(`Loading the script '${BEACON_HOST}`),
+    (c) =>
+      !/ph\.neynar\.com/.test(c) &&
+      !c.startsWith(`Loading the script '${BEACON_HOST}`),
   );
   if (cspConsoleUnexplained.length || full.pageErrors.length) {
     record(
       '6c. no NEW console error from a refusal',
       false,
-      [...cspConsoleUnexplained, ...full.pageErrors].slice(0, 3).join(' | ').slice(0, 240),
+      [...cspConsoleUnexplained, ...full.pageErrors]
+        .slice(0, 3)
+        .join(' | ')
+        .slice(0, 240),
     );
   } else {
     record(
@@ -353,7 +382,7 @@ const run = async () => {
   const dark = await load(ctx, origin, { blockBundle: true });
   const d = await groundOf(dark.page);
   record(
-    '7. the document alone paints the dark shell (no flash of the fork\'s light ground)',
+    "7. the document alone paints the dark shell (no flash of the fork's light ground)",
     d.cls.split(/\s+/).includes('dark') && d.ground === 'rgb(22, 23, 21)',
     `html.class="${d.cls}" data-theme=${d.theme} ground=${d.ground}`,
   );
