@@ -1,7 +1,7 @@
 import { HelmetProvider } from '@dr.pogodin/react-helmet';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BlockedDomainsProvider, PubSubProvider } from 'farcaster-client-hooks';
-import React, { FC, ReactNode, Suspense, useEffect } from 'react';
+import React, { FC, lazy, ReactNode, Suspense, useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { WagmiProvider } from 'wagmi';
 
@@ -31,8 +31,16 @@ import { PrivyRoot } from '~/providers/PrivyRoot';
 import { wagmiConfig } from '~/utils/wagmi';
 
 import { FullScreenErrorBoundary } from './errors/FullScreenErrorBoundary';
-import { MiniAppAutoSignIn } from './session/MiniAppAutoSignIn';
 import { SnapWindowErrorListenerInstaller } from './SnapWindowErrorListenerInstaller';
+
+// Keep the host sign-in/session seam out of the ordinary browser's entry
+// chunk. The host SDK was already lazy; this makes its only eager consumer
+// lazy too, without letting the rest of the app suspend behind it.
+const MiniAppAutoSignIn = lazy(() =>
+  import('./session/MiniAppAutoSignIn').then((module) => ({
+    default: module.MiniAppAutoSignIn,
+  })),
+);
 
 const AuthGatedBlockedDomainsProvider: FC<{ children: ReactNode }> = ({
   children,
@@ -171,7 +179,11 @@ const App: FC = () => {
                                                 instead of showing a QR code the
                                                 phone could not scan. Does nothing
                                                 anywhere else. */}
-                                            <MiniAppAutoSignIn />
+                                            <Suspense
+                                              fallback={<ShellSkeleton />}
+                                            >
+                                              <MiniAppAutoSignIn />
+                                            </Suspense>
                                             <InteractedSnapUrlsWebProvider>
                                               <PubSubProvider>
                                                 <VideoPlayStatusProvider>
