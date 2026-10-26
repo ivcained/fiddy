@@ -9,10 +9,14 @@ if __package__ in (None, ""):
 
 def status_text(status):
     phase = status.get("phase", "unavailable")
+    if status.get("uptime"):
+        container = "Up " + status["uptime"]
+    else:
+        container = status.get("container") or "not running / not found"
     lines = [
         "STATE     " + phase.upper(),
         "NETWORK   " + str(status.get("network", "snapchain")),
-        "CONTAINER " + (status.get("container") or "not running / not found"),
+        "CONTAINER " + container,
     ]
     if status.get("version"):
         lines.append("VERSION   " + str(status["version"]))
@@ -21,15 +25,30 @@ def status_text(status):
         lines.append("SNAPSHOT  chunk %(chunk)s / %(total)s  (%(percent)s%%)" % snapshot)
     if status.get("shards"):
         lines.append("")
-        lines.append("SHARD     HEIGHT             LAST BLOCK")
+        lines.append("SHARD     HEIGHT             SYNC        BEHIND")
         for shard in status["shards"]:
-            delay = shard.get("block_delay_seconds", 0)
-            freshness = "%ss ago" % delay if isinstance(delay, (int, float)) else "not reported"
-            lines.append("%-9s %-18s %s" % (shard.get("id"), shard.get("max_height"), freshness))
+            progress = shard.get("sync_percent")
+            progress_text = ("%.1f%%" % progress) if progress is not None else "---"
+            lines.append("%-9s %-18s %-11s %s" % (shard.get("id"), shard.get("max_height"), progress_text, humanize_delay(shard.get("block_delay_seconds"))))
     if status.get("notice"):
         lines.extend(["", status["notice"]])
     lines.extend(["", "Read directly from the node and Docker. No agent interpretation."])
     return "\n".join(lines)
+
+
+def humanize_delay(seconds):
+    if not isinstance(seconds, (int, float)) or seconds != seconds:
+        return "not reported"
+    total = int(seconds)
+    if total < 90:
+        return "%ds ago" % total
+    minutes = total // 60
+    if minutes < 90:
+        return "%dm ago" % minutes
+    hours = minutes // 60
+    if hours < 72:
+        return "%dh ago" % hours
+    return "%dd ago" % (hours // 24)
 
 
 def settings_text(settings):

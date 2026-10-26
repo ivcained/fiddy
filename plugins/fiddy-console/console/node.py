@@ -7,6 +7,7 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
 
 TARGET_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+$")
@@ -155,6 +156,40 @@ class NodeManager:
         code, output, _ = self.executor.run("docker ps --filter name=snapchain-snapchain-1 --format '{{.Status}}'", timeout=12)
         return output.strip() if code == 0 else ""
 
+    def _docker_started(self):
+        code, output, _ = self.executor.run("docker inspect --format '{{.State.StartedAt}} {{.RestartCount}}' snapchain-snapchain-1", timeout=12)
+        if code != 0 or not output.strip():
+            return None
+        return output.split()
+
+    @staticmethod
+    def _humanize_uptime(started_iso):
+        try:
+            cleaned = re.sub(r"(\.\d{6})\d+", r"\1", started_iso.replace("Z", "+00:00"))
+            started = datetime.fromisoformat(cleaned)
+        except ValueError:
+            return None
+        minutes = int((datetime.now(timezone.utc) - started).total_seconds() // 60)
+        if minutes < 0:
+            return None
+        if minutes < 60:
+            return "%dm" % minutes
+        if minutes < 60 * 48:
+            return "%dh %dm" % (minutes // 60, minutes % 60)
+        return "%dd %dh" % (minutes // 1440, (minutes % 1440) // 60)
+
+    def _network_tips(self):
+        # The network tip is not in the HTTP API; the sync log lines carry it.
+        code, output, _ = self.executor.run("docker logs --tail 4000 snapchain-snapchain-1 2>&1 | grep height.tip | tail -60", timeout=15)
+        tips = {}
+        if code != 0:
+            return tips
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+        for match in re.finditer(r"height\.tip=\[(\d+)\]\s+(\d+)", plain):
+            shard, height = int(match.group(1)), int(match.group(2))
+            tips[shard] = max(tips.get(shard, 0), height)
+        return tips
+
     def _bootstrap(self):
         code, output, _ = self.executor.run("docker logs --tail 2500 snapchain-snapchain-1 2>&1", timeout=15)
         chunks = CHUNK_PATTERN.findall(output) if code == 0 else []
@@ -188,17 +223,27 @@ class NodeManager:
         result["phase"] = "syncing"
         version = info.get("version", {})
         result["version"] = version.get("string") if isinstance(version, dict) else str(version)
+        started = self._docker_started()
+        if started:
+            uptime = self._humanize_uptime(started[0])
+            if uptime:
+                result["uptime"] = "%s (restarts: %s)" % (uptime, started[1] if len(started) > 1 else "0")
         shards = info.get("shardInfos") or info.get("shardInfo") or []
         if isinstance(shards, dict):
             shards = list(shards.values())
+        tips = self._network_tips()
         for shard in shards if isinstance(shards, list) else []:
             if not isinstance(shard, dict):
                 continue
-            result["shards"].append({
+            height = shard.get("maxHeight", shard.get("max_height", 0))
+            entry = {
                 "id": shard.get("shardId", shard.get("shard_id", "?")),
-                "max_height": shard.get("maxHeight", shard.get("max_height", 0)),
+                "max_height": height,
                 "block_delay_seconds": shard.get("blockDelay", shard.get("block_delay", 0)),
-            })
+            }
+            tip = tips.get(int(entry["id"])) if isinstance(entry["id"], int) else None
+            entry["sync_percent"] = round(min(100, height * 100 / tip), 1) if tip and height else None
+            result["shards"].append(entry)
         return result
 
     def logs(self):
