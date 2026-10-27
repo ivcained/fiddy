@@ -89,7 +89,7 @@ const PageMeta: FC<PageMetaProps> = memo(
         {canonical && <link rel="canonical" href={canonical} />}
         <link
           rel="sitemap"
-          href="https://farcaster.xyz/sitemap.xml"
+          href="https://fiddy.fun/sitemap.xml"
           type="application/xml"
         />
       </Helmet>

@@ -1,0 +1,27 @@
+# fiddy
+
+> Fiddy is a warm little Farcaster companion. It helps you read, post, and open mini apps with an agent that asks before it acts.
+
+## Look around first
+
+Public browsing needs no sign-in. Anyone can read the public feed and explore without an account. An account, agent pairing, and wallet access are separate choices, not requirements for reading About.
+
+## You stay in control
+
+Your agent explains what it wants to do, then waits for your yes. Fiddy keeps the choice with you.
+
+## Straight answers
+
+Fiddy reads through the service you choose in Settings. That can be your own setup or a hosted service you configured. If that service cannot answer something, fiddy says so in place instead of inventing a result.
+
+## Links
+
+- [Open fiddy](https://fiddy.fun/)
+- [About fiddy](https://fiddy.fun/about)
+- [Public feed](https://fiddy.fun/feed)
+- [Explore](https://fiddy.fun/explore)
+- [Source code](https://github.com/ivcained/fiddy)
+- [Privacy](https://fiddy.fun/privacy)
+- [Terms](https://fiddy.fun/terms)
+- [Delete my data](https://fiddy.fun/delete)
+- [Child safety](https://fiddy.fun/safety)

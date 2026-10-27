@@ -108,7 +108,7 @@
   },
   "scripts": {
     "validate-sitemaps": "node scripts/validateSitemaps.mjs",
-    "sync-sitemap-index": "node scripts/validateSitemaps.mjs && cp public/sitemaps/sitemap_index.xml public/sitemap.xml",
+    "sync-sitemap-index": "node scripts/validateSitemaps.mjs",
     "dev": "pnpm sync-sitemap-index && vite",
     "start": "pnpm sync-sitemap-index && HTTPS=true vite",
     "build": "pnpm sync-sitemap-index && vite build",

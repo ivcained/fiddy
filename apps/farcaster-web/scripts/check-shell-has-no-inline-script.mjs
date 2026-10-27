@@ -26,18 +26,24 @@ const html = fs.readFileSync(file, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
 
 const inlineScripts = [...html.matchAll(/<script\b([^>]*)>/gi)]
   .filter((m) => !/\bsrc\s*=/i.test(m[1]))
+  // JSON-LD is a data block, not executable script. It does not need a CSP
+  // exception; executable inline script and inline handlers still fail below.
+  .filter((m) => !/\btype\s*=\s*(["'])application\/ld\+json\1/i.test(m[1]))
   .map((m) => `<script${m[1]}>`);
 const inlineHandlers = [
   ...html.matchAll(/<([a-z][a-z0-9]*)\b[^>]*\son([a-z]+)\s*=/gi),
 ].map((m) => `on${m[2]} on <${m[1]}>`);
 
 if (inlineScripts.length === 0 && inlineHandlers.length === 0) {
-  console.log(`  ${name}: no inline script, no inline handler — script-src 'self' is enough`);
+  console.log(
+    `  ${name}: no inline script, no inline handler — script-src 'self' is enough`,
+  );
   process.exit(0);
 }
 
 console.error(`  ${name} would be refused by script-src 'self':`);
-for (const s of inlineScripts) console.error(`    inline <script>: ${s.slice(0, 120)}`);
+for (const s of inlineScripts)
+  console.error(`    inline <script>: ${s.slice(0, 120)}`);
 for (const h of inlineHandlers) console.error(`    inline handler:  ${h}`);
 console.error(
   '    Move it to a same-origin file under public/ and reference it with src=.',

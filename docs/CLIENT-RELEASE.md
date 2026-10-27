@@ -16,6 +16,8 @@ embed renders as and the provider the client reads through, neither of which the
 | --- | --- | --- |
 | `/` | the node-backed client | `releases/a0e53d5…/web/` (this release) |
 | `/assets/*` | the client's hashed bundle | same |
+| `/about` | the crawler-readable, no-JavaScript About page | `releases/<sha>/web/about.html`; exact nginx route, never the SPA fallback |
+| `/robots.txt`, `/sitemap.xml`, `/llms.txt` | Fiddy-owned crawler policy and discovery documents | static files from `apps/farcaster-web/public/`, preserved byte-for-byte by assembly |
 | `/shell-bootstrap.js` | the shell's theme bootstrap — a same-origin classic script | same; this file is why `script-src` can be `'self'` (see the CSP section) |
 | `/preview/` | the read-only preview, byte-identical to what used to be at `/` | `releases/a0e53d5…/web/preview/` |
 | `/farcaster` | the same preview page (the miniapp's launch URL is unchanged) | `releases/a0e53d5…/web/preview/index.html` |
@@ -131,7 +133,11 @@ What it does, and why each step is not optional:
    `index.html` would be refused in the browser after the release). A build that
    needs one does not ship
    (`apps/farcaster-web/scripts/check-shell-has-no-inline-script.mjs`, taken from
-   the frozen tree). Step 3 also has to pass
+   the frozen tree). Data-only `application/ld+json` is allowed and parsed by
+   the discovery tests; executable inline script and handlers are still refused.
+   Step 3 also runs `scripts/validateSitemaps.mjs` over the built tree: only
+   canonical fiddy.fun public routes are allowed, and every static page named
+   by the sitemap must exist. Step 3 also has to pass
    `apps/farcaster-web/scripts/check-manifest.mjs` over the built tree: the
    app-list manifest must be signed, spec-sized (200×200 splash, read from the
    PNG's own header), describe the same product the shell unfurls as, and name a
@@ -143,7 +149,9 @@ What it does, and why each step is not optional:
    path, so a path derived from a served shell (which can belong to another
    release) is not allowed to name it.
 4. **Assemble** `web/` + `server/` + `web/preview/` as described above.
-   Sourcemaps are left out: they are 44 MB of source for a public host.
+   Sourcemaps are left out: they are 44 MB of source for a public host. The
+   reviewed `robots.txt` is compared with the built file and never rewritten;
+   older releases erased its sitemap declaration and private-surface rules here.
 5. **Upload and extract** into a new immutable `releases/<sha>/`; the running
    release is never written to.
 6. **Disk gate on the VPS** — grep the extracted tree, and check the vhost still
@@ -158,7 +166,9 @@ What it does, and why each step is not optional:
    this build produced from the host **by IP** (`--resolve fiddy.fun:443:<origin
    IP>`; HTTPS with SNI, so it is the same vhost a browser reaches, with the CDN
    out of the path), check the served `index.html` for inline script, and compare
-   both files byte-for-byte (`cmp`) with the build. Then one **cache-busted**
+   both files byte-for-byte (`cmp`) with the build. The same static-byte check
+   covers `/about`, `/robots.txt`, `/sitemap.xml` and `/llms.txt`. Then one
+   **cache-busted**
    fetch through the edge (`?cb=<sha>` — a key no earlier release can have
    populated) as a second gate, and the **plain** edge fetch as a *report* only.
    A CDN in front of the host holds copies of URLs whose names do not change
@@ -213,7 +223,7 @@ that make these surfaces exist inside the **served** bundle
 (`account-menu-sign-out`, `fiddy-account-menu-tabbar`) — in the `.js`, never in
 the `.js.map` beside it.
 
-nginx is **not** touched by the script. The client needs four locations that
+nginx is **not** touched by the script. The client needs five locations that
 exist now and are checked in step 6:
 
 - `location ^~ /snapchain-api/` → `https://haatz.quilibrium.com/` with
@@ -232,6 +242,9 @@ exist now and are checked in step 6:
   when the shell changes, documented below;
 - `location ^~ /preview/` and `location = /farcaster` → the preview page, under
   the preview's own stricter CSP.
+- `location = /about { try_files /about.html =404; }` → the static About page.
+  Exact match keeps the extensionless route out of the SPA fallback; its only
+  subresources are the same-origin stylesheet and brand images.
 
 The client's own routes are `/~/together` and `/~/spaces`, so nothing the SPA
 serves lives under `/spaces` — the API prefix does not shadow a page.

@@ -343,7 +343,9 @@ describe('the page a look link unfurls as', () => {
     // …and nothing was made inline: the host serves `script-src 'self'`.
     const withoutComments = html.replace(/<!--[\s\S]*?-->/g, '');
     const inline = [...withoutComments.matchAll(/<script\b([^>]*)>/gi)].filter(
-      (match) => !/\bsrc\s*=/i.test(match[1]),
+      (match) =>
+        !/\bsrc\s*=/i.test(match[1]) &&
+        !/\btype\s*=\s*(["'])application\/ld\+json\1/i.test(match[1]),
     );
     expect(inline).toHaveLength(0);
   });

@@ -67,6 +67,20 @@
     <meta name="twitter:image" content="https://fiddy.fun/fiddy-share-card.png" />
     <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://fiddy.fun/fiddy-embed.png","button":{"title":"Open fiddy","action":{"type":"launch_miniapp","name":"fiddy","url":"https://fiddy.fun/","splashImageUrl":"https://fiddy.fun/fiddy-splash.png","splashBackgroundColor":"#161715"}}}' />
     <title>fiddy — a Farcaster client with an agent</title>
+    <!-- Structured discovery facts adapted from backmeupplz/quilcast (MIT),
+         commit 1412b9cb73a3ae0ed0c09075d0a6dd271b4875b1. Only facts verified
+         for Fiddy belong here; data-only JSON-LD needs no CSP exception. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "fiddy",
+        "url": "https://fiddy.fun/",
+        "description": "Read your feed, open mini apps, and post with a little agent that asks before it acts.",
+        "applicationCategory": "SocialNetworkingApplication",
+        "image": "https://fiddy.fun/fiddy-share-card.png"
+      }
+    </script>
     <!-- Preconnect to image CDN for faster LCP -->
     <link rel="preconnect" href="https://wrpcd.net" crossorigin />
     <!-- Fonts -->
@@ -325,7 +339,21 @@
     </style>
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <noscript>
+      <style>
+        #shell-skeleton { display: none; }
+        body { margin: 0; background: #161715; color: #eef0e8; font-family: 'SF Pro Rounded', ui-rounded, system-ui, -apple-system, sans-serif; }
+        .fiddy-noscript { box-sizing: border-box; width: min(100% - 32px, 640px); margin: 48px auto; padding: 28px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 18px; background: #1d1e1c; }
+        .fiddy-noscript h1 { margin: 0 0 14px; font-size: 30px; line-height: 1.1; }
+        .fiddy-noscript p { color: #b9beaf; font-size: 16px; line-height: 1.6; }
+        .fiddy-noscript a { color: #d4ff3f; text-underline-offset: 3px; }
+      </style>
+      <main class="fiddy-noscript">
+        <h1>You can still get to know fiddy.</h1>
+        <p>You need to enable JavaScript to run this app. <a href="/about">Read what fiddy is</a> without it.</p>
+        <p>With JavaScript on, you can <a href="/feed">look around the public feed</a> or <a href="/explore">explore</a> without an account.</p>
+      </main>
+    </noscript>
     <div id="root"></div>
     <!-- shell-skeleton:start — kept in step with ShellSkeleton.tsx by a test -->
     <div
