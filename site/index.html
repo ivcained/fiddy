@@ -278,40 +278,6 @@ details summary::marker { color: var(--lime-text); }
     </section>
   </div>
 
-  <section class="quickstart" id="quickstart" aria-labelledby="quick-title">
-    <div class="quick-heading">
-      <h2 id="quick-title">Three commands. That’s the setup.</h2>
-      <p>Run these from the cloned Fiddy repo, with <code class="inline">bin</code> on PATH.</p>
-    </div>
-    <div class="command-grid">
-      <div class="quick-command">
-        <span class="command-name">1 · Provision</span>
-        <button class="copy-command" type="button" data-copy="fiddy provision --aws" aria-label="Copy provision command">Copy</button>
-        <code>fiddy provision --aws</code>
-        <small>Create cloud compute. Use <code class="inline">--ssh you@server</code> for a box you have.</small>
-      </div>
-      <div class="quick-command">
-        <span class="command-name">2 · Node</span>
-        <button class="copy-command" type="button" data-copy="fiddy node up" aria-label="Copy node command">Copy</button>
-        <code>fiddy node up</code>
-        <small>Install and sync Snapchain. <code class="inline">--network hypersnap</code> selects the other network.</small>
-      </div>
-      <div class="quick-command">
-        <span class="command-name">3 · Client</span>
-        <button class="copy-command" type="button" data-copy="fiddy client up" aria-label="Copy client command">Copy</button>
-        <code>fiddy client up</code>
-        <small>Boot Fiddy pointed at your node.</small>
-      </div>
-    </div>
-    <div class="cloud-actions">
-      <p><strong>Need the server first?</strong> A cloud server is a recurring bill: AWS is about $285/month; GCP is about $350/month with a $300 new-user credit. New AWS accounts can wait 0-2 days for verification, so GCP is the alternative.</p>
-      <div class="cloud-buttons">
-        <a class="cloud-button aws" href="https://console.aws.amazon.com/cloudshell/home?region=us-east-1" target="_blank" rel="noopener">Open AWS CloudShell ↗</a>
-        <a class="cloud-button google" href="https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fivcained%2Ffiddy&amp;cloudshell_tutorial=docs%2FGCP-DEPLOY.md" target="_blank" rel="noopener"><img src="/client/assets/open-in-cloud-shell.svg" alt="Open in Google Cloud Shell" width="190" height="36"></a>
-      </div>
-    </div>
-  </section>
-
   <section class="status-strip" aria-label="Verified network facts">
     <div class="fact"><strong>~914M</strong><span>messages synced in our own verified full-node run</span></div>
     <div class="fact"><strong><a href="https://github.com/farcasterxyz/snapchain/releases/tag/v0.14.3" target="_blank" rel="noopener">Snapchain v0.14.3</a></strong><span>latest release, checked 25 Oct 2026</span></div>
