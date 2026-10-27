@@ -168,6 +168,7 @@ details summary::marker { color: var(--lime-text); }
 .price-row strong { font-size: 17px; }
 .price-row .price { font-size: 21px; font-weight: 750; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .price-row small { grid-column: 1 / -1; color: var(--dim); font-size: 14px; }
+.badge-cheapest { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 6px; background: var(--accent, #d4ff3f); color: #1a1c10; font-size: 11px; font-weight: 800; letter-spacing: 0.04em; vertical-align: middle; }
 .disclosure { margin-top: 20px; padding: 20px; }
 .disclosure h4 { color: var(--lime-text); font-size: 16px; margin-bottom: 6px; }
 .disclosure p { color: var(--dim); font-size: 15px; margin: 6px 0; }
@@ -370,11 +371,15 @@ details summary::marker { color: var(--lime-text); }
       <p class="dim">You pay your provider directly. Fiddy does not add a fee.</p>
       <ul class="price-ladder">
         <li class="price-row"><strong>Your own machine</strong><span class="price">Free</span><small>Use hardware you already have, if it meets the disk and memory requirements.</small></li>
+        <li class="price-row"><strong>Akash <span class="badge-cheapest">CHEAPEST</span></strong><span class="price">bid-priced</span><small>Decentralized cloud, usually the cheapest way to run a node. Your exact monthly price appears as provider bids before you accept anything. <a href="/client/akash/sdl.yaml">Download the deployment file</a> · <a href="https://github.com/ivcained/fiddy/tree/main/deploy/akash" target="_blank" rel="noopener">setup guide</a>. Ports 3381, 3382/udp and 3383 must be declared at deploy time (they cannot be added later).</small></li>
         <li class="price-row"><strong>Hetzner</strong><span class="price">~€120/mo</span><small>CCX33 with a 2 TB volume. New accounts are capped at 1024 GB volumes, fine once your quota is raised.</small></li>
         <li class="price-row"><strong>OVHcloud</strong><span class="price">~$190/mo</span><small>b3-16 with a 2 TB volume.</small></li>
         <li class="price-row"><strong>AWS</strong><span class="price">~$285/mo</span><small>The default path. Its root volume can simply be 2 TB, which is part of the price difference.</small></li>
         <li class="price-row"><strong>GCP</strong><span class="price">~$350/mo</span><small>Tested end to end by us. <a href="https://cloud.google.com/free" target="_blank" rel="noopener">$300 new-user credit</a>. Set a reminder to delete the VM.</small></li>
       </ul>
+      <div class="cloud-buttons" style="margin: 6px 0 14px">
+        <a class="cloud-button aws" href="https://github.com/ivcained/fiddy/tree/main/deploy/akash" target="_blank" rel="noopener">Deploy to Akash ↗ cheapest</a>
+      </div>
       <div class="pane disclosure">
         <h4>New AWS account? Read this first.</h4>
         <p>CloudShell can stay locked for 0-2 days during verification. GCP is the alternative, with a $300 new-user credit and about $350/month list price after credit. The same AWS one-liner also runs from any terminal after <code class="inline">aws configure</code>.</p>
