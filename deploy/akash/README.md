@@ -14,20 +14,33 @@ so no host files are needed. Built and smoke-tested on 2026-10-27: the
 container boots and starts downloading the snapshot.
 
 Rebuilds publish automatically via `.github/workflows/akash-image.yml`
-(on every change to `deploy/akash/`, or manual dispatch).
+(on every change to `deploy/akash/`, or manual dispatch). The package is public,
+so any provider can pull it.
 
-**The GHCR package must be public for providers to pull it.**
-One-time: https://github.com/users/ivcained/packages/container/fiddy-node/settings
-→ Danger Zone → Change visibility → Public.
+## Deploy, step by step
 
-## Deploy
+**The Console way (no terminal needed):**
 
-```sh
-# with the akash skill (CC/Codex/OpenCode) or the Console:
-#   deploy this SDL, then watch the bids before you accept anything
-cat deploy/akash/sdl.yaml
-```
+1. Get the deployment file: download [`sdl.yaml`](./sdl.yaml)
+   (or copy its contents). It already has the right image, ports, and storage.
+2. Open the [Akash Console](https://console.akash.network) and sign in.
+   Make sure you have credits (Console shows your balance).
+3. Create a new deployment and paste the SDL (or upload the file).
+4. Wait ~30 seconds for provider bids. **Each bid shows its monthly price.**
+   Nothing is spent until you accept one.
+5. Accept the bid you want (cheapest is fine). Your node starts.
+6. In the deployment's shell, run `fiddy-status` to watch it in plain words:
+   "downloading history, X of 5700 chunks" first, then "LIVE" with shard heights.
 
+**The agent way (CC, Codex, OpenCode):**
+
+1. Install the Akash skill: `npx skills add akash-network/akash-skill --skill akash`
+2. Tell your agent: "Deploy `deploy/akash/sdl.yaml` from
+   https://github.com/ivcained/fiddy/tree/main/deploy/akash to Akash, and show me
+   the monthly price of each bid before accepting anything."
+3. Accept a bid, then check `fiddy-status` in the deployment shell.
+
+Notes that apply either way:
 - Persistent volumes (class `beta3`, SSD): `/app/.rocks` = 2 TiB (chain state),
   `/app/.rocks.snapshot` = 1 TiB (download scratch). Both survive redeploys.
 - Ports — **declare all of these at deploy time; Akash cannot add ports to a
