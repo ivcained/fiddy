@@ -103,7 +103,7 @@ describe('Fiddy3DAvatar', () => {
       // With reduced motion, should show static thumbnail
       const img = container.querySelector('img');
       expect(img?.getAttribute('src')).toBe(
-        fiddy3DAssetUrl(789, 'thumbnail.jpg'),
+        fiddy3DAssetUrl(789, 'thumbnail.png'),
       );
     });
 
@@ -197,7 +197,7 @@ describe('Fiddy3DAvatar', () => {
 describe('Reduced motion handling', () => {
   it('does not fetch GIF when reduced motion is enabled', async () => {
     const gifUrl = fiddy3DAssetUrl(555, 'turntable.gif');
-    const thumbnailUrl = fiddy3DAssetUrl(555, 'thumbnail.jpg');
+    const thumbnailUrl = fiddy3DAssetUrl(555, 'thumbnail.png');
 
     // First call (thumbnail) returns image, second call (GIF) would return image too
     mockFetch.mockImplementation(async (url: string) => {

@@ -78,13 +78,13 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
   }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [has3D, setHas3D] = useState(false);
-    const [motionAllowed, setMotionAllowed] = useState(false);
+    const [motionAllowed, setMotionAllowed] = useState(true);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
     const targetSize = SIZE_PIXELS[size];
     const gifUrl = fiddy3DAssetUrl(fid, 'turntable.gif');
-    const thumbnailUrl = fiddy3DAssetUrl(fid, 'thumbnail.jpg');
+    const thumbnailUrl = fiddy3DAssetUrl(fid, 'thumbnail.png');
 
     // Rule 2: Check reduced motion preference BEFORE fetching
     useEffect(() => {
@@ -111,16 +111,17 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
           return;
         }
 
-        // Thumbnail exists — show it (even if we can't show GIF due to motion preference)
-        if (motionAllowed) {
+        // Thumbnail exists — determine what to show based on motion preference
+        if (!motionAllowed) {
+          // Reduced motion - use static thumbnail
+          setHas3D(true);
+        } else {
+          // Free to show animated GIF
           const gifExists = await probeImage(gifUrl, controller.signal);
           if (disposed) {
             return;
           }
           setHas3D(gifExists && thumbnailExists);
-        } else {
-          // Reduced motion - use static thumbnail
-          setHas3D(thumbnailExists);
         }
 
         setLoading(false);
@@ -176,7 +177,7 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
           show3D ? `${displayName}'s Fiddy 3D avatar` : `${displayName} avatar`
         }
       >
-        {/* Priority: 3D GIF (animated) */}
+        {/* Priority: 3D GIF (animated) - only when motion is allowed */}
         {show3D && motionAllowed && (
           <img
             src={gifUrl}
@@ -191,8 +192,8 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
           />
         )}
 
-        {/* Priority: Static thumbnail (reduced motion or failed GIF) */}
-        {showThumbnail && (
+        {/* Priority: Static thumbnail (reduced motion) */}
+        {showThumbnail && !motionAllowed && (
           <img
             src={thumbnailUrl}
             alt=""

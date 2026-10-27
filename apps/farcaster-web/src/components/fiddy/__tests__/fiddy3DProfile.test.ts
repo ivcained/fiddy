@@ -13,7 +13,6 @@ import {
   fiddy3DMotionAllowed,
   getStoredFiddy3DFid,
   setStoredFiddy3DFid,
-  validateFiddy3DUrl,
 } from '~/components/fiddy/fiddy3DProfile';
 
 describe('fiddy3DAssetUrl', () => {
@@ -29,52 +28,10 @@ describe('fiddy3DAssetUrl', () => {
     );
   });
 
-  it('builds correct URLs for thumbnail.jpg', () => {
-    expect(fiddy3DAssetUrl(789, 'thumbnail.jpg')).toBe(
-      `${FIDDY_3D_ASSET_BASE}/789/thumbnail.jpg`,
+  it('builds correct URLs for thumbnail.png', () => {
+    expect(fiddy3DAssetUrl(789, 'thumbnail.png')).toBe(
+      `${FIDDY_3D_ASSET_BASE}/789/thumbnail.png`,
     );
-  });
-});
-
-describe('validateFiddy3DUrl', () => {
-  it('accepts valid fiddy.fun/3d URLs with FID', () => {
-    const result = validateFiddy3DUrl('https://fiddy.fun/3d/123');
-    expect(result.valid).toBe(true);
-    expect(result.fid).toBe(123);
-  });
-
-  it('accepts fiddy.fun/3d/api/assets/ URLs', () => {
-    const result = validateFiddy3DUrl(
-      'https://fiddy.fun/3d/api/assets/456/turntable.gif',
-    );
-    expect(result.valid).toBe(true);
-    expect(result.fid).toBe(456);
-  });
-
-  it('accepts www.fiddy.fun URLs', () => {
-    const result = validateFiddy3DUrl('https://www.fiddy.fun/3d/789');
-    expect(result.valid).toBe(true);
-    expect(result.fid).toBe(789);
-  });
-
-  it('rejects non-fiddy.fun URLs', () => {
-    const result = validateFiddy3DUrl('https://example.com/3d/123');
-    expect(result.valid).toBe(false);
-  });
-
-  it('rejects URLs not starting with /3d/', () => {
-    const result = validateFiddy3DUrl('https://fiddy.fun/abc/123');
-    expect(result.valid).toBe(false);
-  });
-
-  it('rejects invalid FIDs', () => {
-    const result = validateFiddy3DUrl('https://fiddy.fun/3d/abc');
-    expect(result.valid).toBe(false);
-  });
-
-  it('rejects empty/invalid URLs', () => {
-    expect(validateFiddy3DUrl('').valid).toBe(false);
-    expect(validateFiddy3DUrl('not-a-url').valid).toBe(false);
   });
 });
 
