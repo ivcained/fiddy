@@ -4,6 +4,8 @@ FROM farcasterxyz/snapchain:latest
 
 WORKDIR /app
 COPY config.toml /app/config.toml
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Node data lives here; mount persistent storage at these paths.
 # /app/.rocks          chain state (2 TiB recommended)
@@ -12,4 +14,4 @@ ENV RUST_BACKTRACE=full
 
 EXPOSE 3381/tcp 3382/udp 3383/tcp
 
-ENTRYPOINT ["./snapchain", "--config-path", "config.toml"]
+ENTRYPOINT ["/app/entrypoint.sh"]

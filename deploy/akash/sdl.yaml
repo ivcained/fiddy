@@ -6,7 +6,7 @@ version: "2.0"
 
 services:
   snapchain:
-    image: ghcr.io/ivcained/fiddy-node:0.1.0
+    image:            ghcr.io/ivcained/fiddy-node:0.1.1
     expose:
       - port: 3381
         as: 80

@@ -5,7 +5,7 @@ A Snapchain read node, packaged as a container deployment: `fiddy-node` image +
 
 ## Image
 
-`ghcr.io/ivcained/fiddy-node:0.1.0` (also `:latest`). Built from
+`ghcr.io/ivcained/fiddy-node:0.1.1` (also `:latest`). Built from
 `farcasterxyz/snapchain:latest` with the read-node config baked in
 (`read_node = true`, mainnet, upstream validator sets and snapshot endpoint),
 so no host files are needed. Built and smoke-tested on 2026-10-27: the
@@ -30,8 +30,9 @@ cat deploy/akash/sdl.yaml
   `/app/.rocks.snapshot` = 1 TiB (download scratch). Both survive redeploys.
 - Ports: 3381 HTTP API (exposed as 80), 3382/udp gossip, 3383 gRPC.
 - Grafana is optional: delete that service to save a compute line; the node
-  API works without it. statsd must stay (the node exits if it cannot resolve
-  the `statsd` hostname).
+  API works without it. statsd is optional too: when no statsd service
+  exists, the entrypoint sends metrics to loopback instead of crash-looping
+  (0.1.1). Keep statsd + grafana if you want the dashboard.
 
 ## Costs — read this before accepting a lease
 
