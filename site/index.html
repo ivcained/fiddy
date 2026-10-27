@@ -371,7 +371,7 @@ details summary::marker { color: var(--lime-text); }
       <p class="dim">You pay your provider directly. Fiddy does not add a fee.</p>
       <ul class="price-ladder">
         <li class="price-row"><strong>Your own machine</strong><span class="price">Free</span><small>Use hardware you already have, if it meets the disk and memory requirements.</small></li>
-        <li class="price-row"><strong>Akash <span class="badge-cheapest">CHEAPEST</span></strong><span class="price">bid-priced</span><small>Decentralized cloud, usually the cheapest way to run a node. Your exact monthly price appears as provider bids before you accept anything. <a href="/client/akash/sdl.yaml">Download the deployment file</a> · <a href="https://github.com/ivcained/fiddy/tree/main/deploy/akash" target="_blank" rel="noopener">setup guide</a>. Ports 3381, 3382/udp and 3383 must be declared at deploy time (they cannot be added later).</small></li>
+        <li class="price-row"><strong>Akash <span class="badge-cheapest">CHEAPEST</span></strong><span class="price" id="akash-price">bid-priced</span><small>Decentralized cloud, usually the cheapest way to run a node. Your exact monthly price appears as provider bids before you accept anything. <a href="/client/akash/sdl.yaml">Download the deployment file</a> · <a href="https://github.com/ivcained/fiddy/tree/main/deploy/akash" target="_blank" rel="noopener">setup guide</a>. Ports 3381, 3382/udp and 3383 must be declared at deploy time (they cannot be added later).</small></li>
         <li class="price-row"><strong>Hetzner</strong><span class="price">~€120/mo</span><small>CCX33 with a 2 TB volume. New accounts are capped at 1024 GB volumes, fine once your quota is raised.</small></li>
         <li class="price-row"><strong>OVHcloud</strong><span class="price">~$190/mo</span><small>b3-16 with a 2 TB volume.</small></li>
         <li class="price-row"><strong>AWS</strong><span class="price">~$285/mo</span><small>The default path. Its root volume can simply be 2 TB, which is part of the price difference.</small></li>
@@ -599,6 +599,19 @@ details summary::marker { color: var(--lime-text); }
     pre.appendChild(button);
   });
 })();
+</script>
+<script>
+// Live Akash price: real provider bids, refreshed hourly by the price feed.
+fetch('/client/akash/prices.json', {cache: 'no-store'}).then(function (r) {
+  if (!r.ok) return null;
+  return r.json();
+}).then(function (data) {
+  if (!data || !data.cheapest || !data.cheapest.usd_per_month) return;
+  var el = document.getElementById('akash-price');
+  if (!el) return;
+  el.textContent = 'from $' + Math.ceil(data.cheapest.usd_per_month) + '/mo';
+  el.title = 'Live bid from the Akash marketplace, ' + data.bid_count + ' bids, updated ' + data.updated_at + '. Median $' + Math.ceil(data.median.usd_per_month) + '/mo.';
+}).catch(function () { /* bid-priced stays */ });
 </script>
 </body>
 </html>
