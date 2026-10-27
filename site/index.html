@@ -361,7 +361,7 @@ details summary::marker { color: var(--lime-text); }
       <p class="dim">Every scripted path creates a 4 vCPU, 16 GB machine with about 2 TB disk and Docker preinstalled, then saves the target to <code class="inline">~/.fiddy/config</code>. The AWS path also generates an SSH keypair into <code class="inline">~/.fiddy/</code> and locks the security group down. SSH and the node API answer <strong>your IP only</strong>. Gossip ports stay open to the network so your node can talk to peers.</p>
       <div class="pane note">
         <h3>If the outside world cannot reach your copy</h3>
-        <p>Your provider's firewall is blocking the network connection. Open port 3382 over UDP to the network; allow ports 3381 and 3383 over TCP only from your own IP for the HTTP and gRPC APIs.</p>
+        <p>Your provider's firewall is blocking the network connection. Open port 3382 over UDP to the network; allow ports 3381 and 3383 over TCP only from your own IP for the HTTP and gRPC APIs. <strong>Deploying on Akash? Declare 3381 (HTTP), 3382/udp (gossip) and 3383 (gRPC) in the SDL at deploy time — Akash cannot add ports to a running deployment, so a forgotten port means redeploying.</strong></p>
       </div>
     </div>
 

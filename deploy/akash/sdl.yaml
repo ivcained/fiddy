@@ -8,6 +8,7 @@ services:
   snapchain:
     # :latest auto-updates on every redeploy/restart. Pin a tag (0.1.2) to freeze.
     image: ghcr.io/ivcained/fiddy-node:latest
+    # All three ports MUST be here at deploy time: Akash cannot add ports later.
     expose:
       - port: 3381
         as: 80

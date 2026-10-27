@@ -30,7 +30,14 @@ cat deploy/akash/sdl.yaml
 
 - Persistent volumes (class `beta3`, SSD): `/app/.rocks` = 2 TiB (chain state),
   `/app/.rocks.snapshot` = 1 TiB (download scratch). Both survive redeploys.
-- Ports: 3381 HTTP API (exposed as 80), 3382/udp gossip, 3383 gRPC.
+- Ports — **declare all of these at deploy time; Akash cannot add ports to a
+  running deployment.** Forgetting one means redeploying:
+  - `3381` HTTP API (our SDL maps it to external 80)
+  - `3382/udp` gossip — REQUIRED, this is how the node follows the chain
+  - `3383` gRPC API
+  - `3000` only if you deploy Grafana (keep it private if you can)
+  The HTTP/gRPC APIs are public read/write by design: anyone can read and
+  relay casts through your node.
 - Grafana is optional: delete that service to save a compute line; the node
   API works without it. statsd is optional too: when no statsd service
   exists, the entrypoint sends metrics to loopback instead of crash-looping
