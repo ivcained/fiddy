@@ -1,0 +1,105 @@
+---
+# Fiddy read node on Akash: snapchain + statsd + grafana, persistent chain data.
+# Deploy with the Akash Console or the akash skill. Prices are provider bids:
+# you see the monthly cost BEFORE you accept a lease. Nothing here auto-spends.
+version: "2.0"
+
+services:
+  snapchain:
+    image: ghcr.io/ivcained/fiddy-node:0.1.0
+    expose:
+      - port: 3381
+        as: 80
+        to:
+          - global: true
+      - port: 3382
+        proto: udp
+        to:
+          - global: true
+      - port: 3383
+        to:
+          - global: true
+    params:
+      storage:
+        data:
+          mount: /app/.rocks
+          readOnly: false
+        snapshot:
+          mount: /app/.rocks.snapshot
+          readOnly: false
+
+  statsd:
+    image: graphiteapp/graphite-statsd:1.1.10-5
+
+  grafana:
+    image: grafana/grafana:10.0.3
+    expose:
+      - port: 3000
+        to:
+          - global: true
+    # Grafana is optional: drop this service to save the compute line.
+    # Node API on :3381 works with or without it.
+
+profiles:
+  compute:
+    snapchain:
+      resources:
+        cpu:
+          units: 4
+        memory:
+          size: 16Gi
+        storage:
+          - size: 10Gi
+          - name: data
+            size: 2Ti
+            attributes:
+              persistent: true
+              class: beta3
+          - name: snapshot
+            size: 1Ti
+            attributes:
+              persistent: true
+              class: beta3
+    statsd:
+      resources:
+        cpu:
+          units: 1
+        memory:
+          size: 1Gi
+        storage:
+          - size: 2Gi
+    grafana:
+      resources:
+        cpu:
+          units: 0.5
+        memory:
+          size: 512Mi
+        storage:
+          - size: 1Gi
+
+  placement:
+    any:
+      pricing:
+        snapchain:
+          denom: uakt
+          amount: 1000000
+        statsd:
+          denom: uakt
+          amount: 10000
+        grafana:
+          denom: uakt
+          amount: 10000
+
+deployment:
+  snapchain:
+    any:
+      profile: snapchain
+      count: 1
+  statsd:
+    any:
+      profile: statsd
+      count: 1
+  grafana:
+    any:
+      profile: grafana
+      count: 1
