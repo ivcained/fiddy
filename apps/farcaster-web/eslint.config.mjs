@@ -59,6 +59,8 @@ export default [
         indexedDB: 'readonly',
         localStorage: 'readonly',
         MutationObserver: 'readonly',
+        // DOM node-position flags used when checking root → parent → reply order.
+        Node: 'readonly',
         PerformanceObserver: 'readonly',
         performance: 'readonly',
         process: 'readonly',

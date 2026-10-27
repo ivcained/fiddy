@@ -111,6 +111,16 @@ describe('apiCastFromNeynar', () => {
     expect(cast.castType).toBe('reply-cast');
     expect(cast.parentHash).toBe('0xparent');
   });
+
+  it('keeps a parent author profile when the feed answer carries one', () => {
+    const cast = apiCastFromNeynar({
+      ...NEYNAR_CAST,
+      parent_hash: '0xparent',
+      parent_author: { fid: 42, username: 'parent-author' },
+    });
+
+    expect(cast.parentAuthor?.username).toBe('parent-author');
+  });
 });
 
 describe('threadCastsFromNeynar', () => {
@@ -127,6 +137,26 @@ describe('threadCastsFromNeynar', () => {
       NEYNAR_CAST.hash,
       '0xreply',
     ]);
+  });
+
+  it('gives the selected reply its parent author from the loaded chain', () => {
+    const parentHash = '0xd7792fbf5004198c0ec37d12e8626b883c8e52a7';
+    const casts = threadCastsFromNeynar({
+      cast: {
+        ...NEYNAR_CAST,
+        parent_hash: parentHash,
+        chronological_parent_casts: [
+          {
+            ...NEYNAR_CAST,
+            hash: parentHash,
+            author: { fid: 42, username: 'parent-author' },
+          },
+        ],
+      },
+    });
+
+    expect(casts[1]?.parentHash).toBe(parentHash);
+    expect(casts[1]?.parentAuthor?.username).toBe('parent-author');
   });
 
   it('answers an empty list for a conversation it cannot read', () => {

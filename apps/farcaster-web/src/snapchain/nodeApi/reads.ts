@@ -62,6 +62,10 @@ import {
 } from 'farcaster-node-client';
 
 import type { MuteQuery } from '~/snapchain/mutePreferences';
+import {
+  attachParentAuthors,
+  readParentAuthors,
+} from '~/snapchain/parentAuthors';
 import { fetchCastAuthorFromOrigin } from '~/snapchain/providers/castAuthorHandoff';
 
 import {
@@ -1597,27 +1601,37 @@ export class NodeBackedReads {
     // logs only STARTED at 12.6s and each took 5.3s — and the first cast painted
     // at 17.4s. Nothing below depends on the others, so they run at once and the
     // wait is the slowest of the three, not their sum.
-    const [mentionUsers, [likedHashes, recastHashes], , pageClients] =
-      await Promise.all([
-        this.resolveMentionUsers(NodeBackedReads.mentionedFidsOf(messages)),
-        withViewer
-          ? Promise.all([
-              this.viewerReactionHashes('Like'),
-              this.viewerReactionHashes('Recast'),
-            ])
-          : Promise.resolve([undefined, undefined] as [
-              Set<string> | undefined,
-              Set<string> | undefined,
-            ]),
-        // The page's embed URLs are asked about together, before any cast is
-        // built: a photo is drawn as a photo on the first paint rather than
-        // after a reload, and a link's own title, picture and mini-app card are
-        // in hand before the card is drawn (`preparedEmbeds`).
-        this.classifyEmbeds(messages),
-        // ...and so is which app made each cast: one signer read per distinct
-        // signing key for the whole page, so the label is on the first paint.
-        this.resolvePageClients(messages),
-      ]);
+    const [
+      mentionUsers,
+      [likedHashes, recastHashes],
+      ,
+      pageClients,
+      parentAuthors,
+    ] = await Promise.all([
+      this.resolveMentionUsers(NodeBackedReads.mentionedFidsOf(messages)),
+      withViewer
+        ? Promise.all([
+            this.viewerReactionHashes('Like'),
+            this.viewerReactionHashes('Recast'),
+          ])
+        : Promise.resolve([undefined, undefined] as [
+            Set<string> | undefined,
+            Set<string> | undefined,
+          ]),
+      // The page's embed URLs are asked about together, before any cast is
+      // built: a photo is drawn as a photo on the first paint rather than
+      // after a reload, and a link's own title, picture and mini-app card are
+      // in hand before the card is drawn (`preparedEmbeds`).
+      this.classifyEmbeds(messages),
+      // ...and so is which app made each cast: one signer read per distinct
+      // signing key for the whole page, so the label is on the first paint.
+      this.resolvePageClients(messages),
+      readParentAuthors({
+        messages,
+        castById: (fid, hash) => this.castById(fid, hash),
+        readAuthor: (fid) => this.readAuthor(fid),
+      }),
+    ]);
 
     const casts = await mapWithConcurrency(
       messages,
@@ -1626,6 +1640,9 @@ export class NodeBackedReads {
         const identity = pageClients.get(message.signer.toLowerCase());
         return this.buildCast({
           message,
+          parentAuthor: message.castAdd?.parentCastId
+            ? parentAuthors.get(message.castAdd.parentCastId.hash)
+            : undefined,
           likedHashes,
           recastHashes,
           withCounts,
@@ -2124,7 +2141,9 @@ export class NodeBackedReads {
         }),
     );
 
-    const casts = built.filter((cast): cast is ApiCast => cast !== undefined);
+    const casts = attachParentAuthors(
+      built.filter((cast): cast is ApiCast => cast !== undefined),
+    );
     return {
       casts: casts.slice(0, limit + ancestors.length + 1),
       ...(repliesPage.nextPageToken &&

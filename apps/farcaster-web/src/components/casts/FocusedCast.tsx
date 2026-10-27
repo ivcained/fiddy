@@ -17,6 +17,7 @@ import { Recasts } from '~/components/casts/actions/Recasts';
 import { Replies } from '~/components/casts/actions/Replies';
 import { CastAttachmentsSection } from '~/components/casts/CastAttachmentsSection';
 import { CastDetails } from '~/components/casts/CastDetails';
+import { CastReplyContext } from '~/components/casts/CastReplyContext';
 import { CastTranslationTopHat } from '~/components/casts/CastTranslationTopHat';
 import { DeletedCast } from '~/components/casts/DeletedCast';
 import { FocusedCastReplyTrigger } from '~/components/casts/FocusedCastReplyTrigger';
@@ -34,6 +35,7 @@ import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useCastBody } from '~/hooks/casts/useCastBody';
 import { useCastTranslationDisplay } from '~/hooks/casts/useCastTranslationDisplay';
 import { useRecordCastOnView } from '~/hooks/casts/useRecordCastOnView';
+import { useCachedCurrentUser } from '~/hooks/data/useCachedCurrentUser';
 import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
 import { useUserLevel } from '~/hooks/data/useUserLevel';
 import { ApiCastWithContext } from '~/types';
@@ -110,6 +112,7 @@ const FocusedCastContent: React.FC<FocusedCastProps> = React.memo(
     });
 
     const isSignedIn = useIsSignedIn();
+    const currentUser = useCachedCurrentUser();
 
     React.useEffect(() => {
       const sourceOn = getFeedSourceOn(on);
@@ -147,10 +150,15 @@ const FocusedCastContent: React.FC<FocusedCastProps> = React.memo(
     return (
       <div
         ref={inViewRef}
+        id={`cast:${cast.hash}`}
         className={classNames(
           'relative',
           isAdminGatedFeedCast && 'admin-gated-feed-cast',
+          cast.parentHash && 'shadow-[inset_3px_0_0_#d4ff3f] bg-overlay-faint',
         )}
+        data-fiddy={cast.parentHash ? 'selected-reply' : 'focused-cast'}
+        data-cast-hash={cast.hash}
+        data-parent-hash={cast.parentHash}
       >
         <div className="relative p-4 pt-2">
           {(hasTranslation || isTranslationPending || isTranslationOffered) && (
@@ -219,6 +227,11 @@ const FocusedCastContent: React.FC<FocusedCastProps> = React.memo(
             </div>
             {isSignedIn && <CastMenuActions cast={castWithContext} />}
           </div>
+          <CastReplyContext
+            cast={cast}
+            currentUserFid={currentUser?.fid}
+            className="mb-2"
+          />
           <div className="flex flex-col whitespace-pre-wrap break-words text-lg leading-6 tracking-normal">
             {!isFirstInList && <ScrollIntoView />}
             <div>{processedText}</div>

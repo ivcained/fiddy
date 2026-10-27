@@ -38,6 +38,7 @@ import {
   type EmbedCard,
   openGraphFromCard,
 } from '~/snapchain/nodeApi/embedCards';
+import { attachParentAuthors } from '~/snapchain/parentAuthors';
 
 import { NEYNAR_BASE_URL } from './catalog';
 
@@ -108,7 +109,7 @@ interface NeynarCast {
   thread_hash?: unknown;
   parent_hash?: unknown;
   parent_url?: unknown;
-  parent_author?: { fid?: unknown };
+  parent_author?: NeynarUser;
   author?: NeynarUser;
   text?: unknown;
   timestamp?: unknown;
@@ -390,6 +391,9 @@ export const apiCastFromNeynar = (cast: NeynarCast): ApiCast => {
 
   if (parentHash !== undefined) {
     apiCast.parentHash = parentHash;
+    if (cast.parent_author) {
+      apiCast.parentAuthor = apiUserFromNeynar(cast.parent_author);
+    }
   }
   if (parentUrl !== undefined) {
     apiCast.parentUrl = parentUrl;
@@ -1040,7 +1044,7 @@ export const threadCastsFromNeynar = (conversation: unknown): ApiCast[] => {
     apiCastFromNeynar,
   );
   const replies = asNeynarArray(root.direct_replies).map(apiCastFromNeynar);
-  return [...parents, apiCastFromNeynar(root), ...replies];
+  return attachParentAuthors([...parents, apiCastFromNeynar(root), ...replies]);
 };
 
 const readJson = async (response: Response): Promise<unknown | null> => {
