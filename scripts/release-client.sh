@@ -287,6 +287,10 @@ node "$CHECK_SHELL" "$APP/index.html" \
 CHECK_MANIFEST="$STAGE/base/apps/farcaster-web/scripts/check-manifest.mjs"
 node "$CHECK_MANIFEST" "$APP" \
   || { echo "REFUSING to ship: the app-list manifest is not shippable" >&2; exit 1; }
+# Discovery is part of the build, not something assembly may rewrite: one small
+# canonical sitemap, real static pages, and no inherited farcaster.xyz URLs.
+node "$STAGE/base/apps/farcaster-web/scripts/validateSitemaps.mjs" "$APP" \
+  || { echo "REFUSING to ship: the discovery sitemap is not valid" >&2; exit 1; }
 # The entry chunk the release ships, resolved from the shell THIS BUILD wrote.
 # Never from a served shell: a served `index.html` may belong to another release
 # (or to a CDN's copy of one), and a path derived from it names a file this build
@@ -341,7 +345,10 @@ for SERVICE in unfurl translate; do
     | tar -xf - -C "$STAGE/release/server/$SERVICE"
 done
 rm -rf "$STAGE/preview-assets" "$STAGE/prior-index.html"
-printf 'User-agent: *\nDisallow: /api/\n' > "$WEB/robots.txt"
+# Keep the reviewed robots policy byte-for-byte. Assembly used to replace it
+# with two lines, dropping the sitemap and every private-surface rule.
+cmp -s "$APP/robots.txt" "$WEB/robots.txt" \
+  || { echo "REFUSING to ship: release assembly changed robots.txt" >&2; exit 1; }
 printf '{"revision":"%s","mode":"node-backed-client","node":"%s","media":"%s"}\n' \
   "$FULL_SHA" "$NODE_URL" "$MEDIA_URL" > "$WEB/release.json"
 
@@ -367,6 +374,12 @@ ssh_ "set -e
   test -f $RELEASES/$SHA/server/unfurl/server.mjs
   test -f $RELEASES/$SHA/server/unfurl/render-card.py
   test -f $RELEASES/$SHA/server/translate/translate.mjs
+  test -f $RELEASES/$SHA/web/about.html
+  test -f $RELEASES/$SHA/web/llms.txt
+  test -f $RELEASES/$SHA/web/sitemap.xml
+  test -f $RELEASES/$SHA/web/robots.txt
+  grep -q 'Sitemap: https://fiddy.fun/sitemap.xml' $RELEASES/$SHA/web/robots.txt
+  grep -q 'location = /about { try_files /about.html =404; }' /etc/nginx/sites-available/fiddy.fun
   # The card renderer is Pillow, which the host has and the release does not
   # ship (no browser, no npm install): refuse now rather than serve a page
   # whose card cannot be drawn.
@@ -550,6 +563,27 @@ node -e 'const b=require("fs").readFileSync(process.argv[1]);process.exit(b.leng
 grep -qi '^x-unfurl:[[:space:]]*card:profile' "$STAGE/origin-profile-card.png.headers" \
   || gate_fail "the origin's profile card is not that page's own card (the service answered '$(grep -i '^x-unfurl:' "$STAGE/origin-profile-card.png.headers" | tr -d '\r' | tail -1)'): the page's own card is what a share has to preview"
 echo "  origin GET /~/profiles/3 → that page's own og:url, card 1200x630, drawn for the page"
+
+# Static discovery is served as the exact bytes this build produced. About is
+# an exact static route, not the SPA fallback with a different title.
+origin_get "/about" "$STAGE/origin-about.html" \
+  || gate_fail "the origin did not answer GET /about"
+[ "$ORIGIN_CODE" = 200 ] || gate_fail "the origin answered HTTP $ORIGIN_CODE for /about"
+cmp -s "$STAGE/origin-about.html" "$APP/about.html" \
+  || gate_fail "the origin's /about is not this build's static About page"
+origin_get "/robots.txt" "$STAGE/origin-robots.txt" \
+  || gate_fail "the origin did not answer GET /robots.txt"
+cmp -s "$STAGE/origin-robots.txt" "$APP/robots.txt" \
+  || gate_fail "the origin's robots policy differs from this build"
+origin_get "/sitemap.xml" "$STAGE/origin-sitemap.xml" \
+  || gate_fail "the origin did not answer GET /sitemap.xml"
+cmp -s "$STAGE/origin-sitemap.xml" "$APP/sitemap.xml" \
+  || gate_fail "the origin's sitemap differs from this build"
+origin_get "/llms.txt" "$STAGE/origin-llms.txt" \
+  || gate_fail "the origin did not answer GET /llms.txt"
+cmp -s "$STAGE/origin-llms.txt" "$APP/llms.txt" \
+  || gate_fail "the origin's llms.txt differs from this build"
+echo "  origin /about, /robots.txt, /sitemap.xml and /llms.txt: this build's static bytes"
 
 # 2. The entry chunk at the path THIS BUILD produced, from the origin, compared
 #    byte-for-byte. This is the heart of the check.

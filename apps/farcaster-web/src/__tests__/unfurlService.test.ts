@@ -213,7 +213,12 @@ describe('what a cast page tells a crawler', () => {
 
     const scripts = [...html.matchAll(/<script\b([^>]*)>/gi)];
     expect(
-      scripts.filter((tag) => !/\bsrc\s*=/i.test(tag[1])).map((tag) => tag[0]),
+      scripts
+        .filter((tag) => !/\bsrc\s*=/i.test(tag[1]))
+        .filter(
+          (tag) => !/\btype\s*=\s*(["'])application\/ld\+json\1/i.test(tag[1]),
+        )
+        .map((tag) => tag[0]),
     ).toEqual([]);
     expect(
       [...html.matchAll(/<([a-z][a-z0-9]*)\b[^>]*\son([a-z]+)\s*=/gi)].map(

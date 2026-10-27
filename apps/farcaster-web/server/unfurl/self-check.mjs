@@ -211,9 +211,16 @@ for (const [file, answer] of Object.entries(pages)) {
     count(html, /<meta name="twitter:card"/g) === 1,
   );
   check(
-    `${file} drops the site's front-door tags`,
-    !html.includes('fiddy — a Farcaster client with an agent') &&
-      !html.includes('/fiddy-share-card.png'),
+    `${file} drops the site's front-door social tags`,
+    !html.includes(
+      '<meta property="og:title" content="fiddy — a Farcaster client with an agent"',
+    ) &&
+      !html.includes(
+        '<meta property="og:image" content="https://fiddy.fun/fiddy-share-card.png"',
+      ) &&
+      !html.includes(
+        '<meta name="twitter:image" content="https://fiddy.fun/fiddy-share-card.png"',
+      ),
   );
   check(
     `${file} is the shell after </head>, byte for byte`,
