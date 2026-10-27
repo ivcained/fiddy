@@ -5,7 +5,9 @@ A Snapchain read node, packaged as a container deployment: `fiddy-node` image +
 
 ## Image
 
-`ghcr.io/ivcained/fiddy-node:0.1.2` (also `:latest`). Built from
+**Use `ghcr.io/ivcained/fiddy-node:latest` when deploying** — every redeploy
+or pod restart then pulls the newest image, and the chain data persists.
+Pin a version tag (e.g. `0.1.2`) only if you want a frozen setup. Built from
 `farcasterxyz/snapchain:latest` with the read-node config baked in
 (`read_node = true`, mainnet, upstream validator sets and snapshot endpoint),
 so no host files are needed. Built and smoke-tested on 2026-10-27: the
@@ -38,6 +40,7 @@ cat deploy/akash/sdl.yaml
 
 - On start, the image checks `deploy/akash/VERSION` on main and prints an
   `UPDATE AVAILABLE` line with the redeploy command when a newer image exists.
+  `:latest` (the default in sdl.yaml) means every redeploy/restart upgrades you.
   It never rewrites itself: redeploying with the new tag (or `:latest`) is the
   upgrade, and the persistent volumes carry your chain data forward.
 
