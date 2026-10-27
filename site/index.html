@@ -101,6 +101,10 @@ h1 span { display: block; }
 .agent-hero-art { display: block; width: 100%; max-width: 520px; height: auto; margin-top: 22px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 18px 50px rgba(0,0,0,0.45); }
 @media (max-width: 900px) { .agent-hero-art { max-width: 100%; } }
 
+.ports-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+.ports-table th, .ports-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--edge); }
+.ports-table th { color: var(--dim); font-weight: 600; }
+
 /* Three commands and cloud actions */
 .quickstart { scroll-margin-top: 24px; }
 .quick-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
@@ -362,7 +366,18 @@ details summary::marker { color: var(--lime-text); }
       <p class="dim">Every scripted path creates a 4 vCPU, 16 GB machine with about 2 TB disk and Docker preinstalled, then saves the target to <code class="inline">~/.fiddy/config</code>. The AWS path also generates an SSH keypair into <code class="inline">~/.fiddy/</code> and locks the security group down. SSH and the node API answer <strong>your IP only</strong>. Gossip ports stay open to the network so your node can talk to peers.</p>
       <div class="pane note">
         <h3>If the outside world cannot reach your copy</h3>
-        <p>Your provider's firewall is blocking the network connection. Open port 3382 over UDP to the network; allow ports 3381 and 3383 over TCP only from your own IP for the HTTP and gRPC APIs. <strong>Deploying on Akash? Declare 3381 (HTTP), 3382/udp (gossip) and 3383 (gRPC) in the SDL at deploy time — Akash cannot add ports to a running deployment, so a forgotten port means redeploying.</strong></p>
+        <p>Your provider's firewall is blocking the network connection. Open port 3382 over UDP to the network; allow ports 3381 and 3383 over TCP only from your own IP for the HTTP and gRPC APIs.</p>
+<p><strong>On Akash, declare every port at deploy time — they cannot be added later.</strong> The exact setup:</p>
+<table class="ports-table">
+  <thead><tr><th>Container port</th><th>Exposed as</th><th>Protocol</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>3381</td><td>80</td><td>TCP</td><td>HTTP API (/v1/info, reads/writes). The ONLY mapping to external 80.</td></tr>
+    <tr><td>3382</td><td>3382</td><td>UDP</td><td>Gossip. Required; without it the node is an island.</td></tr>
+    <tr><td>3383</td><td>3383</td><td>TCP</td><td>gRPC API.</td></tr>
+    <tr><td>3000</td><td>3000</td><td>TCP</td><td>Only if you deploy Grafana. Keep private/tunneled.</td></tr>
+    <tr><td><s>80 → 80</s></td><td>—</td><td>—</td><td>Do NOT add this: a second mapping to external 80 conflicts.</td></tr>
+  </tbody>
+</table>
       </div>
     </div>
 

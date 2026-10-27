@@ -44,13 +44,16 @@ Notes that apply either way:
 - Persistent volumes (class `beta3`, SSD): `/app/.rocks` = 2 TiB (chain state),
   `/app/.rocks.snapshot` = 1 TiB (download scratch). Both survive redeploys.
 - Ports — **declare all of these at deploy time; Akash cannot add ports to a
-  running deployment.** Forgetting one means redeploying:
-  - `3381` HTTP API (our SDL maps it to external 80). Do NOT also map a second
-    container port 80 to external 80 — one service per external port, or the
-    deployment conflicts.
-  - `3382/udp` gossip — REQUIRED, this is how the node follows the chain
-  - `3383/tcp` gRPC API
-  - `3000` only if you deploy Grafana (keep it private if you can)
+  running deployment.** Forgetting one means redeploying. The exact setup:
+
+  | Container port | Exposed as | Protocol | Notes |
+  |---|---|---|---|
+  | 3381 | 80 | TCP | HTTP API (`/v1/info`, reads/writes). The ONLY mapping to external 80. |
+  | 3382 | 3382 | UDP | Gossip. Required; without it the node is an island. |
+  | 3383 | 3383 | TCP | gRPC API. |
+  | 3000 | 3000 | TCP | Only if you deploy Grafana. Keep private/tunneled. |
+  | ~~80 → 80~~ | — | — | Do NOT add this: a second mapping to external 80 conflicts. |
+
   The HTTP/gRPC APIs are public read/write by design: anyone can read and
   relay casts through your node.
 - Grafana is optional: delete that service to save a compute line; the node
