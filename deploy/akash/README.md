@@ -45,9 +45,11 @@ Notes that apply either way:
   `/app/.rocks.snapshot` = 1 TiB (download scratch). Both survive redeploys.
 - Ports — **declare all of these at deploy time; Akash cannot add ports to a
   running deployment.** Forgetting one means redeploying:
-  - `3381` HTTP API (our SDL maps it to external 80)
+  - `3381` HTTP API (our SDL maps it to external 80). Do NOT also map a second
+    container port 80 to external 80 — one service per external port, or the
+    deployment conflicts.
   - `3382/udp` gossip — REQUIRED, this is how the node follows the chain
-  - `3383` gRPC API
+  - `3383/tcp` gRPC API
   - `3000` only if you deploy Grafana (keep it private if you can)
   The HTTP/gRPC APIs are public read/write by design: anyone can read and
   relay casts through your node.
