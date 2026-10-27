@@ -9,13 +9,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 WORKDIR /app
 COPY config.toml /app/config.toml
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY fiddy-status /usr/local/bin/fiddy-status
+RUN chmod +x /app/entrypoint.sh /usr/local/bin/fiddy-status
 
 # Node data lives here; mount persistent storage at these paths.
 # /app/.rocks          chain state (2 TiB recommended)
 # /app/.rocks.snapshot snapshot download scratch (1 TiB recommended)
 ENV RUST_BACKTRACE=full
-ENV FIDDY_IMAGE_VERSION=0.1.2
+ENV FIDDY_IMAGE_VERSION=0.1.3
 
 EXPOSE 3381/tcp 3382/udp 3383/tcp
 

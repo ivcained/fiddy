@@ -26,5 +26,5 @@ jobs:
           context: deploy/akash
           push: true
           tags: |
-            ghcr.io/ivcained/fiddy-node:0.1.2
+            ghcr.io/ivcained/fiddy-node:0.1.3
             ghcr.io/ivcained/fiddy-node:latest

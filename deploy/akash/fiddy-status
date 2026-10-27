@@ -1,0 +1,20 @@
+#!/bin/bash
+# fiddy-status — your node's status in plain words. No curl, no JSON, no paths.
+set -u
+
+if curl -fsS -m 6 http://127.0.0.1:3381/v1/info >/tmp/fiddy-status.json 2>/dev/null; then
+  echo "Your node is LIVE and following the chain."
+  echo ""
+  tr '{},' '\n\n\n' < /tmp/fiddy-status.json | grep -E '"shardId"|"maxHeight"' | \
+    sed 's/"shardId":/Shard /; s/"maxHeight":/height /' | \
+    awk 'NF==2{printf "%s %s\n", $1, $2} NF==1{print}'
+  echo ""
+  echo "These heights should keep climbing. That is the whole health check."
+else
+  CHUNKS=$(find /app/.rocks.snapshot -name 'chunk_*.bin' 2>/dev/null | wc -l)
+  echo "Still downloading Farcaster history (one-time, a few hours)."
+  echo "Chunks downloaded so far: $CHUNKS of about 5700."
+  echo ""
+  echo "Nothing to do but wait. Run fiddy-status again any time;"
+  echo "when it says LIVE, the node is following the chain."
+fi
