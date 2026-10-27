@@ -56,6 +56,22 @@ Notes that apply either way:
   exists, the entrypoint sends metrics to loopback instead of crash-looping
   (0.1.1). Keep statsd + grafana if you want the dashboard.
 
+## Storage: ephemeral vs persistent (and how to migrate)
+
+- **Persistent (what our SDL uses):** `/app/.rocks` = 2 TiB, `/app/.rocks.snapshot` = 1 TiB,
+  class `beta3`. Survives restarts and redeploys, so an image upgrade never
+  re-downloads the chain. This is what you want.
+- **Ephemeral:** fine only for the root filesystem (our config is tiny).
+  On ephemeral chain storage, every pod reschedule means downloading ~470 GB again.
+- **Pricing:** persistent storage costs more per GB than ephemeral, and the
+  price is provider-specific — you see it inside each bid before accepting.
+  The real number for our exact spec is in the live feed on fiddy.fun/client
+  (Akash row) once the feed has bids; there is no honest flat rate to quote.
+- **Already on ephemeral?** You cannot convert a volume in place. Create a new
+  deployment with the persistent SDL, let it sync once (last full download),
+  then close the old deployment. Copying 2 TiB between pods is slower and
+  fiddlier than one clean resync, so resync is the recommended path.
+
 ## Updates
 
 - On start, the image checks `deploy/akash/VERSION` on main and prints an
