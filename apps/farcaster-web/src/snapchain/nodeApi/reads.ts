@@ -94,6 +94,7 @@ import {
   CASTS_PER_AUTHOR,
   CASTS_PER_AUTHOR_PAGED,
   channelKeyFromParentUrl,
+  isTopLevelWindowMessage,
   MAX_WINDOW_AUTHORS,
   mergeWindowMessages,
   PUBLIC_WINDOW_ANCHORS,
@@ -1938,10 +1939,15 @@ export class NodeBackedReads {
       ...(olderThan !== undefined ? { olderThan } : {}),
     });
 
+    // The main tabs show standalone casts; an explicitly selected topic stays
+    // a channel read, whose casts carry the channel's parentUrl.
+    const topLevel =
+      topic === null ? merged.filter(isTopLevelWindowMessage) : merged;
+
     // The topic filter runs before any cast is built: a window narrowed to one
     // channel should not pay for the counts and embeds of casts it will not
     // show.
-    const inTopic = merged.filter(
+    const inTopic = topLevel.filter(
       (message) =>
         topic === null ||
         channelKeyFromParentUrl(message.castAdd?.parentUrl) === topic,
