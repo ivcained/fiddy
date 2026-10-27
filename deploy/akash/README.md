@@ -63,10 +63,12 @@ Notes that apply either way:
 
 ## Budget options (if the persistent price stings)
 
-1. **Persistent only where it matters most:** keep the 2 TiB `/app/.rocks`
-   volume but make `/app/.rocks.snapshot` ephemeral. The snapshot scratch is
-   only used during the first download; after that, the chain data is what
-   matters. This cuts roughly a third of the persistent bill.
+1. **Persistent only where it matters most (`sdl-value.yaml`):** the 2 TiB
+   `/app/.rocks` volume is persistent, `/app/.rocks.snapshot` is ephemeral.
+   Snapshot scratch only matters during the first download, so upgrades never
+   re-download, and this cuts roughly a third of the persistent bill.
+   **To migrate from an ephemeral deployment:** create a new deployment with
+   `sdl-value.yaml`, let it sync once, then close the old one.
 2. **Fully ephemeral (`sdl-budget.yaml`):** no persistent volumes at all.
    Cheapest possible. The trade: a pod reschedule wipes the chain and you
    re-download ~470 GB (hours). If the pod just runs, nothing re-downloads —
