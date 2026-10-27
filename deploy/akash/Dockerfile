@@ -2,6 +2,10 @@
 # Base image is upstream's; we bake the read_node config so no host files are needed.
 FROM farcasterxyz/snapchain:latest
 
+# curl powers the startup update check and is handy for /v1/info in the shell.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY config.toml /app/config.toml
 COPY entrypoint.sh /app/entrypoint.sh
