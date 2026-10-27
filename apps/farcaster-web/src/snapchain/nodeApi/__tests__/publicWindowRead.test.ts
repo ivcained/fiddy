@@ -54,12 +54,14 @@ const rawCast = ({
   hash,
   seconds,
   text,
+  parentCastId = null,
   parentUrl = null,
 }: {
   fid: number;
   hash: string;
   seconds: number;
   text: string;
+  parentCastId?: { fid: number; hash: string } | null;
   parentUrl?: string | null;
 }) => ({
   data: {
@@ -70,7 +72,7 @@ const rawCast = ({
     castAddBody: {
       embedsDeprecated: [],
       mentions: [],
-      parentCastId: null,
+      parentCastId,
       parentUrl,
       text,
       embeds: [],
@@ -113,7 +115,7 @@ const page = (messages: unknown[]) => ({
   nextPageToken: TERMINAL_PAGE_TOKEN,
 });
 
-/** Three authors, three casts, two channels, oldest-to-newest 5000/7000/9000. */
+/** Three authors: three root casts and two channel casts. */
 const CASTS: Record<number, unknown[]> = {
   40: [
     rawCast({
@@ -122,6 +124,12 @@ const CASTS: Record<number, unknown[]> = {
       seconds: 5000,
       text: 'dev one',
       parentUrl: 'https://warpcast.com/~/channel/dev',
+    }),
+    rawCast({
+      fid: 40,
+      hash: HASH('d'),
+      seconds: 6000,
+      text: 'older root',
     }),
   ],
   41: [rawCast({ fid: 41, hash: HASH('b'), seconds: 9000, text: 'newest' })],
@@ -132,6 +140,12 @@ const CASTS: Record<number, unknown[]> = {
       seconds: 7000,
       text: 'base one',
       parentUrl: 'https://warpcast.com/~/channel/base',
+    }),
+    rawCast({
+      fid: 42,
+      hash: HASH('e'),
+      seconds: 7000,
+      text: 'middle root',
     }),
   ],
 };
@@ -151,9 +165,13 @@ const offlineEmbedCards = () =>
 const windowFetch = ({
   log,
   anchors = ANCHORS,
+  casts = CASTS,
+  thread,
 }: {
   log?: string[];
   anchors?: Record<string, number>;
+  casts?: Record<number, unknown[]>;
+  thread?: { root: unknown; replies: unknown[] };
 }) =>
   createFixtureNodeFetch({
     ...(log ? { log } : {}),
@@ -180,16 +198,22 @@ const windowFetch = ({
           ),
         );
       }
+      if (path === '/v1/castById' && thread) {
+        return thread.root as Record<string, unknown>;
+      }
+      if (path === '/v1/castsByParent' && thread) {
+        return page(thread.replies);
+      }
       if (path === '/v1/castsByFid') {
         const fid = Number(params.get('fid'));
-        return page(CASTS[fid] ?? []);
+        return page(casts[fid] ?? []);
       }
       return undefined;
     },
   });
 
-/** The reader under test, with nobody signed in: the whole point. */
-const signedOutReader = (fetchImpl: typeof fetch) =>
+/** The reader under test, with an optional account on the same public seam. */
+const windowReader = (fetchImpl: typeof fetch, signedInFid?: number) =>
   new NodeBackedReads({
     node: new SnapchainNodeClient({
       baseUrl: NODE,
@@ -199,8 +223,11 @@ const signedOutReader = (fetchImpl: typeof fetch) =>
     fetchImpl,
     embedKinds: offlineEmbedKinds(),
     embedCards: offlineEmbedCards(),
-    getSignedInFid: () => undefined,
+    getSignedInFid: () => signedInFid,
   });
+
+/** The reader under test, with nobody signed in: the whole point. */
+const signedOutReader = (fetchImpl: typeof fetch) => windowReader(fetchImpl);
 
 describe('a window read with no account at all', () => {
   it('answers real casts, newest first, from the anchors’ follows', async () => {
@@ -210,7 +237,7 @@ describe('a window read with no account at all', () => {
     const result = await reads.readPublicFeed({ kind: 'recent' });
 
     expect(result.items.map((item: ApiCastFeedItem) => item.cast.text)).toEqual(
-      ['newest', 'base one', 'dev one'],
+      ['newest', 'middle root', 'older root'],
     );
     expect(
       result.items.map((item: ApiCastFeedItem) => item.cast.author.fid),
@@ -222,6 +249,94 @@ describe('a window read with no account at all', () => {
     ).toBe(true);
     expect(log.some((entry) => entry.startsWith('/v1/linksByFid'))).toBe(true);
     expect(log.some((entry) => entry.startsWith('/v1/castsByFid'))).toBe(true);
+  });
+
+  it.each(['recent', 'trending'] as const)(
+    'keeps cast replies out of the %s window',
+    async (kind) => {
+      const root = rawCast({
+        fid: 40,
+        hash: HASH('a'),
+        seconds: 5000,
+        text: 'root cast',
+      });
+      const reply = rawCast({
+        fid: 41,
+        hash: HASH('d'),
+        seconds: 9000,
+        text: 'a reply, not a feed item',
+        parentCastId: { fid: 40, hash: HASH('a') },
+      });
+      const reads = signedOutReader(
+        windowFetch({ casts: { 40: [root], 41: [reply], 42: [] } }),
+      );
+
+      const result = await reads.readPublicFeed({ kind });
+
+      expect(result.items.map((item) => item.cast.text)).toEqual(['root cast']);
+      expect(result.items[0]?.cast.parentHash).toBeUndefined();
+      expect(result.items[0]?.cast.parentUrl).toBeUndefined();
+    },
+  );
+
+  it.each(['recent', 'trending'] as const)(
+    'keeps parent-URL casts out of the %s window',
+    async (kind) => {
+      const root = rawCast({
+        fid: 40,
+        hash: HASH('a'),
+        seconds: 5000,
+        text: 'root cast',
+      });
+      const channelCast = rawCast({
+        fid: 41,
+        hash: HASH('d'),
+        seconds: 9000,
+        text: 'a channel cast, not a main-feed item',
+        parentUrl: 'https://warpcast.com/~/channel/dev',
+      });
+      const reads = signedOutReader(
+        windowFetch({ casts: { 40: [root], 41: [channelCast], 42: [] } }),
+      );
+
+      const result = await reads.readPublicFeed({ kind });
+
+      expect(result.items.map((item) => item.cast.text)).toEqual(['root cast']);
+      expect(result.items[0]?.cast.parentHash).toBeUndefined();
+      expect(result.items[0]?.cast.parentUrl).toBeUndefined();
+    },
+  );
+
+  it('keeps a root cast’s replies on its thread and in its reply count', async () => {
+    const root = rawCast({
+      fid: 40,
+      hash: HASH('a'),
+      seconds: 5000,
+      text: 'root cast',
+    });
+    const reply = rawCast({
+      fid: 41,
+      hash: HASH('d'),
+      seconds: 9000,
+      text: 'thread reply',
+      parentCastId: { fid: 40, hash: HASH('a') },
+    });
+    const reads = signedOutReader(
+      windowFetch({
+        casts: { 40: [root], 41: [reply], 42: [] },
+        thread: { root, replies: [reply] },
+      }),
+    );
+
+    const feed = await reads.readPublicFeed({ kind: 'recent' });
+    const thread = await reads.readThread({ castHash: HASH('a') });
+
+    expect(feed.items.map((item) => item.cast.text)).toEqual(['root cast']);
+    expect(thread.casts.map((cast) => cast.text)).toEqual([
+      'root cast',
+      'thread reply',
+    ]);
+    expect(thread.casts[0]?.replies.count).toBe(1);
   });
 
   it('narrows to a topic, and keeps the rest out', async () => {
@@ -246,7 +361,7 @@ describe('a window read with no account at all', () => {
     });
 
     expect(result.items.map((item: ApiCastFeedItem) => item.cast.text)).toEqual(
-      ['base one', 'dev one'],
+      ['middle root', 'older root'],
     );
   });
 
@@ -279,4 +394,27 @@ describe('a window read with no account at all', () => {
       ),
     ).toEqual(new Set(FOLLOWED));
   });
+});
+
+describe('the same public window with an account', () => {
+  it.each(['recent', 'trending'] as const)(
+    'uses the signed-out %s filter when signed in',
+    async (kind) => {
+      const signedOut = await signedOutReader(windowFetch({})).readPublicFeed({
+        kind,
+      });
+      const signedIn = await windowReader(windowFetch({}), 42).readPublicFeed({
+        kind,
+      });
+
+      expect(signedIn.items.map((item) => item.cast.text)).toEqual(
+        signedOut.items.map((item) => item.cast.text),
+      );
+      expect(
+        signedIn.items.every(
+          (item) => !item.cast.parentHash && !item.cast.parentUrl,
+        ),
+      ).toBe(true);
+    },
+  );
 });

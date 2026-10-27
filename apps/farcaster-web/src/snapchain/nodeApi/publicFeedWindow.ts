@@ -173,6 +173,12 @@ export const windowFromFeedType = (
 export const isPublicFeedKey = (feedKey: string | undefined): boolean =>
   feedKey === PUBLIC_FEED_KEY;
 
+/** A cast that can stand on its own in the main public feed. */
+export const isTopLevelWindowMessage = (message: NodeMessage): boolean =>
+  message.castAdd !== undefined &&
+  !message.castAdd.parentCastId &&
+  !message.castAdd.parentUrl;
+
 /**
  * Newest first, no duplicates, and nothing newer than `olderThan`.
  *
