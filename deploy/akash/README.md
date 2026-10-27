@@ -61,6 +61,18 @@ Notes that apply either way:
   exists, the entrypoint sends metrics to loopback instead of crash-looping
   (0.1.1). Keep statsd + grafana if you want the dashboard.
 
+## Budget options (if the persistent price stings)
+
+1. **Persistent only where it matters most:** keep the 2 TiB `/app/.rocks`
+   volume but make `/app/.rocks.snapshot` ephemeral. The snapshot scratch is
+   only used during the first download; after that, the chain data is what
+   matters. This cuts roughly a third of the persistent bill.
+2. **Fully ephemeral (`sdl-budget.yaml`):** no persistent volumes at all.
+   Cheapest possible. The trade: a pod reschedule wipes the chain and you
+   re-download ~470 GB (hours). If the pod just runs, nothing re-downloads —
+   this is a real, reasonable budget choice, not a broken one. Do NOT use it
+   if you plan frequent redeploys.
+
 ## Storage: ephemeral vs persistent (and how to migrate)
 
 - **Persistent (what our SDL uses):** `/app/.rocks` = 2 TiB, `/app/.rocks.snapshot` = 1 TiB,
