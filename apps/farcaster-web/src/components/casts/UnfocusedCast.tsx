@@ -3,7 +3,6 @@ import { parseCaip19Url } from 'farcaster-client-data';
 import {
   CastClickType,
   EventingProvider,
-  resolveUsername,
   useTrackCastClick,
 } from 'farcaster-client-hooks';
 import React, {
@@ -22,6 +21,7 @@ import { Recasts } from '~/components/casts/actions/Recasts';
 import { Replies } from '~/components/casts/actions/Replies';
 import { CastAttachmentsSection } from '~/components/casts/CastAttachmentsSection';
 import { CastAuthorLine } from '~/components/casts/CastAuthorLine';
+import { CastReplyContext } from '~/components/casts/CastReplyContext';
 import { CastTranslationTopHat } from '~/components/casts/CastTranslationTopHat';
 import { ClampedCastBody } from '~/components/casts/ClampedCastBody';
 import { DeletedCast } from '~/components/casts/DeletedCast';
@@ -31,7 +31,6 @@ import { PinLabel } from '~/components/casts/PinLabel';
 import { ShowMore } from '~/components/casts/ShowMore';
 import { Threadline } from '~/components/casts/Threadline';
 import { CastProps } from '~/components/casts/types';
-import { LinkToProfile } from '~/components/links/LinkToProfile';
 import { CastMenuActions } from '~/components/popovers/CastMenuActions';
 import { mdAvatarDiameter } from '~/constants/avatar';
 import { useCastBody } from '~/hooks/casts/useCastBody';
@@ -394,14 +393,10 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
                     <CastMenuActions cast={castWithContext} />
                   )}
                 </div>
-                {typeof cast.parentAuthor !== 'undefined' &&
+                {cast.parentHash &&
                   ((!isReplyingToContinuousCast && !isReplyingToFocusedCast) ||
                     forceShowReplyingTo) && (
-                    <div
-                      className={cn(
-                        'flex flex-row space-x-1 pb-1 text-xs text-muted',
-                      )}
-                    >
+                    <div className="flex flex-row">
                       <div
                         className="shrink-0"
                         style={{
@@ -409,24 +404,11 @@ const UnfocusedCastContent: FC<UnfocusedCastProps> = memo(
                           minWidth: mdAvatarDiameter + 20,
                         }}
                       />
-                      <div>Replying to</div>
-                      {cast.parentAuthor.fid === currentUser?.fid ? (
-                        <div>you</div>
-                      ) : (
-                        <LinkToProfile
-                          title={cast.parentAuthor.displayName}
-                          user={cast.parentAuthor}
-                          className="relative hover:underline"
-                          onClick={() => {
-                            trackCastClick({ type: CastClickType.Mention });
-                          }}
-                        >
-                          {resolveUsername({
-                            username: cast.parentAuthor.username,
-                            fid: cast.parentAuthor.fid,
-                          })}
-                        </LinkToProfile>
-                      )}
+                      <CastReplyContext
+                        cast={cast}
+                        currentUserFid={currentUser?.fid}
+                        className="min-w-0"
+                      />
                     </div>
                   )}
                 {isReplyingToEmbed &&
