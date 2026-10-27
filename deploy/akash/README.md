@@ -5,7 +5,7 @@ A Snapchain read node, packaged as a container deployment: `fiddy-node` image +
 
 ## Image
 
-`ghcr.io/ivcained/fiddy-node:0.1.1` (also `:latest`). Built from
+`ghcr.io/ivcained/fiddy-node:0.1.2` (also `:latest`). Built from
 `farcasterxyz/snapchain:latest` with the read-node config baked in
 (`read_node = true`, mainnet, upstream validator sets and snapshot endpoint),
 so no host files are needed. Built and smoke-tested on 2026-10-27: the
@@ -33,6 +33,13 @@ cat deploy/akash/sdl.yaml
   API works without it. statsd is optional too: when no statsd service
   exists, the entrypoint sends metrics to loopback instead of crash-looping
   (0.1.1). Keep statsd + grafana if you want the dashboard.
+
+## Updates
+
+- On start, the image checks `deploy/akash/VERSION` on main and prints an
+  `UPDATE AVAILABLE` line with the redeploy command when a newer image exists.
+  It never rewrites itself: redeploying with the new tag (or `:latest`) is the
+  upgrade, and the persistent volumes carry your chain data forward.
 
 ## Costs — read this before accepting a lease
 

@@ -11,6 +11,7 @@ RUN chmod +x /app/entrypoint.sh
 # /app/.rocks          chain state (2 TiB recommended)
 # /app/.rocks.snapshot snapshot download scratch (1 TiB recommended)
 ENV RUST_BACKTRACE=full
+ENV FIDDY_IMAGE_VERSION=0.1.2
 
 EXPOSE 3381/tcp 3382/udp 3383/tcp
 
