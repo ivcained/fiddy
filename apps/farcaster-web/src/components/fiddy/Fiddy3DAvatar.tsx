@@ -1,19 +1,10 @@
 /**
- * The Fiddy 3D avatar for profile display — shows an animated GIF PFP when
- * a Fiddy 3D generation exists, or falls back to normal Farester PFP.
- *
- * Three rules, in this order:
- *
- *   1. The still paints first, always. The avatar is never empty, and it is
- *      never the reason the profile waits — the static thumbnail is fetched
- *      first and is a real placeholder.
- *   2. Motion is asked for, not assumed. Under `prefers-reduced-motion: reduce`
- *      the GIF is never fetched: reduce user bandwidth and respect preference.
- *   3. Anything that goes wrong — fetch failure, bad data, no generation —
- *      leaves the fallback (normal PFP) in place silently.
+ * The Fiddy 3D avatar for profile display: an animated GIF when motion is
+ * allowed, a static thumbnail under reduced motion, and the normal PFP when
+ * assets are missing or cannot be loaded.
  */
 
-import { FC, memo, useEffect, useRef, useState } from 'react';
+import { FC, memo, useEffect, useState } from 'react';
 
 import { fiddy3DAssetUrl, fiddy3DMotionAllowed } from './fiddy3DProfile';
 
@@ -45,10 +36,7 @@ interface Fiddy3DAvatarProps {
   onLoad?: () => void;
 }
 
-/**
- * Check if an image URL points to a real image (not an error page).
- * Uses HEAD to fetch headers and verifies content-type.
- */
+/** Check that a URL answers with an image rather than an HTML error page. */
 const probeImage = async (
   url: string,
   signal: AbortSignal,
@@ -59,7 +47,6 @@ const probeImage = async (
       return false;
     }
     const contentType = response.headers.get('content-type') ?? '';
-    // Accept common image types, reject HTML (error pages like 404)
     return contentType.startsWith('image/');
   } catch {
     return false;
@@ -76,9 +63,8 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
     onError,
     onLoad,
   }) => {
-    const containerRef = useRef<HTMLDivElement>(null);
     const [has3D, setHas3D] = useState(false);
-    const [motionAllowed, setMotionAllowed] = useState(true);
+    const [motionAllowed] = useState(() => fiddy3DMotionAllowed());
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
@@ -86,18 +72,15 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
     const gifUrl = fiddy3DAssetUrl(fid, 'turntable.gif');
     const thumbnailUrl = fiddy3DAssetUrl(fid, 'thumbnail.png');
 
-    // Rule 2: Check reduced motion preference BEFORE fetching
-    useEffect(() => {
-      setMotionAllowed(fiddy3DMotionAllowed());
-    }, []);
-
-    // Probe for 3D assets and decide which to use
     useEffect(() => {
       const controller = new AbortController();
       let disposed = false;
 
+      setHas3D(false);
+      setLoading(true);
+      setError(false);
+
       const checkAssets = async () => {
-        // Always load thumbnail first as a fast probe
         const thumbnailExists = await probeImage(
           thumbnailUrl,
           controller.signal,
@@ -111,23 +94,23 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
           return;
         }
 
-        // Thumbnail exists — determine what to show based on motion preference
+        // Reduced motion is decided before this effect starts, so this path
+        // never probes or downloads the GIF.
         if (!motionAllowed) {
-          // Reduced motion - use static thumbnail
           setHas3D(true);
-        } else {
-          // Free to show animated GIF
-          const gifExists = await probeImage(gifUrl, controller.signal);
-          if (disposed) {
-            return;
-          }
-          setHas3D(gifExists && thumbnailExists);
+          setLoading(false);
+          return;
         }
 
+        const gifExists = await probeImage(gifUrl, controller.signal);
+        if (disposed) {
+          return;
+        }
+        setHas3D(gifExists);
         setLoading(false);
       };
 
-      checkAssets();
+      void checkAssets();
 
       return () => {
         disposed = true;
@@ -135,50 +118,28 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
       };
     }, [gifUrl, thumbnailUrl, motionAllowed]);
 
-    // Handle error callback
-    useEffect(() => {
-      if (error && onError) {
-        onError();
-      }
-    }, [error, onError]);
-
-    // Handle load callback
-    useEffect(() => {
-      if (!loading && has3D && !error && onLoad) {
-        onLoad();
-      }
-    }, [loading, has3D, error, onLoad]);
-
     const handleError = () => {
       setError(true);
-      if (onError) {
-        onError();
-      }
+      onError?.();
     };
 
-    const handleLoad = () => {
-      if (onLoad) {
-        onLoad();
-      }
-    };
-
-    // Determine which image to show
-    const show3D = has3D && !loading && !error;
-    const showThumbnail = !show3D && has3D && !loading && !error;
-    const showFallback = !has3D || loading || error;
+    const show3D = has3D && !loading && !error && motionAllowed;
+    const showThumbnail = has3D && !loading && !error && !motionAllowed;
+    const showFallback = !show3D && !showThumbnail;
+    const showing3D = show3D || showThumbnail;
 
     return (
       <div
-        ref={containerRef}
         className={`relative overflow-hidden rounded-full ${className}`}
         style={{ width: targetSize, height: targetSize }}
         role="img"
         aria-label={
-          show3D ? `${displayName}'s Fiddy 3D avatar` : `${displayName} avatar`
+          showing3D
+            ? `${displayName}'s Fiddy 3D avatar`
+            : `${displayName} avatar`
         }
       >
-        {/* Priority: 3D GIF (animated) - only when motion is allowed */}
-        {show3D && motionAllowed && (
+        {show3D && (
           <img
             src={gifUrl}
             alt=""
@@ -188,12 +149,11 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
             loading="lazy"
             decoding="async"
             onError={handleError}
-            onLoad={handleLoad}
+            onLoad={onLoad}
           />
         )}
 
-        {/* Priority: Static thumbnail (reduced motion) */}
-        {showThumbnail && !motionAllowed && (
+        {showThumbnail && (
           <img
             src={thumbnailUrl}
             alt=""
@@ -203,11 +163,10 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
             loading="lazy"
             decoding="async"
             onError={handleError}
-            onLoad={handleLoad}
+            onLoad={onLoad}
           />
         )}
 
-        {/* Fallback: Normal PFP */}
         {showFallback && fallbackPfpUrl && (
           <img
             src={fallbackPfpUrl}
@@ -220,7 +179,6 @@ const Fiddy3DAvatar: FC<Fiddy3DAvatarProps> = memo(
           />
         )}
 
-        {/* Loading state - show fallback or placeholder */}
         {loading && !fallbackPfpUrl && (
           <div
             className="size-full animate-pulse bg-light-purple"

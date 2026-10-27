@@ -109,7 +109,9 @@ describe('Fiddy3DAvatar', () => {
 
     // Verify the GIF wasn't fetched
     expect(
-      mockFetch.mock.calls.some((call) => call[0].includes('turntable.gif')),
+      mockFetch.mock.calls.some((call) =>
+        String(call[0]).includes('turntable.gif'),
+      ),
     ).toBe(false);
   });
 
@@ -200,7 +202,8 @@ describe('Reduced motion handling', () => {
     const thumbnailUrl = fiddy3DAssetUrl(555, 'thumbnail.png');
 
     // First call (thumbnail) returns image, second call (GIF) would return image too
-    mockFetch.mockImplementation(async (url: string) => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
       if (url === thumbnailUrl) {
         return {
           ok: true,

@@ -80,7 +80,14 @@ describe('localStorage integration', () => {
   });
 
   it('returns null for invalid stored values', () => {
-    localStorage.setItem('fiddy3d_fid', 'not-a-number');
+    for (const value of ['not-a-number', '123abc', '0', '-1', '1.5']) {
+      localStorage.setItem('fiddy3d_fid', value);
+      expect(getStoredFiddy3DFid()).toBe(null);
+    }
+  });
+
+  it('does not store an invalid FID', () => {
+    setStoredFiddy3DFid(0);
     expect(getStoredFiddy3DFid()).toBe(null);
   });
 

@@ -42,8 +42,8 @@ export const getStoredFiddy3DFid = (): number | null => {
     if (!stored) {
       return null;
     }
-    const parsed = parseInt(stored, 10);
-    return isNaN(parsed) ? null : parsed;
+    const parsed = Number(stored);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
   } catch {
     return null;
   }
@@ -53,7 +53,7 @@ export const getStoredFiddy3DFid = (): number | null => {
  * Store the Fiddy 3D FID for the current user.
  */
 export const setStoredFiddy3DFid = (fid: number): void => {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !Number.isSafeInteger(fid) || fid <= 0) {
     return;
   }
   try {

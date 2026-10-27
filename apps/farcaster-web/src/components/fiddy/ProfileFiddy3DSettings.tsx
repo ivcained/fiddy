@@ -1,8 +1,6 @@
 /**
  * Profile edit component that allows users to enable Fiddy 3D on their
- * own profile. Only shown to the signed-in user for their own profile.
- * Uses local storage to remember the setting — no server claim.
- * Only allows the signed-in user's own FID.
+ * own profile. Storage is local-only and keyed to the signed-in FID.
  */
 
 import { FC, memo, useCallback, useEffect, useState } from 'react';
@@ -29,19 +27,10 @@ const ProfileFiddy3DSettings: FC<ProfileFiddy3DSettingsProps> = memo(
     const [enabled, setEnabled] = useState(false);
     const [hasAssets, setHasAssets] = useState<boolean | null>(null);
 
-    // Load stored preference on mount
     useEffect(() => {
-      if (!isOwnProfile) {
-        return;
-      }
-      const stored = getStoredFiddy3DFid();
-      // Only enable if it matches the current signed-in FID
-      if (stored === signedInFid) {
-        setEnabled(true);
-      }
+      setEnabled(isOwnProfile && getStoredFiddy3DFid() === signedInFid);
     }, [isOwnProfile, signedInFid]);
 
-    // Check if the user's FID has 3D assets (probe the thumbnail)
     useEffect(() => {
       if (!enabled || !signedInFid) {
         setHasAssets(null);
@@ -49,6 +38,8 @@ const ProfileFiddy3DSettings: FC<ProfileFiddy3DSettingsProps> = memo(
       }
 
       const controller = new AbortController();
+      let disposed = false;
+
       const checkAssets = async () => {
         try {
           const thumbnailUrl = fiddy3DAssetUrl(signedInFid, 'thumbnail.png');
@@ -56,28 +47,41 @@ const ProfileFiddy3DSettings: FC<ProfileFiddy3DSettingsProps> = memo(
             method: 'HEAD',
             signal: controller.signal,
           });
-          setHasAssets(response.ok);
+          if (!disposed) {
+            setHasAssets(response.ok);
+          }
         } catch {
-          setHasAssets(false);
+          if (!disposed) {
+            setHasAssets(false);
+          }
         }
       };
-      checkAssets();
+      void checkAssets();
 
-      return () => controller.abort();
+      return () => {
+        disposed = true;
+        controller.abort();
+      };
     }, [enabled, signedInFid]);
 
     const handleToggle = useCallback(() => {
+      if (
+        !isOwnProfile ||
+        !Number.isSafeInteger(signedInFid) ||
+        signedInFid <= 0
+      ) {
+        return;
+      }
+
       if (enabled) {
-        // Disable: clear storage
         setEnabled(false);
         clearStoredFiddy3DFid();
         setHasAssets(null);
       } else {
-        // Enable: store signed-in FID
         setStoredFiddy3DFid(signedInFid);
         setEnabled(true);
       }
-    }, [enabled, signedInFid]);
+    }, [enabled, isOwnProfile, signedInFid]);
 
     if (!isOwnProfile) {
       return null;
@@ -93,6 +97,8 @@ const ProfileFiddy3DSettings: FC<ProfileFiddy3DSettingsProps> = memo(
             <label className="relative inline-flex cursor-pointer items-center">
               <input
                 type="checkbox"
+                role="switch"
+                aria-label="Use Fiddy 3D on your profile"
                 checked={enabled}
                 onChange={handleToggle}
                 className="peer sr-only"
@@ -111,12 +117,13 @@ const ProfileFiddy3DSettings: FC<ProfileFiddy3DSettingsProps> = memo(
               )}
               {hasAssets === false && (
                 <span className="text-yellow-600">
-                  No 3D found.{' '}
+                  No 3D figure found.{' '}
                   <ExternalLink
                     href={FIDDY_3D_CREATE_URL}
+                    title="Get your chibi figure"
                     className="text-purple-600 hover:underline"
                   >
-                    Create yours →
+                    Get your chibi figure →
                   </ExternalLink>
                 </span>
               )}
@@ -126,6 +133,7 @@ const ProfileFiddy3DSettings: FC<ProfileFiddy3DSettingsProps> = memo(
           {!enabled && (
             <ExternalLink
               href={FIDDY_3D_CREATE_URL}
+              title="Get your chibi figure"
               className="text-xs text-purple-600 hover:underline"
             >
               Get your chibi figure →
