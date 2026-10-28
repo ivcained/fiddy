@@ -85,6 +85,7 @@ import {
   NotificationGroupUsersPage,
   NotificationsPage,
   OpenOnMobilePage,
+  PeopleToFollowPage,
   PrivacyPolicyPage,
   ProfileAssetsWithoutUsernamePage,
   ProfileAssetsWithUsernamePage,
@@ -187,6 +188,7 @@ export type RouteFamily =
   | 'bookmarks'
   | 'starter-packs'
   | 'news'
+  | 'peopleToFollow'
   | 'saved';
 
 const routes = {
@@ -954,6 +956,13 @@ const routes = {
     search: {},
     family: family('bookmarks'),
     Component: BookmarksPage,
+  },
+  peopleToFollow: {
+    path: `${appPathPrefix}/people`,
+    params: {},
+    search: {},
+    family: family('default'),
+    Component: PeopleToFollowPage,
   },
   saved: {
     path: `${appPathPrefix}/saved`,

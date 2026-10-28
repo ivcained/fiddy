@@ -36,6 +36,7 @@ import {
   noteProviderReadResult,
   useProviderWatch,
 } from '~/snapchain/providers';
+import { registerSeamFetch } from '~/snapchain/seamFetchRef';
 import { useClientFilterPreferences } from '~/snapchain/useClientFilterPreferences';
 import { useMutePreferences } from '~/snapchain/useMutePreferences';
 import { useNodeChoice } from '~/snapchain/useNodeChoice';
@@ -140,9 +141,12 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
      */
     const nodeBackedHandle = useMemo(() => {
       if (localApiEnabled || !isNodeBackedClientEnabled()) {
+        // No seam in this build: a surface that asked for it by name
+        // (`~/snapchain/seamFetchRef`) is told so, in its own words.
+        registerSeamFetch(undefined);
         return undefined;
       }
-      return createProviderBackedFetch({
+      const handle = createProviderBackedFetch({
         // Asked fresh on every request, so a switch mid-session takes effect
         // on the very next read instead of needing the app to rebuild.
         getActiveProvider: () => getActiveProvider(),
@@ -168,6 +172,10 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         // (see above, and `~/hooks/data/useCountsBehindSink`).
         onCountsRead,
       });
+      // The seam exists: name it for the surfaces that ask for it directly
+      // (`getSeamFetch`), and hand it back to this provider's own wiring.
+      registerSeamFetch(handle.fetch);
+      return handle;
       // The address the build was configured with is the only input that can
       // change under a running tab and needs the adapter rebuilt; the live
       // provider is read per request, above. `nodeChoice` is read through the

@@ -160,6 +160,15 @@ const Router: React.FC = () => {
                   path={routes.saved.path}
                   element={<routes.saved.Component />}
                 />
+                {/* People to follow: a feed-header tab away, ranked off the
+                    node's own follow graph (ported phunk engine). Without this
+                    route /~/people falls through to the vanity profile route
+                    for the handle @people — measured as a "username proof not
+                    found" error card. */}
+                <Route
+                  path={routes.peopleToFollow.path}
+                  element={<routes.peopleToFollow.Component />}
+                />
                 {/* The agent surface is a first-class route: the sidebar entry,
                     the hatch CTA on the empty state, and the status pill all
                     land here, and without this route the nav would fall through

@@ -907,6 +907,12 @@ export const OpenOnMobilePage = lazyWithPreload(() =>
   })),
 );
 
+export const PeopleToFollowPage = lazyWithPreload(() =>
+  import('~/pages/peopleToFollow/PeopleToFollowPage').then((res) => ({
+    default: res.PeopleToFollowPage,
+  })),
+);
+
 export const LoginRedirectToAppPage = lazyWithPreload(() =>
   import('~/pages/loginRedirectToApp/LoginRedirectToAppPage').then((res) => ({
     default: res.LoginRedirectToAppPage,
