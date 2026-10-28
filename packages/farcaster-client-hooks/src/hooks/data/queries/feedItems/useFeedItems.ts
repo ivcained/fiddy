@@ -353,6 +353,9 @@ const useNonSuspenseFeedItems = ({
   onNullFeedItemsResponse,
   sortMode,
   seedCastHash,
+  initialData,
+  initialDataUpdatedAt,
+  initialStaleTime = 60_000,
 }: {
   feedKey: string;
   feedType: string;
@@ -362,6 +365,12 @@ const useNonSuspenseFeedItems = ({
   includeUserSuggestions?: boolean;
   sortMode?: ApiFeedSortMode;
   seedCastHash?: string;
+  /** A server-drawn first page, before React has made its own read. */
+  initialData?: InfiniteData<ApiGetFeedItems200Response>;
+  /** When that first page was drawn; absent means it is fresh now. */
+  initialDataUpdatedAt?: number;
+  /** How long the seeded page may stand before focus or mount refreshes it. */
+  initialStaleTime?: number;
 }) => {
   const { apiClient } = useFarcasterApiClient();
   const batchUpdateGloballyCachedCast = useBatchMergeIntoGloballyCachedCasts();
@@ -441,6 +450,19 @@ const useNonSuspenseFeedItems = ({
 
   const query = useInfiniteQuery({
     ...feedItemsDefaultQueryOptions(feedKey),
+    // A seeded first page is a real page the server just read: mount must not
+    // immediately repeat that read (the browser only asks again when it is
+    // stale, focused, or the reader asks for a retry).
+    ...(initialData
+      ? {
+          initialData,
+          ...(initialDataUpdatedAt === undefined
+            ? {}
+            : { initialDataUpdatedAt }),
+          staleTime: initialStaleTime,
+          refetchOnMount: false,
+        }
+      : {}),
     initialPageParam: undefined,
     queryKey: queryKey,
 

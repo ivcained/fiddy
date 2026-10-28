@@ -22,6 +22,7 @@
 
 import { cardUrl, pageTags, renderPageHtml } from './shellMeta.mjs';
 import { castPage, lookPage, profilePage } from './pages.mjs';
+import { publicFeedPage } from '../public-feed/page.mjs';
 import { lookFacts, shareableLook } from './looks.mjs';
 import { CARD_HEIGHT, CARD_WIDTH } from './cards.mjs';
 import {
@@ -95,6 +96,8 @@ export const createUnfurlHandler = ({
   siteCard,
   renderCard,
   reader,
+  /** The bounded recent public-feed cache (`../public-feed/`), when shipped. */
+  feed,
   /**
    * Where shared looks live (`looks.mjs`), or nothing.
    *
@@ -436,6 +439,45 @@ export const createUnfurlHandler = ({
         return text(405, 'only GET\n');
       }
 
+      // The signed-out public feed. Unlike the per-link pages this has its own
+      // one-minute data cache, so the generic five-minute HTML cache cannot
+      // pin an old first page. Any unavailable or unusable read is the shell.
+      if (
+        segments[0] === 'feed' &&
+        (segments.length === 1 || (segments.length === 2 && !segments[1]))
+      ) {
+        try {
+          const current = feed ? await feed.get() : undefined;
+          if (current) {
+            return {
+              status: 200,
+              headers: {
+                'content-type': 'text/html; charset=utf-8',
+                'cache-control': 'public, max-age=60, no-transform',
+                'x-unfurl': 'page:feed',
+              },
+              body: publicFeedPage({
+                origin,
+                shell: shellSource(),
+                result: current.result,
+                at: current.at,
+              }),
+            };
+          }
+        } catch {
+          // The ordinary client still has its own empty, error and retry path.
+        }
+        return {
+          status: 200,
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'public, max-age=300, no-transform',
+            'x-unfurl': 'shell',
+          },
+          body: shellSource(),
+        };
+      }
+
       // A shared look, as the data the app reads (`/look/<id>.json`) or as the
       // page a crawler reads (`/look/<id>`, below with the cast and profile
       // pages). Both come from the same checked body.
@@ -499,6 +541,9 @@ export const createUnfurlHandler = ({
             translations: translator
               ? { on: translator.available(), ...translator.sizes() }
               : 'off',
+            // The server-drawn feed's one bounded cache, or nothing on a host
+            // that ships the SPA only. A read's age, not a fake freshness.
+            feed: feed ? (feed.stats?.() ?? null) : 'off',
           })}\n`,
         };
       }

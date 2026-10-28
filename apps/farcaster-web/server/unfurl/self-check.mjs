@@ -72,6 +72,7 @@ const shell = readFileSync(shellPath, 'utf8');
 // WHAT A PAGE IS, built here rather than fetched: the fixtures carry the shapes
 // a hostile one takes (a quote, an angle bracket, a long body, no text at all).
 const CAST_HASH = `0x${'a'.repeat(40)}`;
+const FEED_HASH = `0x${'b'.repeat(40)}`;
 const LOOK_ID = '0123456789';
 const LOOK = {
   name: 'Fiddy dark',
@@ -140,6 +141,33 @@ const handler = createUnfurlHandler({
   looks: {
     get: async (id) => (id === LOOK_ID ? LOOK : undefined),
   },
+  feed: {
+    get: async () => ({
+      at: 1234,
+      result: {
+        latestMainCastTimestamp: 1,
+        items: [
+          {
+            id: 'fixture-feed-a',
+            cast: {
+              hash: FEED_HASH,
+              fid: 3,
+              text: 'A root cast with <brackets> & "quotes"',
+              timestamp: Date.UTC(2026, 0, 2),
+              author: {
+                fid: 3,
+                username: 'dwr',
+                displayName: 'Dan Romero',
+              },
+              replies: { count: 1 },
+              reactions: { count: 2 },
+              recasts: { count: 3 },
+            },
+          },
+        ],
+      },
+    }),
+  },
 });
 
 const pages = {
@@ -150,6 +178,10 @@ const pages = {
   'profile.html': await handler.handle({
     method: 'GET',
     path: '/~/profiles/3',
+  }),
+  'feed.html': await handler.handle({
+    method: 'GET',
+    path: '/feed',
   }),
   'look.html': await handler.handle({
     method: 'GET',
@@ -162,7 +194,7 @@ mkdirSync(outDir, { recursive: true });
 const withoutComments = (html) => html.replace(/<!--[\s\S]*?-->/g, '');
 const withoutLinkedData = (html) =>
   withoutComments(html).replace(
-    /<script type="application\/ld\+json">[\s\S]*?<\/script>/g,
+    /<script type="application\/(?:ld\+)?json"[^>]*>[\s\S]*?<\/script>/g,
     '',
   );
 const count = (html, pattern) => (html.match(pattern) ?? []).length;
@@ -178,11 +210,23 @@ for (const [file, answer] of Object.entries(pages)) {
       ? `${origin}/~/conversations/${CAST_HASH}`
       : kind === 'profile'
         ? `${origin}/~/profiles/3`
-        : `${origin}/look/${LOOK_ID}`;
+        : kind === 'feed'
+          ? `${origin}/feed`
+          : `${origin}/look/${LOOK_ID}`;
   const cardId =
-    kind === 'cast' ? CAST_HASH : kind === 'profile' ? '3' : LOOK_ID;
-  const image = `${origin}/unfurl/cards/${kind}/${cardId}.png`;
-  const miniAppImage = `${origin}/unfurl/cards/${kind}/${cardId}.3x2.png`;
+    kind === 'cast'
+      ? CAST_HASH
+      : kind === 'profile'
+        ? '3'
+        : kind === 'feed'
+          ? null
+          : LOOK_ID;
+  const image = cardId
+    ? `${origin}/unfurl/cards/${kind}/${cardId}.png`
+    : `${origin}/fiddy-share-card.png`;
+  const miniAppImage = cardId
+    ? `${origin}/unfurl/cards/${kind}/${cardId}.3x2.png`
+    : `${origin}/fiddy-embed.png`;
 
   check(
     `${file} answers 200 with the page's own tags`,
@@ -195,7 +239,10 @@ for (const [file, answer] of Object.entries(pages)) {
   );
   check(
     `${file} is delivered exactly as built`,
-    answer.headers['cache-control'] === 'public, max-age=300, no-transform',
+    answer.headers['cache-control'] ===
+      (kind === 'feed'
+        ? 'public, max-age=60, no-transform'
+        : 'public, max-age=300, no-transform'),
     answer.headers['cache-control'],
   );
   const miniApp = JSON.parse(
@@ -227,7 +274,7 @@ for (const [file, answer] of Object.entries(pages)) {
   check(
     `${file} drops the site's front-door tags`,
     !html.includes('fiddy — a Farcaster client with an agent') &&
-      !html.includes('/fiddy-share-card.png'),
+      (kind === 'feed' || !html.includes('/fiddy-share-card.png')),
   );
   check(
     `${file} keeps the shell body, adding only the profile crawler root`,
@@ -236,8 +283,15 @@ for (const [file, answer] of Object.entries(pages)) {
           '<div id="root"><section class="fiddy-crawler-profile"',
         ) &&
           html.endsWith(shell.slice(shell.indexOf('<!-- shell-skeleton:start')))
-      : html.slice(html.indexOf('</head>')) ===
-          shell.slice(shell.indexOf('</head>')),
+      : kind === 'feed'
+        ? html.includes(
+            '<div id="root"><main class="fiddy-server-feed" data-fiddy-server-feed>',
+          ) &&
+          html.endsWith(
+            shell.slice(shell.indexOf('<!-- shell-skeleton:start')),
+          )
+        : html.slice(html.indexOf('</head>')) ===
+            shell.slice(shell.indexOf('</head>')),
   );
   check(
     `${file} keeps the entry chunk`,
@@ -264,6 +318,25 @@ for (const [file, answer] of Object.entries(pages)) {
     check(
       `${file} cannot be broken out of by a cast body`,
       !html.includes('<brackets>') && !/<script>alert/i.test(html),
+    );
+  }
+  if (kind === 'feed') {
+    const boot = JSON.parse(
+      /<script type="application\/json" id="fiddy-public-feed-boot">([\s\S]*?)<\/script>/.exec(
+        html,
+      )?.[1] ?? 'null',
+    );
+    check(
+      `${file} draws the seed cast and its own boot data`,
+      html.includes('A root cast with &lt;brackets&gt; &amp; &quot;quotes&quot;') &&
+        !html.includes('A root cast with <brackets>') &&
+        boot?.result?.items?.[0]?.cast?.hash === FEED_HASH,
+    );
+    check(
+      `${file} hides the loading skeleton and carries no inline script`,
+      html.includes('#shell-skeleton{display:none}') &&
+        count(withoutLinkedData(html), /<script\b[^>]*>/gi) ===
+          count(withoutLinkedData(shell), /<script\b[^>]*>/gi),
     );
   }
   if (kind === 'profile') {
@@ -433,5 +506,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  "  unfurl self-check ok: all three pages carry their own cards and tags in both sizes, drawn over this build's own shell",
+  "  unfurl self-check ok: cast, profile, feed and look carry their tags, with cast/profile/look cards in both sizes, drawn over this build's own shell",
 );

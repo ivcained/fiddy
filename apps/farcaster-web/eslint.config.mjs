@@ -3,6 +3,11 @@ import customConfig from 'eslint-config-custom/react';
 const NOTION_RE = String.raw`/notion\.(?:so|site)/i`;
 
 export default [
+  {
+    // Built at release time by scripts/build-public-feed-server.mjs. This is a
+    // bundled artifact, not source, and it is gitignored as well.
+    ignores: ['server/public-feed/generated/**'],
+  },
   ...customConfig,
   {
     files: ['**/*.config.js', '**/*.config.mjs', '**/.prettierrc.js'],
@@ -248,6 +253,8 @@ export default [
       // detector and the server's service) are held to each other here
       // (card t_bb7cca3b).
       'src/__tests__/castTranslationService.test.ts',
+      // The server-drawn feed lives beside that same host service.
+      'src/__tests__/serverPublicFeed.test.ts',
     ],
     rules: {
       'no-restricted-imports': 'off',

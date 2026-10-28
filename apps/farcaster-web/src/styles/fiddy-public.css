@@ -239,3 +239,111 @@
   border: 1.5px solid var(--fiddy-glass-border, rgba(238, 240, 232, 0.14));
   color: var(--fiddy-ink-dim, #9ba193);
 }
+
+/* ---------- the server-drawn first paint ----------
+   Before the SPA mounts, `/feed` can already carry its own recent window as
+   plain HTML and a boot seed. These are the same visual parts the app's column
+   uses, drawn without JavaScript, and the SPA replaces the static root as a
+   whole rather than animating from these to the same casts. */
+
+.fiddy-server-feed {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.fiddy-server-feed-head {
+  margin: 12px 16px 0;
+  color: var(--fiddy-ink, #eef0e8);
+}
+
+.fiddy-server-feed-brand {
+  color: var(--fiddy-accent, #d4ff3f);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fiddy-server-feed-head h1 {
+  margin: 6px 0 4px;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.fiddy-server-feed-head p {
+  margin: 0 0 12px;
+  color: var(--fiddy-ink-dim, #9ba193);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.fiddy-server-cast {
+  margin: 0 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--fiddy-glass-border, rgba(238, 240, 232, 0.14));
+  color: var(--fiddy-ink, #eef0e8);
+}
+
+.fiddy-server-cast header,
+.fiddy-server-cast footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fiddy-server-cast header a,
+.fiddy-server-cast header span {
+  color: var(--fiddy-ink, #eef0e8);
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.fiddy-server-cast header span span,
+.fiddy-server-cast footer {
+  color: var(--fiddy-ink-dim, #9ba193);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.fiddy-server-cast time,
+.fiddy-server-cast footer span {
+  white-space: nowrap;
+}
+
+.fiddy-server-cast-text {
+  margin: 8px 0 0;
+  color: var(--fiddy-ink, #eef0e8);
+  font-size: 14.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.fiddy-server-cast-links,
+.fiddy-server-cast footer {
+  margin-top: 8px;
+}
+
+.fiddy-server-cast-links a,
+.fiddy-server-cast-open {
+  color: var(--fiddy-accent, #d4ff3f);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.fiddy-server-cast footer span + span::before {
+  content: '·';
+  margin-right: 8px;
+}
+
+@media (max-width: 640px) {
+  .fiddy-server-feed-head,
+  .fiddy-server-cast {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+}

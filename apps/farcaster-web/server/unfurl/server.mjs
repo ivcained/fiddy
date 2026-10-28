@@ -20,6 +20,12 @@
  *                         still answers, as the shell: nothing is invented.
  *   PYTHON                default python3, running render-card.py
  *   READ_TIMEOUT_MS       default 8000, for every upstream read
+ *   FIDDY_PUBLIC_FEED     "off" disables the server-drawn /feed and serves the
+ *                         ordinary shell (a host that wants the SPA only)
+ *   FIDDY_PUBLIC_FEED_FIRST_WAIT_MS
+ *                         default 2000, how long a cold /feed waits for the
+ *                         node before answering the shell while the read keeps
+ *                         going in the background
  *   FIDDY_LOOKS_DIR       where shared looks are kept (see looks.mjs). Absent
  *                         means this host stores none: a look it already holds
  *                         still renders, and a share request refuses in one
@@ -50,6 +56,7 @@ import { carriesApiBody, LOOK_SHARE_PATH, readLookBody } from './lookBody.mjs';
 import { createLookStore, LOOK_LIMITS } from './looks.mjs';
 import { createUnfurlHandler } from './handler.mjs';
 import { createLinkReader } from './reader.mjs';
+import { createPublicFeedService } from '../public-feed/service.mjs';
 import {
   createTranslationStore,
   createTranslator,
@@ -126,6 +133,22 @@ const looksDir = process.env.FIDDY_LOOKS_DIR;
 const looks = looksDir ? createLookStore({ dir: looksDir }) : undefined;
 
 /**
+ * The server-drawn public feed. It reads the SAME public window the client
+ * reads, behind a one-entry stale-while-refresh cache, and falls back to the
+ * ordinary shell whenever the node cannot answer honestly.
+ */
+const feed =
+  process.env.FIDDY_PUBLIC_FEED === 'off'
+    ? undefined
+    : createPublicFeedService({
+        nodeBaseUrl: process.env.SNAPCHAIN_HTTP_URL ?? 'https://haatz.quilibrium.com',
+        readTimeoutMs: timeoutMs,
+        waitMs: Number(
+          process.env.FIDDY_PUBLIC_FEED_FIRST_WAIT_MS ?? 2_000,
+        ),
+      });
+
+/**
  * Cast translations (`../translate/translate.mjs`), or nothing.
  *
  * Nothing is a real state, not a broken one: a host with no state directory and
@@ -164,6 +187,7 @@ const handler = createUnfurlHandler({
   siteCard: loadSiteCard,
   renderCard,
   reader,
+  feed,
   looks,
   translator,
 });

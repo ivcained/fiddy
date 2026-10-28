@@ -1,7 +1,7 @@
 #!/bin/bash
 # Install (or refresh) the per-page unfurl service on the host that serves
-# fiddy.fun: the systemd unit, its environment file, and the two nginx
-# locations that route to it.
+# fiddy.fun: the systemd unit, its environment file, and the nginx
+# locations that route public pages to it.
 #
 #   bash scripts/install-fiddy-unfurl-service.sh
 #
