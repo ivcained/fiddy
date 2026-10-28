@@ -24,6 +24,7 @@
 # (PROBE_VITE_CACHE_DIR) writes a sibling of this one, and an unignored 100MB
 # directory is worse than untidy — eslint walks it on every lint run.
 /.probe-vite-cache*
+/server/public-feed/generated
 
 npm-debug.log*
 yarn-debug.log*

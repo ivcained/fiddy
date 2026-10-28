@@ -20,6 +20,10 @@ import { useNonSuspenseFeedItems } from 'farcaster-client-hooks';
 import { useCallback, useMemo, useState } from 'react';
 
 import {
+  consumePublicFeedBoot,
+  mergeRefreshedPublicFeed,
+} from '~/lib/publicFeedBoot';
+import {
   feedTypeForWindow,
   PUBLIC_FEED_KEY,
   type PublicFeedKind,
@@ -69,10 +73,31 @@ export const usePublicWindow = (variant: PublicBrowseVariant): PublicWindow => {
   );
   const [topic, setTopic] = useState<string | null>(null);
 
+  // The server-drawn recent page, if this document carried one. Consumed once:
+  // it is a first paint, not a second definition of the feed, and it seeds
+  // exactly the same query the page would otherwise ask for.
+  const [boot] = useState(() =>
+    variant === 'feed' ? consumePublicFeedBoot() : undefined,
+  );
   const feedType = feedTypeForWindow({ kind, topic });
+
+  // Only the opening recent window matches what the server drew; a topic or
+  // the ranked view is the reader's own question and starts from its own read.
+  const seed = boot && kind === 'recent' && topic === null ? boot : undefined;
+  const initialData = useMemo(
+    () =>
+      seed
+        ? {
+            pageParams: [undefined],
+            pages: [{ result: seed.result }],
+          }
+        : undefined,
+    [seed],
+  );
 
   const {
     feedItems,
+    dataUpdatedAt,
     isLoading,
     isError,
     error,
@@ -88,14 +113,42 @@ export const usePublicWindow = (variant: PublicBrowseVariant): PublicWindow => {
     // bookkeeping, no updateState write.
     updateState: false,
     onNullFeedItemsResponse: noop,
+    ...(initialData
+      ? {
+          initialData,
+          initialDataUpdatedAt: seed?.at,
+          // The server's own cache refreshes on a one-minute beat; the browser
+          // may keep the seed for that long before focus refreshes it.
+          initialStaleTime: 60_000,
+        }
+      : {}),
   });
+
+  // Every refresh of the seeded recent window keeps the initial casts on top,
+  // taking each cast's fresh values when it has them. Keeping this merge in
+  // place on later renders matters too: a count or context update must not
+  // restore the network's order and visibly move cards after the first paint.
+  const orderedFeedItems = useMemo(() => {
+    if (
+      boot &&
+      kind === 'recent' &&
+      topic === null &&
+      dataUpdatedAt > boot.at
+    ) {
+      return mergeRefreshedPublicFeed({
+        bootItems: boot.result.items,
+        freshItems: feedItems,
+      });
+    }
+    return feedItems;
+  }, [boot, feedItems, dataUpdatedAt, kind, topic]);
 
   const castsWithContext = useMemo(
     () =>
-      buildCastsWithContext(feedItems, {
+      buildCastsWithContext(orderedFeedItems, {
         showChannelTag: (cast) => !cast.parentHash,
       }),
-    [feedItems],
+    [orderedFeedItems],
   );
 
   /**
@@ -108,8 +161,8 @@ export const usePublicWindow = (variant: PublicBrowseVariant): PublicWindow => {
    * the whole window (`PublicBrowsePage`, the topic row).
    */
   const topics = useMemo(
-    () => topicsFromCasts(feedItems.map((item) => item.cast)),
-    [feedItems],
+    () => topicsFromCasts(orderedFeedItems.map((item) => item.cast)),
+    [orderedFeedItems],
   );
 
   const selectKind = useCallback((next: PublicFeedKind) => {

@@ -209,6 +209,16 @@ say "2/8 vite build (node $NODE_URL, network '${NETWORK:-not recorded}', media $
   NODE_OPTIONS=--max-old-space-size=8192 npx vite build > "$STAGE/build.log" 2>&1 ) \
   || { tail -30 "$STAGE/build.log"; exit 1; }
 
+# The server-drawn `/feed` page runs the client's OWN public-window reader in
+# plain Node, with no node_modules on the host. Build it here, before the local
+# gate: the unfurl self-check below asks for a feed page, and the disk gate
+# refuses a release whose service would import a bundle that was never built.
+( cd "$STAGE/base/apps/farcaster-web" && \
+  node scripts/build-public-feed-server.mjs > "$STAGE/public-feed-build.log" 2>&1 ) \
+  || { tail -30 "$STAGE/public-feed-build.log"; exit 1; }
+test -f "$STAGE/base/apps/farcaster-web/server/public-feed/generated/reader.mjs" \
+  || { echo "REFUSING to ship: the server public-feed reader was not built" >&2; exit 1; }
+
 say "3/8 local gate: the bundle carries the adapter, the media path and Together"
 APP="$STAGE/base/apps/farcaster-web/dist"
 grep -rqs --include='*.js' "$GATE_ADAPTER" "$APP/assets" || { echo "MISSING adapter sentence in the build" >&2; exit 1; }
@@ -332,7 +342,7 @@ cp -a "$STAGE/server/." "$STAGE/release/server/"
 # must not be (a carried-forward copy is a copy of whatever the PREVIOUS release
 # happened to ship, which for a service is a release that changes nothing).
 # Sources only: no __pycache__, no editor files.
-for SERVICE in unfurl translate; do
+for SERVICE in unfurl translate public-feed; do
   SERVICE_SRC="$STAGE/base/apps/farcaster-web/server/$SERVICE"
   [ -d "$SERVICE_SRC" ] || { echo "REFUSING to ship: $SERVICE_SRC is not in the frozen tree" >&2; exit 1; }
   rm -rf "$STAGE/release/server/$SERVICE"
@@ -367,6 +377,12 @@ ssh_ "set -e
   test -f $RELEASES/$SHA/server/unfurl/server.mjs
   test -f $RELEASES/$SHA/server/unfurl/render-card.py
   test -f $RELEASES/$SHA/server/translate/translate.mjs
+  # The server-drawn public feed's reader, built from this release's own source.
+  test -f $RELEASES/$SHA/server/public-feed/generated/reader.mjs
+  # The client's own /feed route is proxied to the unfurl service, so the
+  # server-drawn first page and the app land on the same release.
+  grep -q 'location = /feed' /etc/nginx/sites-available/fiddy.fun
+  grep -q 'proxy_pass http://127.0.0.1:3220;' /etc/nginx/sites-available/fiddy.fun
   # The card renderer is Pillow, which the host has and the release does not
   # ship (no browser, no npm install): refuse now rather than serve a page
   # whose card cannot be drawn.

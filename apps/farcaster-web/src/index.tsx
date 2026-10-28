@@ -12,6 +12,7 @@ import { initFarcasterApi } from '~/init/initFarcasterApi';
 import { initPolyfills } from '~/init/initPolyfills';
 import { initPreloadLazyComponents } from '~/init/initPreloadLazyComponents';
 import { installStaleChunkReloadListener } from '~/init/initReloadOnStaleChunks';
+import { capturePublicFeedBoot } from '~/lib/publicFeedBoot';
 
 const init = () => {
   initAnalytics();
@@ -22,6 +23,9 @@ const init = () => {
   // preloader is the first thing in the app that fetches a chunk.
   installStaleChunkReloadListener();
   initPreloadLazyComponents();
+  // The server-drawn `/feed` root carries its boot seed. Read it before the
+  // static root is cleared below, or the seed is gone with the HTML.
+  capturePublicFeedBoot();
 };
 
 init();

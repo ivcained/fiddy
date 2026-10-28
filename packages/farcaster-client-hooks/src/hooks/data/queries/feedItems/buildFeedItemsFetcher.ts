@@ -45,17 +45,18 @@ export const buildFeedItemsFetcher =
     sortMode?: ApiFeedSortMode;
     seedCastHash?: string;
   }) =>
-  async ({ pageParam }: { pageParam?: FeedItemsPageParam }) => {
+  async ({ pageParam }: { pageParam?: unknown }) => {
     const castViewEvents = internalEventsTracker.getAndRemoveCastViewEvents();
+    const typedPageParam = pageParam as FeedItemsPageParam | undefined;
 
     try {
       const response = await apiClient.getFeedItems(
         {
           feedKey,
           feedType,
-          olderThan: pageParam?.olderThan,
-          latestMainCastTimestamp: pageParam?.latestMainCastTimestamp,
-          excludeItemIdPrefixes: pageParam?.excludeItemIdPrefixes,
+          olderThan: typedPageParam?.olderThan,
+          latestMainCastTimestamp: typedPageParam?.latestMainCastTimestamp,
+          excludeItemIdPrefixes: typedPageParam?.excludeItemIdPrefixes,
           castViewEvents,
           updateState,
           includeUserSuggestions,
