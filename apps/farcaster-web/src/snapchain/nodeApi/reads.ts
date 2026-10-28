@@ -103,6 +103,7 @@ import {
   rankWindowByEngagement,
   TRENDING_CANDIDATES,
 } from './publicFeedWindow';
+import { scoreSuggestions } from './recommend';
 
 /** Raised when the node genuinely cannot answer a request the app made. */
 export class NodeCannotAnswerError extends Error {
@@ -200,6 +201,21 @@ export const forgetCastAuthors = (): void => {
   castFidIndex.clear();
 };
 const USER_DATA_PAGE_SIZE = 100;
+
+/**
+ * People-to-follow knobs, phunk's defaults: the 40 people the viewer followed
+ * most recently are the sample whose own follow lists are read; each of
+ * those reads takes that account's newest 300 follows; the viewer's top 3
+ * channels are the shared-channel signal, from each channel's newest 100
+ * casts. Together that is about 45 node requests for one suggestion list.
+ */
+const PEOPLE_SAMPLE = 40;
+const PEOPLE_PER_ACCOUNT = 300;
+const PEOPLE_CHANNELS = 3;
+const PEOPLE_PER_CHANNEL = 100;
+/** How long a computed suggestion list is reused (the graph does not move
+ * fast enough for a reload to be worth 45 more requests). */
+const PEOPLE_CACHE_MS = 60_000;
 const SEEN_STORAGE_PREFIX = 'fiddy:node-seen';
 
 /** `[null,null]` — measured as "there is nothing after this page". Shared with
@@ -292,6 +308,28 @@ export interface NodeBackedReadsOptions {
 interface CacheEntry<T> {
   at: number;
   value: T;
+}
+
+/** One suggested person, with everything the page needs to draw them. */
+export interface PeopleSuggestion {
+  user: ApiUser;
+  /** Plain counts, ported scoring — no model or AI involved. */
+  score: number;
+  /** The people the viewer follows who follow them (names, first three). */
+  followedBy: { fid: number; username?: string; displayName?: string }[];
+  /** The channel parent URLs the viewer and this person both post in. */
+  channels: string[];
+  /** Their latest casts, newest first. */
+  latestCasts: ApiCast[];
+}
+
+/** `GET /v2/people-suggestions`: the whole answer. */
+export interface PeopleSuggestionsResult {
+  suggestions: PeopleSuggestion[];
+  /** How many of the viewer's newest follows were sampled for the graph. */
+  sampled: number;
+  /** The channel parent URLs the shared-channel signal was read from. */
+  channelsRead: string[];
 }
 
 const USER_CACHE_MS = 60_000;
@@ -457,6 +495,12 @@ export class NodeBackedReads {
    * (`undefined` never reaches this map).
    */
   private readonly anchorFidCache = new Map<string, number>();
+
+  /** The people-to-follow answer, per viewer and limit (one graph read). */
+  private readonly peopleCache = new Map<
+    string,
+    CacheEntry<PeopleSuggestionsResult>
+  >();
 
   constructor({
     node,
@@ -2330,6 +2374,308 @@ export class NodeBackedReads {
       )
       .slice(0, limit);
     return await this.buildCasts(messages);
+  }
+
+  // -------------------------------------------------------- people to follow
+
+  /**
+   * `GET /v2/people-suggestions`: people the viewer might follow, ranked by
+   * plain counts off the node.
+   *
+   * The engine is a port of phunk-client's `recommend.py` (MIT, Ramitphi; the
+   * pure half lives in `recommend.ts`) — friends of friends plus shared
+   * channels, no model and no AI anywhere in it. The node reads that feed it:
+   *
+   *   1. `linksByFid` (the viewer's own follow list, newest first) — once;
+   *   2. `linksByFid` (the newest 300 follows of the 40 people the viewer
+   *      followed most recently) — one page each, bounded fan-out;
+   *   3. `castsByFid` (the viewer's latest casts) — the channels they post in;
+   *   4. `castsByParent` (those channels' latest casts) — who posts there.
+   *
+   * About 45 requests in all, the same order of cost as one feed page. The
+   * answers hold for a minute (`PEOPLE_CACHE_MS`), so a reload does not pay
+   * for the graph twice.
+   */
+  async readPeopleSuggestions({
+    fid: fidParam,
+    limit = 20,
+  }: {
+    fid?: number;
+    limit?: number;
+  } = {}): Promise<PeopleSuggestionsResult> {
+    const fid = fidParam ?? this.requireFid();
+
+    const cacheKey = `people:${fid}:${limit}`;
+    const cached = this.peopleCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < PEOPLE_CACHE_MS) {
+      return cached.value;
+    }
+
+    const result = await this.computePeopleSuggestions({ fid, limit });
+    this.peopleCache.set(cacheKey, { at: Date.now(), value: result });
+    return result;
+  }
+
+  private async computePeopleSuggestions({
+    fid,
+    limit,
+  }: {
+    fid: number;
+    limit: number;
+  }): Promise<PeopleSuggestionsResult> {
+    // 1. The viewer's own follow edges, newest first. The full list matters:
+    //    it is the skip set, so a candidate the viewer already follows is
+    //    never suggested back. Bounded by the reader's own count cap.
+    const edges = await this.followEdgesOf(fid, this.countCap);
+    const following = new Set<number>(
+      edges.map((edge) => edge.targetFid).filter((target) => target !== fid),
+    );
+
+    // 2. The newest follows of the people the viewer followed most recently
+    //    (phunk's sample: 40, not everyone, to keep request counts low on a
+    //    shared node).
+    const sampled: number[] = [];
+    for (const edge of edges) {
+      if (sampled.length >= PEOPLE_SAMPLE) {
+        break;
+      }
+      if (edge.targetFid !== fid && !sampled.includes(edge.targetFid)) {
+        sampled.push(edge.targetFid);
+      }
+    }
+    const sampledFollows = await mapWithConcurrency(
+      sampled,
+      RESOLVE_CONCURRENCY,
+      async (targetFid) =>
+        [targetFid, await this.newestFollowTargetsOf(targetFid)] as const,
+    );
+    const theirFollows = new Map<number, ReadonlySet<number>>(sampledFollows);
+
+    // 3. The channels the viewer posts in most (among their latest casts).
+    const channelUrls = await this.myChannelUrls(fid);
+
+    // 4. Who posted recently in each of those channels.
+    const channelAuthorLists = await mapWithConcurrency(
+      channelUrls,
+      RESOLVE_CONCURRENCY,
+      async (url) => [url, await this.channelAuthorCounts(url)] as const,
+    );
+    const channelAuthors = new Map<string, ReadonlyMap<number, number>>(
+      channelAuthorLists,
+    );
+
+    const ranked = scoreSuggestions(
+      fid,
+      following,
+      theirFollows,
+      channelAuthors,
+      { limit },
+    );
+
+    // The people behind the list: their profile, the reason's names, and
+    // their latest casts. Everything read through the same caches the rest
+    // of this reader uses, so a suggestion that is also in the feed costs
+    // nothing extra.
+    const suggestions = await mapWithConcurrency(
+      ranked,
+      RESOLVE_CONCURRENCY,
+      async (suggestion) => {
+        try {
+          const [user, latestCasts, followedBy] = await Promise.all([
+            this.readAuthor(suggestion.fid),
+            this.readUserCasts({ fid: suggestion.fid, limit: 3 }),
+            this.reasonNames(suggestion.followedBy),
+          ]);
+          return {
+            user,
+            score: suggestion.score,
+            followedBy,
+            channels: suggestion.channels,
+            latestCasts,
+          } satisfies PeopleSuggestion;
+        } catch {
+          // A suggestion whose profile could not be read is dropped rather
+          // than drawn with an invented name — same rule as the blocked list.
+          return undefined;
+        }
+      },
+    );
+
+    return {
+      suggestions: suggestions.filter(
+        (suggestion): suggestion is PeopleSuggestion =>
+          suggestion !== undefined,
+      ),
+      sampled: sampled.length,
+      channelsRead: channelUrls,
+    };
+  }
+
+  /**
+   * One account's follow edges, newest first, bounded by `cap` edges — the
+   * node's `linksByFid` with `reverse` (a node pages oldest-first otherwise).
+   */
+  private async followEdgesOf(
+    fid: number,
+    cap: number,
+  ): Promise<{ targetFid: number; timestampMs: number }[]> {
+    const edges: { targetFid: number; timestampMs: number }[] = [];
+    const seenTokens = new Set<string>();
+    let pageToken: string | undefined;
+    for (;;) {
+      const page = await this.node.linksByFid({
+        fid,
+        linkType: 'follow',
+        pageSize: 1000,
+        pageToken,
+        reverse: true,
+      });
+      for (const message of page.messages) {
+        const targetFid = message.link?.targetFid;
+        if (typeof targetFid === 'number') {
+          edges.push({ targetFid, timestampMs: message.timestampMs });
+        }
+      }
+      pageToken = page.nextPageToken;
+      if (
+        page.messages.length === 0 ||
+        !pageToken ||
+        isTerminalPageToken(pageToken) ||
+        seenTokens.has(pageToken) ||
+        edges.length >= cap
+      ) {
+        break;
+      }
+      seenTokens.add(pageToken);
+    }
+    // phunk re-sorts by timestamp after reading; the node serves an
+    // fid-sharded page already sorted, but the sort is cheap and makes the
+    // "newest follows" sample exact rather than trusted.
+    return edges.sort((a, b) => b.timestampMs - a.timestampMs);
+  }
+
+  /**
+   * The newest `limit` accounts one fid follows — the newest, not the first
+   * ever recorded, so a recently-made account's graph is what feeds the
+   * suggestions rather than its oldest follows (same request phunk makes:
+   * one page for `limit` below 1000).
+   */
+  private async newestFollowTargetsOf(
+    fid: number,
+    limit = PEOPLE_PER_ACCOUNT,
+  ): Promise<Set<number>> {
+    try {
+      const page = await this.node.linksByFid({
+        fid,
+        linkType: 'follow',
+        pageSize: limit,
+        reverse: true,
+      });
+      const targets = new Set<number>();
+      for (const message of page.messages) {
+        const targetFid = message.link?.targetFid;
+        if (typeof targetFid === 'number' && targets.size < limit) {
+          targets.add(targetFid);
+        }
+      }
+      return targets;
+    } catch {
+      // An account the node cannot answer for contributes no graph, and the
+      // rest of the suggestions are unaffected — phunk's `NodeError` pass.
+      return new Set<number>();
+    }
+  }
+
+  /**
+   * The channel parent URLs this account posts in most, among their latest
+   * casts (phunk's `my_channels`: top 3 by non-reply posts in the newest 100).
+   */
+  private async myChannelUrls(
+    fid: number,
+    top = PEOPLE_CHANNELS,
+  ): Promise<string[]> {
+    try {
+      const page = await this.node.castsByFid({
+        fid,
+        pageSize: 100,
+        reverse: true,
+      });
+      const counts = new Map<string, number>();
+      for (const message of page.messages) {
+        const cast = message.castAdd;
+        // A channel cast is a top-level cast with a parent URL; a reply's
+        // parent is a cast, not a channel.
+        if (cast?.parentUrl && !cast.parentCastId) {
+          counts.set(cast.parentUrl, (counts.get(cast.parentUrl) ?? 0) + 1);
+        }
+      }
+      return [...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, top)
+        .map(([url]) => url);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * {fid: posts} among a channel's latest casts — the shared-channel signal.
+   * A channel spans shards, so the page is only roughly newest-first; the
+   * counts do not care about order.
+   */
+  private async channelAuthorCounts(
+    url: string,
+    limit = PEOPLE_PER_CHANNEL,
+  ): Promise<Map<number, number>> {
+    const counts = new Map<number, number>();
+    try {
+      const page = await this.node.castsByParent({
+        url,
+        pageSize: limit,
+        reverse: true,
+      });
+      for (const message of page.messages) {
+        if (message.castAdd) {
+          counts.set(message.fid, (counts.get(message.fid) ?? 0) + 1);
+        }
+      }
+    } catch {
+      // A channel the node cannot answer contributes no authors.
+    }
+    return counts;
+  }
+
+  /**
+   * The names behind a reason line ("followed by @a and @b"): the first three
+   * accounts only, read through the author cache. More than three names are
+   * not spelled out — the reason says "and N more".
+   */
+  private async reasonNames(
+    fids: number[],
+  ): Promise<{ fid: number; username?: string; displayName?: string }[]> {
+    const shown = fids.slice(0, 3);
+    const read = await mapWithConcurrency(
+      shown,
+      RESOLVE_CONCURRENCY,
+      async (fid) => {
+        try {
+          return await this.readAuthor(fid);
+        } catch {
+          return undefined;
+        }
+      },
+    );
+    return read.flatMap((user) =>
+      user === undefined
+        ? []
+        : [
+            {
+              fid: user.fid,
+              username: user.username,
+              displayName: user.displayName,
+            },
+          ],
+    );
   }
 
   // -------------------------------------------------------- the follow graph

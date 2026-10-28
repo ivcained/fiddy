@@ -82,6 +82,11 @@ const NODE_ROUTES: { method: string; path: string; why: string }[] = [
   },
   {
     method: 'GET',
+    path: '/v2/people-suggestions',
+    why: 'people to follow are counted off the follow graph and channel casts (linksByFid → linksByFid, castsByFid → castsByParent)',
+  },
+  {
+    method: 'GET',
     path: '/v2/me',
     why: 'the signed-in account is its own user-data messages on the node',
   },

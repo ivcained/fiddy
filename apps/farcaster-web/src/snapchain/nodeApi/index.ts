@@ -34,3 +34,4 @@ export * from './nodeBackedFetch';
 export * from './nodeCannotAnswer';
 export * from './nodeWrites';
 export * from './reads';
+export * from './recommend';

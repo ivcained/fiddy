@@ -963,6 +963,22 @@ export const createNodeBackedFetch = ({
           return jsonResponse({ result });
         }
 
+        case '/v2/people-suggestions': {
+          // The client's own people-to-follow request (this route is not one
+          // the hosted API spells): who to follow, counted off the follow
+          // graph and channel casts. The viewer is the signed-in account,
+          // same as every other signed-in read; `requireFid` says the honest
+          // sentence when nobody is.
+          const limitParam = Number(searchParams.get('limit'));
+          return jsonResponse({
+            result: await reader.readPeopleSuggestions({
+              ...(Number.isFinite(limitParam) && limitParam > 0
+                ? { limit: limitParam }
+                : {}),
+            }),
+          });
+        }
+
         default:
           // The one sentence a read that reached the node and has no reader says.
           // It must be true (nothing was faked, and no source was invented) and
