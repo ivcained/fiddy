@@ -3,7 +3,8 @@
  *
  * Two sources, each used only for what it can answer:
  *
- *   * the Snapchain node — `/v1/castById?fid=&hash=` and `/v1/userDataByFid`,
+ *   * the Snapchain node — `/v1/castById?fid=&hash=`, `/v1/userDataByFid`,
+ *     and a bounded reverse `/v1/castsByFid` page for a profile's latest posts,
  *     the same reads the reader's own client makes, so a card shows what the
  *     app shows;
  *   * Neynar, for exactly one thing: turning a cast HASH into its author's FID.
@@ -26,6 +27,8 @@ const CACHE = {
   castMs: 10 * 60 * 1000,
   userMs: 10 * 60 * 1000,
 };
+
+export const PROFILE_CAST_LIMIT = 10;
 
 /** A full cast hash: `0x` and 20 bytes of hex. A prefix is not answerable. */
 export const isFullCastHash = (value) =>
@@ -179,6 +182,30 @@ export const createLinkReader = ({
       return userDataFromMessages(payload.messages, fid);
     });
 
+  const latestCasts = (fid) =>
+    cache.readOrLoad(`latest:${fid}`, async () => {
+      const payload = await jsonOrUndefined(
+        await get(
+          `/v1/castsByFid?fid=${fid}&pageSize=${PROFILE_CAST_LIMIT}&reverse=true`,
+        ).catch(() => undefined),
+      );
+      if (!Array.isArray(payload?.messages)) {
+        // A failed page is not an empty one. Keep those states separate so the
+        // crawler never says a person has no posts when the read simply failed.
+        return undefined;
+      }
+      return payload.messages
+        .map((message) => {
+          const text = castTextFromMessage(message);
+          const hash = message?.hash;
+          return text !== undefined && isFullCastHash(hash)
+            ? { hash, fid, text }
+            : undefined;
+        })
+        .filter(Boolean)
+        .slice(0, PROFILE_CAST_LIMIT);
+    });
+
   const castByAuthor = (fid, hash) =>
     cache.readOrLoad(`cast:${fid}:${hash.toLowerCase()}`, async () => {
       const payload = await jsonOrUndefined(
@@ -231,8 +258,14 @@ export const createLinkReader = ({
       return { cast, author: author ?? { fid } };
     },
     async profile(fid) {
-      const author = await userData(fid);
-      return author ? { author } : undefined;
+      const [author, casts] = await Promise.all([
+        userData(fid),
+        latestCasts(fid),
+      ]);
+      // An empty user-data answer cannot prove a missing FID rather than an
+      // unpublished or incomplete profile. The handler retains its shell
+      // fallback for both that case and a failed read; neither becomes a 404.
+      return author ? { author, casts } : undefined;
     },
     /**
      * The FID that wrote a cast, when the caller has only the hash.

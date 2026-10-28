@@ -12,11 +12,13 @@
  *      and a card on this host;
  *   2. the site's front-door tags are gone, because a document that declares
  *      both tells an unfurler whichever one it reads first;
- *   3. everything from `</head>` on is byte-for-byte the shell — the theme
- *      bootstrap, the skeleton and the entry chunk are the app's first paint;
- *   4. nothing in the injected head is inline script or an inline handler, the
- *      same check `scripts/check-shell-has-no-inline-script.mjs` makes of the
- *      shell (that host serves `script-src 'self'`), so a tag that would be
+ *   3. cast and look bodies stay byte-for-byte the shell; a profile adds only
+ *      its crawler-readable root, while the theme bootstrap, skeleton markup
+ *      and entry chunk stay intact;
+ *   4. nothing injected is inline executable script or an inline handler
+ *      (ProfilePage JSON-LD is data), the same rule
+ *      `scripts/check-shell-has-no-inline-script.mjs` makes of the shell
+ *      (that host serves `script-src 'self'`), so a tag that would be
  *      refused in a browser cannot ship;
  *   5. values that came off the network cannot close an attribute — a cast whose
  *      text contains a quote and a handle built out of angle brackets;
@@ -98,8 +100,15 @@ const fixtures = {
       fid: 3,
       username: 'dwr',
       displayName: 'Dan Romero',
-      bio: 'Interested in technology and other stuff.',
+      bio: 'Building <things> & "sharing" on Farcaster.',
     },
+    casts: [
+      {
+        hash: CAST_HASH,
+        fid: 3,
+        text: 'A latest post with <brackets> & "quotes"',
+      },
+    ],
   },
 };
 
@@ -151,6 +160,11 @@ const pages = {
 mkdirSync(outDir, { recursive: true });
 
 const withoutComments = (html) => html.replace(/<!--[\s\S]*?-->/g, '');
+const withoutLinkedData = (html) =>
+  withoutComments(html).replace(
+    /<script type="application\/ld\+json">[\s\S]*?<\/script>/g,
+    '',
+  );
 const count = (html, pattern) => (html.match(pattern) ?? []).length;
 
 for (const [file, answer] of Object.entries(pages)) {
@@ -216,9 +230,14 @@ for (const [file, answer] of Object.entries(pages)) {
       !html.includes('/fiddy-share-card.png'),
   );
   check(
-    `${file} is the shell after </head>, byte for byte`,
-    html.slice(html.indexOf('</head>')) ===
-      shell.slice(shell.indexOf('</head>')),
+    `${file} keeps the shell body, adding only the profile crawler root`,
+    kind === 'profile'
+      ? html.includes(
+          '<div id="root"><section class="fiddy-crawler-profile"',
+        ) &&
+          html.endsWith(shell.slice(shell.indexOf('<!-- shell-skeleton:start')))
+      : html.slice(html.indexOf('</head>')) ===
+          shell.slice(shell.indexOf('</head>')),
   );
   check(
     `${file} keeps the entry chunk`,
@@ -227,9 +246,9 @@ for (const [file, answer] of Object.entries(pages)) {
     ),
   );
   check(
-    `${file} has no inline script`,
-    count(withoutComments(html), /<script\b[^>]*>/gi) ===
-      count(withoutComments(shell), /<script\b[^>]*>/gi),
+    `${file} has no inline executable script`,
+    count(withoutLinkedData(html), /<script\b[^>]*>/gi) ===
+      count(withoutLinkedData(shell), /<script\b[^>]*>/gi),
   );
   check(
     `${file} has no inline handler`,
@@ -245,6 +264,45 @@ for (const [file, answer] of Object.entries(pages)) {
     check(
       `${file} cannot be broken out of by a cast body`,
       !html.includes('<brackets>') && !/<script>alert/i.test(html),
+    );
+  }
+  if (kind === 'profile') {
+    const linkedData = JSON.parse(
+      /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(
+        html,
+      )?.[1] ?? 'null',
+    );
+    check(
+      `${file} has parseable ProfilePage JSON-LD with only facts read`,
+      linkedData?.['@type'] === 'ProfilePage' &&
+        linkedData?.url === url &&
+        linkedData?.mainEntity?.name === 'Dan Romero' &&
+        linkedData?.mainEntity?.alternateName === '@dwr' &&
+        linkedData?.mainEntity?.identifier === '3' &&
+        linkedData?.mainEntity?.description ===
+          'Building <things> & "sharing" on Farcaster.' &&
+        !('image' in linkedData.mainEntity) &&
+        !('interactionStatistic' in linkedData.mainEntity),
+    );
+    check(
+      `${file} has readable escaped profile and latest-post HTML`,
+      html.includes('data-fiddy-crawler') &&
+        html.includes('Latest posts') &&
+        html.includes(
+          'A latest post with &lt;brackets&gt; &amp; &quot;quotes&quot;',
+        ) &&
+        !html.includes('A latest post with <brackets>'),
+    );
+    check(
+      `${file} keeps its canonical and share card unchanged`,
+      html.includes(`<link rel="canonical" href="${url}" />`) &&
+        html.includes(`<meta property="og:image" content="${image}" />`),
+    );
+    check(
+      `${file} clears crawler HTML before the SPA mounts`,
+      readFileSync(path.join(webRoot, 'src', 'index.tsx'), 'utf8').includes(
+        '$root.replaceChildren()',
+      ),
     );
   }
 }

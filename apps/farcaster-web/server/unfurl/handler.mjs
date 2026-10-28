@@ -7,7 +7,8 @@
  *
  * The contract with the host, in one sentence: **this service answers a cast or
  * profile URL with the shell the release ships, or with the shell plus that
- * page's tags; it never answers with a document of its own invention.** A page
+ * page's tags and, for a readable profile, its plain HTML and JSON-LD; it never
+ * answers with a document of its own invention.** A page
  * it cannot read is not an error page — it is the shell, unchanged, exactly
  * what the host served before this service existed. That is what makes the
  * nginx fallback and the honest-miss path the same thing.
@@ -277,7 +278,11 @@ export const createUnfurlHandler = ({
         });
         return {
           ok: true,
-          html: renderPageHtml(shellSource(), tags),
+          html: renderPageHtml(shellSource(), tags, {
+            jsonLd: facts.jsonLd,
+            crawlerHtml: facts.crawlerHtml,
+            crawlerStyle: facts.crawlerStyle,
+          }),
           kind: facts.kind,
         };
       } catch {
@@ -606,6 +611,24 @@ export const createUnfurlHandler = ({
             ? { ...castPage({ origin, hash, ...facts }) }
             : undefined;
         });
+      }
+
+      if (
+        segments[0] === '~' &&
+        segments[1] === 'profiles' &&
+        segments[2] &&
+        segments.length === 4 &&
+        (segments[3] === 'followers' || segments[3] === 'following')
+      ) {
+        return {
+          status: 200,
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'public, max-age=300, no-transform',
+            'x-unfurl': 'shell:noindex',
+          },
+          body: renderPageHtml(shellSource(), '', { noindex: true }),
+        };
       }
 
       if (segments[0] === '~' && segments[1] === 'profiles' && segments[2]) {

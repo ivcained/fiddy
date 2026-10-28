@@ -151,6 +151,30 @@ describe('a probe one URL at a time', () => {
     expect(resolver.kindOf(CLOUDFLARE_PHOTO)).toBe('video');
   });
 
+  it('uses the same upgraded URL for the probe and every cache lookup', async () => {
+    vi.stubGlobal('window', {
+      location: { protocol: 'https:', hostname: 'fiddy.fun' },
+    });
+    const original = 'http://media.example/photo/original';
+    const upgraded = 'https://media.example/photo/original';
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return responseWith('image/jpeg');
+    }) as unknown as typeof fetch;
+
+    try {
+      const resolver = testResolver(fetchImpl);
+      await resolver.classify([original]);
+
+      expect(calls).toEqual([upgraded]);
+      expect(resolver.kindOf(original)).toBe('image');
+      expect(resolver.kindOf(upgraded)).toBe('image');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('asks the browser image probe when no request can be made', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
