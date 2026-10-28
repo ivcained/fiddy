@@ -285,6 +285,100 @@ describe('what a profile page tells a crawler', () => {
     expect(embed.button.title).toBe('Open this profile in fiddy');
     expect(embed.button.action.url).toBe(`${ORIGIN}/~/profiles/3`);
   });
+
+  it('adds ProfilePage JSON-LD and readable profile and post HTML', async () => {
+    const firstHash = `0x${'a'.repeat(40)}`;
+    const readable = {
+      ...profile,
+      casts: [
+        {
+          hash: firstHash,
+          fid: 3,
+          text: 'A post with <brackets> & "quotes"',
+        },
+      ],
+    };
+    const { body } = await read('/~/profiles/3', {
+      reader: fakeReader({ profile: () => readable }),
+    });
+    const html = body as string;
+
+    const linkedData = JSON.parse(
+      /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(
+        html,
+      )?.[1] ?? 'null',
+    );
+    expect(linkedData).toEqual({
+      '@context': 'https://schema.org',
+      '@type': 'ProfilePage',
+      url: `${ORIGIN}/~/profiles/3`,
+      mainEntity: {
+        '@type': 'Person',
+        name: 'Dan Romero',
+        alternateName: '@dwr',
+        identifier: '3',
+        description: 'Interested in technology and other stuff.',
+        url: `${ORIGIN}/~/profiles/3`,
+      },
+    });
+    expect(html).not.toContain('follower_count');
+    expect(metaContent(html, 'property', 'og:image')).toBe(
+      `${ORIGIN}/unfurl/cards/profile/3.png`,
+    );
+    expect(html).toContain(
+      `<link rel="canonical" href="${ORIGIN}/~/profiles/3" />`,
+    );
+
+    const crawler = /<section[^>]*data-fiddy-crawler[\s\S]*?<\/section>/.exec(
+      html,
+    )?.[0];
+    expect(crawler).toContain('<h1');
+    expect(crawler).toContain('Dan Romero');
+    expect(crawler).toContain('@dwr');
+    expect(crawler).toContain('Latest posts');
+    expect(crawler).toContain(
+      'A post with &lt;brackets&gt; &amp; &quot;quotes&quot;',
+    );
+    expect(crawler).not.toContain('<brackets>');
+    expect(crawler).toContain(`href="${ORIGIN}/~/conversations/${firstHash}"`);
+    // The readable page replaces the loading skeleton even without the bundle.
+    expect(html).toContain('#shell-skeleton{display:none}');
+  });
+
+  it('bounds the readable latest posts to ten', async () => {
+    const { body } = await read('/~/profiles/3', {
+      reader: fakeReader({
+        profile: () => ({
+          ...profile,
+          casts: Array.from({ length: 12 }, (_, index) => ({
+            hash: `0x${String(index).padStart(2, '0')}${'a'.repeat(38)}`,
+            fid: 3,
+            text: `Post ${index}`,
+          })),
+        }),
+      }),
+    });
+    expect(String(body).match(/data-fiddy-crawler-post=/g) ?? []).toHaveLength(
+      10,
+    );
+  });
+
+  it('distinguishes a proven empty post list from an unavailable one', async () => {
+    for (const [casts, expected, unexpected] of [
+      [[], 'No posts here yet.', "aren't available"],
+      [
+        undefined,
+        "Latest posts aren't available right now.",
+        'No posts here yet.',
+      ],
+    ] as const) {
+      const { body } = await read('/~/profiles/3', {
+        reader: fakeReader({ profile: () => ({ ...profile, casts }) }),
+      });
+      expect(String(body)).toContain(expected);
+      expect(String(body)).not.toContain(unexpected);
+    }
+  });
 });
 
 describe('the pages this service cannot read', () => {
@@ -347,13 +441,27 @@ describe('the pages this service cannot read', () => {
     // tab. Those are pages, not 404s.
     for (const url of [
       `/~/conversations/${'0x' + 'a'.repeat(40)}/reactions`,
-      '/~/profiles/3/followers',
       '/~/settings',
     ]) {
       const { status, body, headers } = await read(url);
       expect(status).toBe(200);
       expect(headers['x-unfurl']).toBe('shell');
       expect(body).toBe(shell);
+    }
+  });
+
+  it('keeps thin follower and following lists out of search', async () => {
+    for (const list of ['followers', 'following']) {
+      const { status, body, headers } = await read(`/~/profiles/3/${list}`);
+      expect(status).toBe(200);
+      expect(headers['x-unfurl']).toBe('shell:noindex');
+      expect(metaContent(String(body), 'name', 'robots')).toBe(
+        'noindex, follow',
+      );
+      expect(String(body)).not.toContain('rel="canonical"');
+      expect(String(body)).toContain(
+        '<script src="/shell-bootstrap.js"></script>',
+      );
     }
   });
 });
@@ -826,6 +934,14 @@ describe('the reader, against the node’s own envelope', () => {
         hash: DW_R.cast.hash,
       };
     }
+    if (url.includes('/v1/castsByFid')) {
+      return {
+        messages: Array.from({ length: 12 }, (_, index) => ({
+          data: { castAddBody: { text: `Latest ${index}` } },
+          hash: `0x${String(index).padStart(2, '0')}${'a'.repeat(38)}`,
+        })),
+      };
+    }
     if (url.includes('/v1/userDataByFid')) {
       return {
         messages: [
@@ -862,6 +978,105 @@ describe('the reader, against the node’s own envelope', () => {
     expect(facts?.cast.text).toBe('Neat');
     expect(facts?.cast.fid).toBe(3);
     expect(facts?.author.username).toBe('dwr');
+  });
+
+  it('reads a small latest-cast page beside the profile facts', async () => {
+    const urls: string[] = [];
+    const nodeReader = createLinkReader({
+      fetchImpl: (async (url: string) => {
+        urls.push(url);
+        return new Response(JSON.stringify(envelope(url)), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as unknown as typeof fetch,
+      nodeBaseUrl: 'https://node.test',
+      neynarApiKey: 'test',
+    });
+
+    const facts = await nodeReader.profile(3);
+
+    expect(facts?.author.username).toBe('dwr');
+    expect(facts?.casts).toHaveLength(10);
+    expect(facts?.casts?.[0]).toMatchObject({ text: 'Latest 0', fid: 3 });
+    expect(urls.find((url) => url.includes('/v1/castsByFid'))).toContain(
+      'pageSize=10&reverse=true',
+    );
+  });
+
+  it('keeps a proven empty latest-cast page empty', async () => {
+    const nodeReader = createLinkReader({
+      fetchImpl: (async (url: string) => {
+        const payload = url.includes('/v1/castsByFid')
+          ? { messages: [] }
+          : envelope(url);
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as unknown as typeof fetch,
+      nodeBaseUrl: 'https://node.test',
+      neynarApiKey: 'test',
+    });
+    expect((await nodeReader.profile(3))?.casts).toEqual([]);
+  });
+
+  it('marks only the latest casts unavailable when their read fails', async () => {
+    const nodeReader = createLinkReader({
+      fetchImpl: (async (url: string) => {
+        if (url.includes('/v1/castsByFid')) {
+          throw new Error('temporarily unavailable');
+        }
+        return new Response(JSON.stringify(envelope(url)), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as unknown as typeof fetch,
+      nodeBaseUrl: 'https://node.test',
+      neynarApiKey: 'test',
+    });
+    const facts = await nodeReader.profile(3);
+    expect(facts?.author.username).toBe('dwr');
+    expect(facts?.casts).toBeUndefined();
+  });
+
+  it('does not turn an ambiguous or failed profile read into an empty person', async () => {
+    for (const fail of [false, true]) {
+      const nodeReader = createLinkReader({
+        fetchImpl: (async (url: string) => {
+          if (url.includes('/v1/castsByFid')) {
+            return new Response(JSON.stringify({ messages: [] }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          if (fail) {
+            throw new Error('temporarily unavailable');
+          }
+          return new Response(JSON.stringify({ messages: [] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }) as unknown as typeof fetch,
+        nodeBaseUrl: 'https://node.test',
+        neynarApiKey: 'test',
+      });
+      // userDataByFid cannot prove the difference between a FID with no
+      // published profile facts and a missing profile. Both stay on the shell;
+      // neither becomes a 404 or a person with zero posts.
+      expect(await nodeReader.profile(3)).toBeUndefined();
+    }
+  });
+});
+
+describe('SPA startup after a crawler-readable page', () => {
+  it('clears the server-rendered root before creating the React root', () => {
+    const entry = readFileSync(path.join(webRoot, 'src', 'index.tsx'), 'utf8');
+    const cleanup = entry.indexOf('$root.replaceChildren()');
+    const mount = entry.indexOf('ReactDOM.createRoot($root)');
+    expect(cleanup).toBeGreaterThanOrEqual(0);
+    expect(mount).toBeGreaterThan(cleanup);
+    expect(entry).not.toContain('<script>document');
   });
 });
 

@@ -34,6 +34,8 @@
  *     next read, rather than holding the feed open.
  */
 
+import { secureExternalMediaUrl } from '~/utils/externalMediaUrl';
+
 /** The kinds of embed the client renders inline. Everything else is a link. */
 export type EmbedKind = 'image' | 'video';
 
@@ -330,7 +332,8 @@ export const createEmbedKindResolver = (
 
   const kindOf = (url: string): EmbedKindAnswer | undefined => {
     loadPersisted();
-    return answers.get(url) ?? embedKindFromExtension(url);
+    const mediaUrl = secureExternalMediaUrl(url);
+    return answers.get(mediaUrl) ?? embedKindFromExtension(mediaUrl);
   };
 
   const classify = async (
@@ -339,10 +342,14 @@ export const createEmbedKindResolver = (
   ): Promise<void> => {
     loadPersisted();
     const targets: string[] = [];
-    for (const url of new Set(urls)) {
-      if (typeof url !== 'string' || url === '') {
+    for (const candidate of new Set(urls)) {
+      if (typeof candidate !== 'string' || candidate === '') {
         continue;
       }
+      // Probe, render, and cache one canonical media URL. In particular an
+      // external http:// image on an HTTPS page must never be probed over one
+      // scheme and painted over another.
+      const url = secureExternalMediaUrl(candidate);
       if (kindOf(url) !== undefined) {
         continue;
       }

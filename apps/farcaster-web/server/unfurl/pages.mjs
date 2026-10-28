@@ -12,6 +12,7 @@
  */
 
 import { oneLine } from './shellMeta.mjs';
+import { profileCrawler } from './profileCrawler.mjs';
 
 /** `@dwr`, or `fid 3` when the account has no name to print. */
 const handleOf = (author) =>
@@ -44,7 +45,7 @@ export const castPage = ({ origin, hash, cast, author }) => {
   };
 };
 
-export const profilePage = ({ origin, fid, author }) => {
+export const profilePage = ({ origin, fid, author, casts }) => {
   const handle = handleOf(author);
   const name = displayOf(author);
   const bio = oneLine(author?.bio, 200);
@@ -55,6 +56,7 @@ export const profilePage = ({ origin, fid, author }) => {
     description: bio || `${handle} on Farcaster.`,
     imageAlt: `The Fiddy mascot on a dark card, for ${name} (${handle}).`,
     type: 'profile',
+    ...profileCrawler({ origin, fid, author, casts }),
     card: {
       kind: 'profile',
       fid,

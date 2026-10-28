@@ -29,6 +29,9 @@ init();
 const $root = document.getElementById('root');
 
 if ($root) {
+  // A crawler-readable profile is static HTML only. Clear it before React
+  // mounts so the enabled app never duplicates or retains the crawler section.
+  $root.replaceChildren();
   const root = ReactDOM.createRoot($root);
   root.render(
     <React.StrictMode>

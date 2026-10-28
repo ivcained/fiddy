@@ -7,6 +7,8 @@ import {
   useState,
 } from 'react';
 
+import { secureExternalMediaUrl } from '~/utils/externalMediaUrl';
+
 export type ImageProps = DetailedHTMLProps<
   ImgHTMLAttributes<{}>,
   HTMLImageElement
@@ -27,7 +29,8 @@ const Image: FC<ImageProps> = memo(
       Record<string, boolean | undefined>
     >({});
 
-    const resolvedSrc = didFailToLoadMap[src] && fallback ? fallback : src;
+    const requestedSrc = didFailToLoadMap[src] && fallback ? fallback : src;
+    const resolvedSrc = secureExternalMediaUrl(requestedSrc);
 
     const wrappedOnError = useCallback<
       React.ReactEventHandler<HTMLImageElement>

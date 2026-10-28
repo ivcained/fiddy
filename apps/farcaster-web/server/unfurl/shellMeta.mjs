@@ -8,11 +8,12 @@
  * cast or profile URL with that page's OWN tags over the same shell the app
  * ships.
  *
- * The rule this file exists to hold: the document's `<head>` is the ONLY thing
- * changed. The theme bootstrap, the inline skeleton, the entry chunk and the
- * body are handed back byte-for-byte, because the shell is the app — anything
- * this touches is a way to break a reader's first paint, and the host serves
- * `script-src 'self'`, so nothing here may introduce an inline script.
+ * For casts and looks the document's `<head>` is the ONLY thing changed. A
+ * readable profile also gets static crawler HTML inside the empty app root and
+ * ProfilePage JSON-LD. The theme bootstrap, skeleton markup, entry chunk and
+ * normal client render stay intact, and nothing here adds inline executable
+ * JavaScript because the host serves `script-src 'self'`. The client clears the
+ * crawler root immediately before mounting.
  *
  * Site tags are REMOVED rather than added to, and that is deliberate: the shell
  * says `og:title: fiddy — a Farcaster client with an agent` for every URL, and
@@ -114,13 +115,19 @@ export const pageTags = ({
   ].join('\n    ');
 
 /**
- * The shell with this page's head, and nothing else about it changed.
+ * The shell with this page's head, plus a profile's static crawler root when
+ * supplied. JSON-LD is data, not executable script; `<` is escaped so profile
+ * text cannot close its tag.
  *
  * A shell with no `</head>` is not a shell (a truncated release, a wrong path):
  * that is raised rather than papered over, because the alternative is serving a
  * document nobody can parse.
  */
-export const renderPageHtml = (shell, tags) => {
+export const renderPageHtml = (
+  shell,
+  tags,
+  { jsonLd, crawlerHtml, crawlerStyle, noindex = false } = {},
+) => {
   if (!shell.includes('</head>')) {
     throw new Error('the shell has no </head>: refusing to serve it as a page');
   }
@@ -128,12 +135,38 @@ export const renderPageHtml = (shell, tags) => {
   for (const pattern of SITE_TAGS) {
     stripped = stripped.replace(pattern, '');
   }
+  if (noindex) {
+    stripped = stripped.replace(
+      /\s*<link\s+rel="canonical"\s+href=(?:"[^"]*"|'[^']*')\s*\/?\s*>/gi,
+      '',
+    );
+  }
+  const headTags = [
+    tags,
+    noindex ? '<meta name="robots" content="noindex, follow" />' : '',
+    crawlerStyle ?? '',
+    jsonLd
+      ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n    ');
   // The index is taken AFTER stripping: the site's tags sat before </head>, so
   // an index from the original document would cut the body off its own head
   // (measured: the first version of this function shifted the whole body by the
   // length of the tags it had just removed).
   const head = stripped.indexOf('</head>');
-  return `${stripped.slice(0, head)}    ${tags}\n  ${stripped.slice(head)}`;
+  let html = `${stripped.slice(0, head)}    ${headTags}\n  ${stripped.slice(head)}`;
+  if (crawlerHtml) {
+    if (!html.includes('<div id="root"></div>')) {
+      throw new Error('the shell has no empty app root for crawler HTML');
+    }
+    html = html.replace(
+      '<div id="root"></div>',
+      () => `<div id="root">${crawlerHtml}</div>`,
+    );
+  }
+  return html;
 };
 
 /** The card assets the per-page tags describe, all served from this origin. */
