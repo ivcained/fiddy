@@ -57,6 +57,7 @@ export default [
         fetch: 'readonly',
         getComputedStyle: 'readonly',
         HTMLCanvasElement: 'readonly',
+        HTMLElement: 'readonly',
         Image: 'readonly',
         // A probe that drives the wallet flows reads the page's own IndexedDB
         // (the key store and the draft store live there); it is a page global,

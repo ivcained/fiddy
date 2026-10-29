@@ -30,7 +30,9 @@ import {
   SpaceEmbedAttachment,
 } from '~/components/attachments/SpaceEmbedAttachment';
 import { UnsupportedEmbed } from '~/components/attachments/UnsupportedEmbed';
+import { useVideoShapeRevision } from '~/components/attachments/useVideoShape';
 import { VideoAttachment } from '~/components/attachments/VideoAttachment';
+import { withLearnedVideoShapes } from '~/components/attachments/videoShape';
 import { ImageLightboxModal } from '~/components/modals/ImageLightboxModal';
 import { LinkifiedText } from '~/components/text/LinkifiedText';
 import { getRenderableEmbeds } from '~/utils/castUtils';
@@ -79,6 +81,9 @@ const useCastAttachment = ({
   onMiniAppLaunch?: () => void;
 }) => {
   const telemetry = useTelemetry();
+  useVideoShapeRevision();
+  const learnedEmbeds =
+    typeof embeds === 'undefined' ? undefined : withLearnedVideoShapes(embeds);
   const renderableEmbeds = getRenderableEmbeds({
     castText: text,
     embeds,
@@ -309,7 +314,7 @@ const useCastAttachment = ({
     }
 
     const layout = getCastEmbedLayout({
-      embeds,
+      embeds: learnedEmbeds ?? embeds,
       platform: 'web',
       isFocused: isFocusedCast,
       renderingCarousel: needsCarousel,
@@ -413,7 +418,7 @@ const useCastAttachment = ({
               .map(({ data: video }, videoIndex) => {
                 return (
                   <VideoAttachment
-                    key={videoIndex}
+                    key={video.url}
                     url={video.url}
                     videoWidth={video.width!}
                     videoHeight={video.height!}
@@ -475,7 +480,7 @@ const useCastAttachment = ({
               .map(({ data: video }, videoIndex) => {
                 return (
                   <VideoAttachment
-                    key={videoIndex}
+                    key={video.url}
                     url={video.url}
                     videoWidth={video.width!}
                     videoHeight={video.height!}
@@ -613,6 +618,7 @@ const useCastAttachment = ({
     hasAttachments,
     hasNonCarouselAttachments,
     isFocusedCast,
+    learnedEmbeds,
     needsCarousel,
     renderUrlEmbedNonSnap,
     renderUrlEmbedSnap,

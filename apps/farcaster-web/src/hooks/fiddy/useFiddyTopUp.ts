@@ -48,7 +48,7 @@ import {
 } from '~/lib/fiddyPendingTopUp';
 import {
   describeSendFailure,
-  readInjectedWallet,
+  resolveTopUpWallet,
   sendTopUp,
   type TopUpSource,
   type TopUpWallet,
@@ -131,30 +131,19 @@ export const useFiddyTopUp = (
   }
 
   const resolveWallet = useCallback(
-    async (source: TopUpSource): Promise<TopUpWallet | null> => {
-      if (source === 'farcaster') {
-        const miniapp = await openMiniappWallet();
-        if (miniapp === null) {
-          return null;
-        }
-        return {
-          source: 'farcaster',
-          address: miniapp.address,
-          provider: miniapp.provider,
-          label: 'your Farcaster wallet',
-        };
-      }
-      if (provider && (address ?? wagmiAddress)) {
-        return {
-          source: 'wallet',
-          address: (address ?? wagmiAddress) as `0x${string}`,
-          provider,
-          label: connector?.name ?? 'your connected wallet',
-        };
-      }
-      const injected = readInjectedWallet();
-      return injected;
-    },
+    async (source: TopUpSource): Promise<TopUpWallet | null> =>
+      resolveTopUpWallet({
+        source,
+        openHost: openMiniappWallet,
+        connected:
+          provider && (address ?? wagmiAddress)
+            ? {
+                address: (address ?? wagmiAddress) as `0x${string}`,
+                provider,
+                label: connector?.name ?? 'your connected wallet',
+              }
+            : null,
+      }),
     [address, connector, provider, wagmiAddress],
   );
 

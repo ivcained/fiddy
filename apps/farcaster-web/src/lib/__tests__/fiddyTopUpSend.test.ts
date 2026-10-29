@@ -25,6 +25,7 @@ import { FundingError, parseFundingConfig } from '~/lib/fiddyCredit';
 import {
   describeSendFailure,
   readInjectedWallet,
+  resolveTopUpWallet,
   sendTopUp,
   walletAccount,
   walletChainId,
@@ -218,18 +219,161 @@ describe('every refusal has a name', () => {
   });
 });
 
+describe('wallet resolution priority', () => {
+  it('keeps the Farcaster host ahead of connected and injected wallets', async () => {
+    const host = fakeProvider({ record: [] });
+    const resolved = await resolveTopUpWallet({
+      source: 'farcaster',
+      openHost: async () => ({ address: SENDER, provider: host }),
+      connected: {
+        address: SENDER,
+        provider: fakeProvider({ record: [] }),
+        label: 'Connected',
+      },
+      readFallback: async () => {
+        throw new Error('the injected fallback must not be asked');
+      },
+    });
+
+    expect(resolved).toMatchObject({
+      source: 'farcaster',
+      address: SENDER,
+      provider: host,
+      label: 'your Farcaster wallet',
+    });
+  });
+
+  it('keeps the connected wallet ahead of injected discovery', async () => {
+    const connected = fakeProvider({ record: [] });
+    const resolved = await resolveTopUpWallet({
+      source: 'wallet',
+      openHost: async () => {
+        throw new Error('the host must not be asked');
+      },
+      connected: {
+        address: SENDER,
+        provider: connected,
+        label: 'Connected',
+      },
+      readFallback: async () => {
+        throw new Error('the injected fallback must not be asked');
+      },
+    });
+
+    expect(resolved).toMatchObject({
+      source: 'wallet',
+      address: SENDER,
+      provider: connected,
+      label: 'Connected',
+    });
+  });
+});
+
 describe('the wallets this client can reach', () => {
   it('reads a provider that injected itself, and nothing when there is none', async () => {
-    expect(readInjectedWallet()).toBeNull();
+    await expect(readInjectedWallet()).resolves.toBeNull();
 
     vi.stubGlobal('ethereum', {
       request: async () => [],
       isMetaMask: true,
     });
 
-    const injected = readInjectedWallet();
+    const injected = await readInjectedWallet();
     expect(injected?.label).toBe('MetaMask');
     expect(injected?.source).toBe('wallet');
+  });
+
+  it('prefers a live announced wallet over a global that never answers', async () => {
+    const stale = { request: () => new Promise(() => {}) };
+    const live = fakeProvider({ record: [] });
+    vi.stubGlobal('ethereum', stale);
+    const announce = () => {
+      window.dispatchEvent(
+        new CustomEvent('eip6963:announceProvider', {
+          detail: {
+            info: { name: 'Rabby', rdns: 'io.rabby' },
+            provider: live,
+          },
+        }),
+      );
+    };
+    window.addEventListener('eip6963:requestProvider', announce, {
+      once: true,
+    });
+
+    try {
+      const injected = await readInjectedWallet();
+      expect(injected?.provider).toBe(live);
+      expect(injected?.label).toBe('Rabby');
+    } finally {
+      window.removeEventListener('eip6963:requestProvider', announce);
+    }
+  });
+
+  it('dedupes announcements and keeps the chosen provider through submission', async () => {
+    const firstCalls: Call[] = [];
+    const chosenCalls: Call[] = [];
+    const first = fakeProvider({ record: firstCalls });
+    const chosen = fakeProvider({ record: chosenCalls });
+    vi.stubGlobal('ethereum', chosen);
+    const announce = () => {
+      for (const [name, rdns, provider] of [
+        ['Rabby', 'io.rabby', first],
+        ['MetaMask', 'io.metamask', chosen],
+        ['Rabby again', 'io.rabby', first],
+      ] as const) {
+        window.dispatchEvent(
+          new CustomEvent('eip6963:announceProvider', {
+            detail: { info: { name, rdns }, provider },
+          }),
+        );
+      }
+    };
+    window.addEventListener('eip6963:requestProvider', announce, {
+      once: true,
+    });
+
+    try {
+      const wallet = await readInjectedWallet();
+      expect(wallet?.provider).toBe(chosen);
+      expect(wallet?.label).toBe('MetaMask');
+      expect(
+        await sendTopUp({
+          reader: reader(),
+          config,
+          usd: '5.00',
+          wallet: wallet!,
+        }),
+      ).toBe(HASH);
+      expect(
+        chosenCalls.some((call) => call.method === 'eth_sendTransaction'),
+      ).toBe(true);
+      expect(firstCalls).toEqual([]);
+    } finally {
+      window.removeEventListener('eip6963:requestProvider', announce);
+    }
+  });
+
+  it('gives a dead fallback wallet a bounded, named refusal', async () => {
+    const dead = { request: () => new Promise(() => {}) };
+    await expect(
+      sendTopUp({
+        reader: reader(),
+        config,
+        usd: '5.00',
+        walletTimeoutMs: 1,
+        wallet: {
+          source: 'wallet',
+          address: SENDER,
+          provider: dead,
+          label: 'your browser wallet',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'WALLET_UNRESPONSIVE',
+      ownerLine:
+        'Your browser wallet is not answering. Reconnect it or choose another wallet.',
+    });
   });
 
   it('asks the wallet which chain it is on, and survives one that will not say', async () => {

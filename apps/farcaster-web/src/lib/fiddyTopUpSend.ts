@@ -79,7 +79,7 @@ const asOxProvider = (
  * miniapp host can have a `window.ethereum` that is not ours to drive, and an
  * object without `request` is not a provider.
  */
-export const readInjectedWallet = (): TopUpWallet | null => {
+export const readInjectedWallet = async (): Promise<TopUpWallet | null> => {
   if (typeof window === 'undefined') {
     return null;
   }
@@ -88,23 +88,97 @@ export const readInjectedWallet = (): TopUpWallet | null => {
       ethereum?: { request?: unknown; isMetaMask?: boolean };
     }
   ).ethereum;
-  if (!injected || typeof injected.request !== 'function') {
+  const { discoverAnnouncedWallets } = await import('~/lib/injectedWallets');
+  const announced = await discoverAnnouncedWallets({ target: window });
+  const selected =
+    announced.find((wallet) => wallet.provider === injected) ?? announced[0];
+  const provider = selected?.provider ?? injected;
+  if (!provider || typeof provider.request !== 'function') {
     return null;
   }
   return {
     source: 'wallet',
     address: '0x0000000000000000000000000000000000000000',
-    provider: injected as TopUpProvider,
-    label: injected.isMetaMask ? 'MetaMask' : 'your browser wallet',
+    provider: provider as TopUpProvider,
+    label:
+      selected?.label ??
+      (injected?.isMetaMask ? 'MetaMask' : 'your browser wallet'),
   };
+};
+
+export const resolveTopUpWallet = async ({
+  source,
+  openHost,
+  connected,
+  readFallback = readInjectedWallet,
+}: {
+  source: TopUpSource;
+  openHost: () => Promise<{
+    address: Address;
+    provider: TopUpProvider;
+  } | null>;
+  connected?: {
+    address: Address;
+    provider: TopUpProvider;
+    label: string;
+  } | null;
+  readFallback?: () => Promise<TopUpWallet | null>;
+}): Promise<TopUpWallet | null> => {
+  if (source === 'farcaster') {
+    const host = await openHost();
+    return host === null
+      ? null
+      : { source: 'farcaster', ...host, label: 'your Farcaster wallet' };
+  }
+  if (connected) {
+    return { source: 'wallet', ...connected };
+  }
+  return readFallback();
+};
+
+const DEFAULT_WALLET_TIMEOUT_MS = 8_000;
+
+class WalletResponseTimeout extends Error {
+  readonly code = 'WALLET_RESPONSE_TIMEOUT';
+
+  constructor() {
+    super('The browser wallet did not answer before the deadline.');
+    this.name = 'WalletResponseTimeout';
+  }
+}
+
+const withWalletDeadline = async <T>(
+  request: Promise<T>,
+  timeoutMs: number,
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new WalletResponseTimeout()),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
 };
 
 /** The chain id the wallet is on right now, or null when it will not say. */
 export const walletChainId = async (
   provider: TopUpProvider,
+  timeoutMs = DEFAULT_WALLET_TIMEOUT_MS,
 ): Promise<number | null> => {
   try {
-    const raw = await provider.request({ method: 'eth_chainId' });
+    const raw = await withWalletDeadline(
+      provider.request({ method: 'eth_chainId' }),
+      timeoutMs,
+    );
     const parsed =
       typeof raw === 'string' ? Number.parseInt(raw, 16) : Number(raw);
     return Number.isFinite(parsed) ? parsed : null;
@@ -116,11 +190,15 @@ export const walletChainId = async (
 /** The wallet's own account, asked of the wallet rather than assumed. */
 export const walletAccount = async (
   provider: TopUpProvider,
+  timeoutMs = DEFAULT_WALLET_TIMEOUT_MS,
 ): Promise<Address | null> => {
   try {
-    const accounts = (await provider.request({
-      method: 'eth_requestAccounts',
-    })) as unknown;
+    const accounts = (await withWalletDeadline(
+      provider.request({
+        method: 'eth_requestAccounts',
+      }),
+      timeoutMs,
+    )) as unknown;
     const address = Array.isArray(accounts)
       ? accounts.find(
           (account): account is Address =>
@@ -178,33 +256,44 @@ export const sendTopUp = async ({
   usd,
   wallet,
   isCurrent,
+  walletTimeoutMs = DEFAULT_WALLET_TIMEOUT_MS,
 }: {
   reader: BaseTransferReader;
   config: FundingConfig;
   usd: string;
   wallet: TopUpWallet;
   isCurrent?: () => boolean;
+  walletTimeoutMs?: number;
 }): Promise<Hash> => {
-  const chainId = await walletChainId(wallet.provider);
+  const chainId = await walletChainId(wallet.provider, walletTimeoutMs);
   if (chainId !== null && chainId !== config.chain.id) {
     throw new FundingError('WRONG_NETWORK', {
       cause: new Error(`wallet chain ${chainId} is not ${config.chain.id}`),
     });
   }
 
-  const account = await walletAccount(wallet.provider);
+  const account = await walletAccount(wallet.provider, walletTimeoutMs);
   if (account === null) {
     throw new FundingError('NOT_CONNECTED');
   }
 
   const prepared = await prepareTopUp({ reader, config, usd, from: account });
 
-  const hash = (await submitEvmTransfer({
-    provider: asOxProvider(wallet.provider),
-    reader,
-    prepared,
-    isCurrent: isCurrent ?? (() => true),
-  })) as unknown;
+  const boundedProvider: TopUpProvider = {
+    request: (args) =>
+      withWalletDeadline(wallet.provider.request(args), walletTimeoutMs),
+  };
+  let hash: unknown;
+  try {
+    hash = await submitEvmTransfer({
+      provider: asOxProvider(boundedProvider),
+      reader,
+      prepared,
+      isCurrent: isCurrent ?? (() => true),
+    });
+  } catch (error) {
+    throw describeSendFailure(error);
+  }
 
   if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
     throw new FundingError('SEND_FAILED', {
@@ -224,6 +313,9 @@ export const describeSendFailure = (error: unknown): FundingError => {
     return error;
   }
   const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'WALLET_RESPONSE_TIMEOUT') {
+    return new FundingError('WALLET_UNRESPONSIVE', { cause: error });
+  }
   if (code === 4001) {
     return new FundingError('DECLINED', { cause: error });
   }

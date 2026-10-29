@@ -230,7 +230,9 @@ const announceProbeWallet = (address) => {
       }),
     );
 
-  window.ethereum = provider;
+  // Competing extensions can leave this global dead even though a live wallet
+  // still announces itself. The whole ready-flow probe must use the announcement.
+  window.ethereum = { request: () => new Promise(() => {}) };
   window.addEventListener('eip6963:requestProvider', announce);
   announce();
 };
@@ -782,8 +784,8 @@ const runReady = async ({ width }) => {
     `${review.reviewRecipientFull ?? '(none)'} / copy ${review.copy?.title ?? '(none)'}`,
   );
   check(
-    `${at}: the review names the wallet that will pay`,
-    (review.reviewPayer ?? '').length > 0,
+    `${at}: the review names the live announced wallet, not the stale global`,
+    review.reviewPayer === 'Probe Wallet',
     review.reviewPayer ?? '(nothing)',
   );
   check(

@@ -42,7 +42,7 @@ import {
   type FundingSession,
 } from '~/lib/fiddyCredit';
 import { type PendingTopUp, readPendingTopUp } from '~/lib/fiddyPendingTopUp';
-import { readInjectedWallet } from '~/lib/fiddyTopUpSend';
+import { readInjectedWallet, type TopUpWallet } from '~/lib/fiddyTopUpSend';
 
 // ---------------------------------------------------------------------------
 // The chip
@@ -316,7 +316,9 @@ export const FiddyFundingPanel = memo<FiddyFundingPanelProps>(
     const { provider, address, openConnectModal } = useWallet();
     const { address: wagmiAddress, connector } = useAccount();
     const [miniapp, setMiniapp] = useState(false);
-    const [injected, setInjected] = useState(false);
+    const [injectedWallet, setInjectedWallet] = useState<TopUpWallet | null>(
+      null,
+    );
 
     const topUp = useFiddyTopUp(config.data ?? null);
 
@@ -327,7 +329,11 @@ export const FiddyFundingPanel = memo<FiddyFundingPanelProps>(
           setMiniapp(isMiniapp);
         }
       });
-      setInjected(readInjectedWallet() !== null);
+      void readInjectedWallet().then((wallet) => {
+        if (alive) {
+          setInjectedWallet(wallet);
+        }
+      });
       return () => {
         alive = false;
       };
@@ -344,18 +350,18 @@ export const FiddyFundingPanel = memo<FiddyFundingPanelProps>(
         });
       }
       const connected = Boolean((address ?? wagmiAddress) && provider);
-      if (connected || injected) {
+      if (connected || injectedWallet) {
         options.push({
           source: 'wallet',
           label: connected
             ? (connector?.name ?? 'Your connected wallet')
-            : (readInjectedWallet()?.label ?? 'Your browser wallet'),
+            : (injectedWallet?.label ?? 'Your browser wallet'),
           line: 'A wallet in this browser. Fiddy never sees its keys and never holds your money.',
           available: true,
         });
       }
       return options;
-    }, [address, connector, injected, miniapp, provider, wagmiAddress]);
+    }, [address, connector, injectedWallet, miniapp, provider, wagmiAddress]);
 
     const connectLine =
       walletOptions.length === 0
