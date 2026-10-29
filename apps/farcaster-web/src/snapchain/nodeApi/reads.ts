@@ -699,8 +699,17 @@ export class NodeBackedReads {
         this.countLinkDirection({ fid }),
       ]);
 
-      const following = await this.viewerFollows(fid);
-      const viewerContext = following === undefined ? undefined : { following };
+      const [following, followedBy] = await Promise.all([
+        this.viewerFollows(fid),
+        this.viewerIsFollowedBy(fid),
+      ]);
+      const viewerContext =
+        following === undefined && followedBy === undefined
+          ? undefined
+          : {
+              ...(following !== undefined ? { following } : {}),
+              ...(followedBy !== undefined ? { followedBy } : {}),
+            };
 
       const user = apiUserFromNode({
         fid,
@@ -747,6 +756,32 @@ export class NodeBackedReads {
       return true;
     } catch (error) {
       // A missing edge is the answer "no"; anything else leaves the field out.
+      return isMissingOnNode(error) ? false : undefined;
+    }
+  }
+
+  /**
+   * Is there a follow edge from this profile back to the viewer?
+   *
+   * Only the profile-shaped read asks this reverse question. The label and the
+   * direction come from quilcast `e93bd29f9172` (MIT); the independent unknown
+   * semantics match `viewerFollows` above.
+   */
+  private async viewerIsFollowedBy(
+    profileFid: number,
+  ): Promise<boolean | undefined> {
+    const viewerFid = this.getSignedInFid();
+    if (viewerFid === undefined || viewerFid === profileFid) {
+      return undefined;
+    }
+    try {
+      await this.node.linkById({
+        fid: profileFid,
+        targetFid: viewerFid,
+        linkType: 'follow',
+      });
+      return true;
+    } catch (error) {
       return isMissingOnNode(error) ? false : undefined;
     }
   }

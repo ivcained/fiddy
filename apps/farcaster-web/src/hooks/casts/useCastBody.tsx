@@ -86,7 +86,7 @@ const useCastAttachment = ({
 
   const carouselEligibleEmbeds = React.useMemo(() => {
     return renderableEmbeds.filter(
-      (o) => o.type === 'image' || o.type === 'video' || o.type === 'og',
+      (o) => o.type === 'image' || o.type === 'video',
     );
   }, [renderableEmbeds]);
 
@@ -114,6 +114,7 @@ const useCastAttachment = ({
     const carouselIneligibleEmbeds = renderableEmbeds.filter(
       (o) =>
         o.type === 'quote' ||
+        o.type === 'og' ||
         o.type === 'non-carousel-bunched-og' ||
         o.type === 'groupInvite' ||
         o.type === 'unsupported',
@@ -307,15 +308,13 @@ const useCastAttachment = ({
       };
     }
 
-    const carouselHasNonMedia =
-      carouselEligibleEmbeds.findIndex((o) => o.type === 'og') !== -1;
-
     const layout = getCastEmbedLayout({
       embeds,
       platform: 'web',
       isFocused: isFocusedCast,
       renderingCarousel: needsCarousel,
-      carouselHasNonMedia,
+      // The strip is media-only now; cards render below it at full width.
+      carouselHasNonMedia: false,
     });
 
     const { width, height, effectiveAR, carouselMaxHeight, mediaTileHeight } =
@@ -461,40 +460,16 @@ const useCastAttachment = ({
                           ? width
                           : undefined
                       }
-                      ignoreAspectRatio={carouselHasNonMedia}
+                      ignoreAspectRatio={false}
                       carouselIndex={imageIndex}
                       snapContext={false}
                     />
                   );
                 })}
             </FullScreenImagesProvider>
-            {renderableEmbeds
-              .filter((o) => o.type === 'og')
-              .map(({ data: embed }) =>
-                renderUrlEmbedNonSnap({
-                  embed,
-                  height: needsCarousel ? height : undefined,
-                  width: needsCarousel ? undefined : width,
-                  spaceWidth: width,
-                  cast,
-                }),
-              )}
           </>
         ) : (
           <>
-            {renderableEmbeds
-              .filter((o) => o.type === 'og')
-              .filter((o) => isSnapEmbed(o.data))
-              .map(({ data: embed }) =>
-                renderUrlEmbedSnap({
-                  embed,
-                  height: needsCarousel ? height : undefined,
-                  width: needsCarousel ? undefined : width,
-                  snapWidth: width,
-                  spaceWidth: width,
-                  cast,
-                }),
-              )}
             {renderableEmbeds
               .filter((o) => o.type === 'video')
               .map(({ data: video }, videoIndex) => {
@@ -539,17 +514,15 @@ const useCastAttachment = ({
                           ? undefined
                           : mediaTile
                       }
-                      width={carouselHasNonMedia ? width : undefined}
+                      width={undefined}
                       maxWidth={
-                        carouselHasNonMedia
+                        imageIndex === 0 &&
+                        renderableEmbeds.filter((o) => o.type === 'video')
+                          .length === 0
                           ? width
-                          : imageIndex === 0 &&
-                              renderableEmbeds.filter((o) => o.type === 'video')
-                                .length === 0
-                            ? width
-                            : undefined
+                          : undefined
                       }
-                      ignoreAspectRatio={carouselHasNonMedia}
+                      ignoreAspectRatio={false}
                       carouselIndex={imageIndex}
                       noShrink={needsCarousel}
                       snapContext={true}
@@ -557,19 +530,6 @@ const useCastAttachment = ({
                   );
                 })}
             </FullScreenImagesProvider>
-            {renderableEmbeds
-              .filter((o) => o.type === 'og')
-              .filter((o) => !isSnapEmbed(o.data))
-              .map(({ data: embed }) =>
-                renderUrlEmbedSnap({
-                  embed,
-                  height: needsCarousel ? height : undefined,
-                  width: needsCarousel ? undefined : width,
-                  snapWidth: width,
-                  spaceWidth: width,
-                  cast,
-                }),
-              )}
           </>
         );
     }
@@ -607,6 +567,31 @@ const useCastAttachment = ({
                 <GroupInviteAttachment groupInvite={groupInvite} />
               </div>
             ))}
+          {/*
+           * Link and app cards stack at full width BELOW the media strip.
+           * quilcast `db1e0edfae09` (MIT), adapted to keep Fiddy's own special
+           * renderers and URL-based media classification.
+           */}
+          {renderableEmbeds
+            .filter((o) => o.type === 'og')
+            .map(({ data: embed }) =>
+              layout.mode === 'non-snap'
+                ? renderUrlEmbedNonSnap({
+                    embed,
+                    height: undefined,
+                    width: undefined,
+                    spaceWidth: undefined,
+                    cast,
+                  })
+                : renderUrlEmbedSnap({
+                    embed,
+                    height: undefined,
+                    width: undefined,
+                    snapWidth: undefined,
+                    spaceWidth: undefined,
+                    cast,
+                  }),
+            )}
         </div>
       );
     }
