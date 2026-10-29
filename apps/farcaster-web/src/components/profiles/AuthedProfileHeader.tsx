@@ -153,7 +153,7 @@ const AuthedProfileHeader: FC<AuthedProfileHeaderProps> = memo(
           <div className="flex w-full flex-row items-start">
             <div className="min-w-0 flex-auto space-y-3">
               <div className="flex flex-row items-center justify-between">
-                <div className="flex flex-col">
+                <div className="flex min-w-0 flex-col">
                   <div className="flex flex-row items-center">
                     <div className="flex-1">
                       <UserDisplayNameWithBadges user={user} style="header" />
@@ -162,8 +162,8 @@ const AuthedProfileHeader: FC<AuthedProfileHeaderProps> = memo(
                       userProfile={userProfile}
                     />
                   </div>
-                  <div className="flex flex-row items-center">
-                    <div className="mr-1 text-base text-faint">
+                  <div className="flex min-w-0 flex-row items-center">
+                    <div className="mr-1 min-w-0 truncate text-base text-faint">
                       {resolveUsername({
                         username: user.username,
                         fid: user.fid,

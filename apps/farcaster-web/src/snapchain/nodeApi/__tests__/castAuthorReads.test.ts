@@ -14,7 +14,8 @@
  *     a quoted cast's author) is read with its user data and ONE `/v1/linkById`
  *     for the viewer's follow edge, and its followers are never counted;
  *   - a profile-shaped account (`/v2/user`, `/v2/me`, a search result, `useUser`)
- *     still counts, exactly as before, because those surfaces render the number.
+ *     still counts, exactly as before, and may ask the reverse edge for its
+ *     "Follows you" label.
  *
  * If a future change lets counting back into the cast path, the first test here
  * goes red rather than the feed going slow again.
@@ -211,5 +212,17 @@ describe('the home feed does not count the accounts it draws', () => {
     );
     // …and none of it was counting followers.
     expect(countingReads(nodeLog)).toEqual([]);
+    // The profile-only reverse read must never fan out into cast assembly.
+    expect(
+      nodeLog.filter((entry) => {
+        if (!entry.startsWith('/v1/linkById')) {
+          return false;
+        }
+        return (
+          new URL(entry, 'http://node.test').searchParams.get('target_fid') ===
+          '3'
+        );
+      }),
+    ).toEqual([]);
   });
 });
