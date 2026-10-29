@@ -8,9 +8,10 @@ import type {
   ApiMediaV2,
   ApiOpenGraphMetadata,
 } from 'farcaster-client-data';
-import React from 'react';
+import React, { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { defaultVideoShapeStore } from '~/components/attachments/videoShape';
 import { CastAttachmentsSection } from '~/components/casts/CastAttachmentsSection';
 import { useCastAttachmentDebug } from '~/hooks/casts/useCastBody';
 
@@ -50,14 +51,26 @@ vi.mock('~/components/attachments/VideoAttachment', () => ({
   VideoAttachment: ({
     url,
     tileHeight,
+    videoWidth,
+    videoHeight,
+    renderWidth,
+    renderHeight,
   }: {
     url: string;
     tileHeight?: number;
+    videoWidth?: number;
+    videoHeight?: number;
+    renderWidth?: number;
+    renderHeight?: number;
   }) =>
     React.createElement('div', {
       'data-testid': 'video-attachment',
       'data-tile-height': tileHeight,
       'data-url': url,
+      'data-video-width': videoWidth,
+      'data-video-height': videoHeight,
+      'data-render-width': renderWidth,
+      'data-render-height': renderHeight,
     }),
 }));
 
@@ -346,6 +359,27 @@ describe('special renderers stay intact outside the media strip', () => {
 
     const quote = container.querySelector('[data-testid="quote-card"]')!;
     expect(strip(container)?.contains(quote)).toBe(false);
+  });
+});
+
+describe('learned video measurements reach the existing cast layout', () => {
+  it('recomputes a node-backed video when its metadata arrives', () => {
+    const url = 'https://media.test/node-backed-metadata.mp4';
+    const { container } = renderEmbeds({
+      ...emptyEmbeds(),
+      videos: [{ type: 'video', url, sourceUrl: url }],
+    });
+    const attachment = () =>
+      container.querySelector('[data-testid="video-attachment"]')!;
+
+    const initialWidth = attachment().getAttribute('data-render-width');
+    expect(initialWidth).not.toBeNull();
+
+    act(() => {
+      defaultVideoShapeStore.learn(url, 1080, 1920);
+    });
+
+    expect(attachment().getAttribute('data-render-width')).toBeNull();
   });
 });
 

@@ -158,6 +158,7 @@ export type FundingFailureCode =
   | 'NOT_ENOUGH_USDC'
   | 'NOT_ENOUGH_GAS'
   | 'DECLINED'
+  | 'WALLET_UNRESPONSIVE'
   | 'SEND_FAILED'
   // From this side of the wire.
   | 'UNREACHABLE'
@@ -225,6 +226,8 @@ const OWNER_LINES: Record<FundingFailureCode, string> = {
   NOT_ENOUGH_GAS:
     'Your wallet has no ETH on Base for the network fee. Nothing was sent.',
   DECLINED: 'That was not approved, so nothing was sent.',
+  WALLET_UNRESPONSIVE:
+    'Your browser wallet is not answering. Reconnect it or choose another wallet.',
   SEND_FAILED:
     'Your wallet did not send that. Nothing was transferred, and nothing was added.',
   UNREACHABLE:

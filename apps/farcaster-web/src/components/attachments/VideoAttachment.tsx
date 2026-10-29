@@ -33,6 +33,9 @@ import { useInView } from 'react-intersection-observer';
 
 import { useVideoPlayStatus } from '~/contexts/VideoPlayStatusProvider';
 
+import { useResolvedVideoShape } from './useVideoShape';
+import { defaultVideoShapeStore } from './videoShape';
+
 interface VideoAttachmentProps {
   url: string;
   videoWidth: number;
@@ -119,6 +122,15 @@ const posterIsRenderable = (thumbnailUrl?: string): thumbnailUrl is string => {
   );
 };
 
+const learnVideoMetadata = (url: string, target: EventTarget | null): void => {
+  const video = target as HTMLVideoElement | null;
+  defaultVideoShapeStore.learn(
+    url,
+    video?.videoWidth ?? 0,
+    video?.videoHeight ?? 0,
+  );
+};
+
 const VideoAttachment: FC<VideoAttachmentProps> = memo((props) => {
   const { renderWidth, renderHeight, maxHeight, maxWidth, tileHeight } = props;
 
@@ -129,14 +141,30 @@ const VideoAttachment: FC<VideoAttachmentProps> = memo((props) => {
    */
   const isStripTile = typeof tileHeight === 'number' && tileHeight > 0;
 
+  const learnedShape = useResolvedVideoShape(
+    props.url,
+    props.videoWidth,
+    props.videoHeight,
+  );
+
   const { aspectRatio } = useMemo(() => {
     return {
       aspectRatio: getImageAspectRatio({
-        w: props.videoWidth,
-        h: props.videoHeight,
+        w: learnedShape?.width ?? props.videoWidth,
+        h: learnedShape?.height ?? props.videoHeight,
       }),
     };
-  }, [props.videoHeight, props.videoWidth]);
+  }, [learnedShape, props.videoHeight, props.videoWidth]);
+
+  // This is the same poster the player or its unloaded placeholder already
+  // draws. Asking for its natural size adds no earlier origin or media path,
+  // and the bounded shared cache deduplicates repeat mounts.
+  useEffect(() => {
+    if (learnedShape !== null || !posterIsRenderable(props.thumbnailUrl)) {
+      return;
+    }
+    void defaultVideoShapeStore.loadPoster(props.url, props.thumbnailUrl);
+  }, [learnedShape, props.thumbnailUrl, props.url]);
 
   const { ref: inViewRef, inView } = useInView({
     threshold: 0.9,
@@ -241,6 +269,7 @@ const VideoAttachment: FC<VideoAttachmentProps> = memo((props) => {
   // especially the w-full classes.
   return (
     <div
+      data-fiddy="video-attachment"
       className={classNames(
         'flex shrink-0 flex-col overflow-hidden rounded-[12px] border border-default',
         // A strip tile: it STRETCHES with the row like every sibling tile
@@ -539,6 +568,9 @@ const VidstackVideoPlayer: FC<VideoPlayerProps> = memo(
         onCanPlay={() => {
           setCanPlay(true);
         }}
+        onLoadedMetadata={(event) => {
+          learnVideoMetadata(url, event.target);
+        }}
         onVolumeChange={(detail) => {
           if (
             !detail.muted &&
@@ -817,6 +849,9 @@ const NativeVideoPlayer: FC<VideoPlayerProps> = ({
       loop
       muted
       controls
+      onLoadedMetadata={(event) => {
+        learnVideoMetadata(url, event.currentTarget);
+      }}
       onPlay={() => {
         if (eventsEmittedRef.current.play === false) {
           eventsEmittedRef.current.play = true;
