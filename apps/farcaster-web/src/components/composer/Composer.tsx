@@ -82,6 +82,7 @@ import {
   LOCAL_DRAFT_TOP_LEVEL_KEY,
   LocalDraft,
   setLocalDraft,
+  whenLocalDraftsReady,
 } from './LocalDrafts';
 import { QueueCastButton } from './QueueCastButton';
 import { QueuedCast, QueuedCastInfo } from './QueuedCast';
@@ -258,6 +259,7 @@ const ComposerInner = React.forwardRef<
   ) => {
     const { trackEvent } = useAnalytics();
     const currentUser = useCurrentUser();
+    const currentFid = currentUser?.fid;
     const createCast = useCreateCast();
     const optimisticallyAddNewCastToThread =
       useOptimisticallyAddNewCastToThread('bottom');
@@ -709,12 +711,12 @@ const ComposerInner = React.forwardRef<
 
     const clearLocalDraftForCurrentComposer = React.useCallback(() => {
       if (typeof localDraftKey !== 'undefined') {
-        setLocalDraft(undefined, localDraftKey);
+        setLocalDraft(undefined, localDraftKey, currentFid);
       }
       if (localDraftKey === LOCAL_DRAFT_TOP_LEVEL_KEY) {
-        setLocalDraft(undefined);
+        setLocalDraft(undefined, undefined, currentFid);
       }
-    }, [localDraftKey]);
+    }, [localDraftKey, currentFid]);
 
     // Tracks the auto-save draft created during this composer session.
     // We discard the previous one before each new save to avoid accumulating
@@ -1508,91 +1510,118 @@ const ComposerInner = React.forwardRef<
     );
 
     React.useEffect(() => {
-      if (!canUseLocalDraftRecovery || typeof localDraftKey === 'undefined') {
+      if (
+        !canUseLocalDraftRecovery ||
+        typeof localDraftKey === 'undefined' ||
+        !currentFid
+      ) {
         return;
       }
       if (localDraftHydrationAttemptedKeyRef.current === localDraftKey) {
         return;
       }
-      localDraftHydrationAttemptedKeyRef.current = localDraftKey;
+      let cancelled = false;
+      const recover = async () => {
+        if (currentFid) {
+          await whenLocalDraftsReady(currentFid);
+        }
+        if (
+          cancelled ||
+          localDraftHydrationAttemptedKeyRef.current === localDraftKey
+        ) {
+          return;
+        }
+        localDraftHydrationAttemptedKeyRef.current = localDraftKey;
+        const localDraft =
+          getLocalDraft(localDraftKey, currentFid) ??
+          (localDraftKey === LOCAL_DRAFT_TOP_LEVEL_KEY
+            ? getLocalDraft(undefined, currentFid)
+            : undefined);
+        if (typeof localDraft === 'undefined') {
+          return;
+        }
+        if (
+          localDraftKey === LOCAL_DRAFT_TOP_LEVEL_KEY
+            ? typeof localDraft.parentCastHash !== 'undefined'
+            : localDraft.parentCastHash !== parentCastHash
+        ) {
+          return;
+        }
 
-      const localDraft =
-        getLocalDraft(localDraftKey) ??
-        (localDraftKey === LOCAL_DRAFT_TOP_LEVEL_KEY
-          ? getLocalDraft()
-          : undefined);
-      if (typeof localDraft === 'undefined') {
-        return;
-      }
-      if (
-        localDraftKey === LOCAL_DRAFT_TOP_LEVEL_KEY
-          ? typeof localDraft.parentCastHash !== 'undefined'
-          : localDraft.parentCastHash !== parentCastHash
-      ) {
-        return;
-      }
+        const composerIsStillEmpty =
+          queuedCasts.length === 1 &&
+          queuedCasts[0].editorState
+            .getCurrentContent()
+            .getPlainText()
+            .trim() === '';
+        if (!composerIsStillEmpty && !isActiveDraftLocalRecovery) {
+          return;
+        }
 
-      const composerIsStillEmpty =
-        queuedCasts.length === 1 &&
-        queuedCasts[0].editorState.getCurrentContent().getPlainText().trim() ===
-          '';
-      if (!composerIsStillEmpty && !isActiveDraftLocalRecovery) {
-        return;
-      }
+        const hasContent =
+          localDraft.casts.some((c) => c.text.trim().length > 0) ||
+          localDraft.casts.some((c) => c.embeds.length > 0);
+        if (!hasContent) {
+          return;
+        }
 
-      const hasContent =
-        localDraft.casts.some((c) => c.text.trim().length > 0) ||
-        localDraft.casts.some((c) => c.embeds.length > 0);
-      if (!hasContent) {
-        return;
-      }
-
-      const newQueuedCasts: QueuedCastInfo[] = [];
-      const newEmbedUrls: { [castLocalKey: number]: string[] } = {};
-      const openGraphLinkEventsToQueue: { [castLocalKey: number]: string } = {};
-      const draftCasts =
-        localDraft.casts.length > 0
-          ? localDraft.casts
-          : [{ text: '', embeds: [] }];
-      for (let i = 0; i < draftCasts.length; i++) {
-        const draftCast = draftCasts[i];
-        const localKey = nextCastLocalKeyRef.current++;
-        let es = EditorState.createWithContent(
-          ContentState.createFromText(draftCast.text),
+        const newQueuedCasts: QueuedCastInfo[] = [];
+        const newEmbedUrls: { [castLocalKey: number]: string[] } = {};
+        const openGraphLinkEventsToQueue: { [castLocalKey: number]: string } =
+          {};
+        const draftCasts =
+          localDraft.casts.length > 0
+            ? localDraft.casts
+            : [{ text: '', embeds: [] }];
+        for (let i = 0; i < draftCasts.length; i++) {
+          const draftCast = draftCasts[i];
+          const localKey = nextCastLocalKeyRef.current++;
+          let es = EditorState.createWithContent(
+            ContentState.createFromText(draftCast.text),
+          );
+          es = EditorState.moveSelectionToEnd(es);
+          if (i === draftCasts.length - 1) {
+            es = EditorState.forceSelection(es, es.getSelection());
+          }
+          newQueuedCasts.push({ editorState: es, localKey });
+          newEmbedUrls[localKey] = draftCast.embeds ?? [];
+          if (draftCast.embeds && draftCast.embeds.length > 0) {
+            openGraphLinkEventsToQueue[localKey] = draftCast.embeds.join(' ');
+          }
+        }
+        setQueuedCasts(newQueuedCasts);
+        setEmbedsFromAllDraftCasts(
+          newEmbedUrls,
+          onDraftImages,
+          onDraftVideos,
+          onDraftUrls,
         );
-        es = EditorState.moveSelectionToEnd(es);
-        if (i === draftCasts.length - 1) {
-          es = EditorState.forceSelection(es, es.getSelection());
+        if (typeof localDraft.channelKey !== 'undefined') {
+          setChannelKey(localDraft.channelKey);
         }
-        newQueuedCasts.push({ editorState: es, localKey });
-        newEmbedUrls[localKey] = draftCast.embeds ?? [];
-        if (draftCast.embeds && draftCast.embeds.length > 0) {
-          openGraphLinkEventsToQueue[localKey] = draftCast.embeds.join(' ');
+        setFocusedCastLocalKey(
+          newQueuedCasts[newQueuedCasts.length - 1].localKey,
+        );
+        if (Object.keys(openGraphLinkEventsToQueue).length > 0) {
+          setQueuedSetOpenGraphLinkEvents((curValue) => ({
+            ...curValue,
+            ...openGraphLinkEventsToQueue,
+          }));
         }
-      }
-      setQueuedCasts(newQueuedCasts);
-      setEmbedsFromAllDraftCasts(
-        newEmbedUrls,
-        onDraftImages,
-        onDraftVideos,
-        onDraftUrls,
-      );
-      if (typeof localDraft.channelKey !== 'undefined') {
-        setChannelKey(localDraft.channelKey);
-      }
-      setFocusedCastLocalKey(
-        newQueuedCasts[newQueuedCasts.length - 1].localKey,
-      );
-      if (Object.keys(openGraphLinkEventsToQueue).length > 0) {
-        setQueuedSetOpenGraphLinkEvents((curValue) => ({
-          ...curValue,
-          ...openGraphLinkEventsToQueue,
-        }));
-      }
+      };
+      void recover();
+      return () => {
+        cancelled = true;
+      };
       // We intentionally only depend on the stable recovery gates so this
       // runs once per mount. The captured setters are stable.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [canUseLocalDraftRecovery, isActiveDraftLocalRecovery, localDraftKey]);
+    }, [
+      canUseLocalDraftRecovery,
+      isActiveDraftLocalRecovery,
+      localDraftKey,
+      currentFid,
+    ]);
 
     // Tracks whether this composer session has ever held content. Used by
     // the persistence effect below to decide whether an "empty" transition
@@ -1637,13 +1666,14 @@ const ComposerInner = React.forwardRef<
           parentCastHash,
           scheduledAt: scheduledAt?.getTime(),
         };
-        setLocalDraft(draft, localDraftKey);
+        setLocalDraft(draft, localDraftKey, currentFid);
       } catch (e) {
         trackError(e);
       }
       return undefined;
     }, [
       canUseLocalDraftRecovery,
+      currentFid,
       channelKey,
       clearLocalDraftForCurrentComposer,
       draftEmbedUrls,

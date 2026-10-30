@@ -43,6 +43,11 @@ import type {
   ApiCaststormDraft,
 } from 'farcaster-client-data';
 
+import {
+  readSealedValues,
+  writeSealedValues,
+} from '~/lib/sealedDrafts/runtime';
+
 /** One list per account, in the browser that person is using. */
 const STORAGE_PREFIX = 'fiddy:node-drafts';
 
@@ -53,10 +58,15 @@ const STORAGE_PREFIX = 'fiddy:node-drafts';
  */
 export const LOCAL_DRAFT_LIMIT = 50;
 
-interface StoredDrafts {
+export interface StoredDrafts {
   caststorms: ApiCaststormDraft[];
   casts: ApiCastDraft[];
 }
+
+const canSeal = (): boolean =>
+  typeof indexedDB !== 'undefined' &&
+  typeof crypto !== 'undefined' &&
+  typeof crypto.subtle !== 'undefined';
 
 const EMPTY: StoredDrafts = { caststorms: [], casts: [] };
 
@@ -115,7 +125,7 @@ export class LocalDraftStore {
     return `${STORAGE_PREFIX}:${fid}`;
   }
 
-  read(fid: number): StoredDrafts {
+  private readLegacy(fid: number): StoredDrafts {
     const storage = this.storage;
     if (!storage) {
       return EMPTY;
@@ -146,10 +156,48 @@ export class LocalDraftStore {
     }
   }
 
+  read(fid: number): StoredDrafts {
+    const storage = this.storage;
+    if (!storage || !canSeal()) {
+      return this.readLegacy(fid);
+    }
+    const legacy = this.readLegacy(fid);
+    const legacyValues: Record<string, unknown> = {};
+    for (const draft of legacy.caststorms) {
+      legacyValues[`s_${draft.draftId}`] = draft;
+    }
+    for (const draft of legacy.casts) {
+      legacyValues[`c_${draft.draftId}`] = draft;
+    }
+    const values = readSealedValues(storage, fid, 'node', legacyValues);
+    const caststorms: ApiCaststormDraft[] = [];
+    const casts: ApiCastDraft[] = [];
+    for (const [id, value] of Object.entries(values)) {
+      if (id.startsWith('s_') && isCaststormDraft(value)) {
+        caststorms.push(value);
+      }
+      if (id.startsWith('c_') && isCastDraft(value)) {
+        casts.push(value);
+      }
+    }
+    return { caststorms, casts };
+  }
+
   private write(fid: number, drafts: StoredDrafts): boolean {
     const storage = this.storage;
     if (!storage) {
       return false;
+    }
+    if (canSeal()) {
+      const values: Record<string, unknown> = {};
+      for (const draft of drafts.caststorms.slice(0, LOCAL_DRAFT_LIMIT)) {
+        values[`s_${draft.draftId}`] = draft;
+      }
+      for (const draft of drafts.casts.slice(0, LOCAL_DRAFT_LIMIT)) {
+        values[`c_${draft.draftId}`] = draft;
+      }
+      writeSealedValues(storage, fid, 'node', values);
+      return true;
     }
     try {
       storage.setItem(

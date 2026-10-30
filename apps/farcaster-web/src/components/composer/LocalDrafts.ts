@@ -20,6 +20,12 @@ const SCOPED_STORAGE_KEY = 'local-caststorm-drafts-by-key';
 const LOCAL_DRAFT_SCHEMA_VERSION = 3;
 const LOCAL_DRAFT_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 14;
 
+import {
+  readSealedValues,
+  whenSealedValuesReady,
+  writeSealedValues,
+} from '~/lib/sealedDrafts/runtime';
+
 export const LOCAL_DRAFT_TOP_LEVEL_KEY = 'cast:new';
 
 export type LocalDraftCast = {
@@ -182,10 +188,52 @@ function writeScopedLocalDrafts(drafts: ScopedLocalDrafts): void {
   }
 }
 
-export function getLocalDraft(key?: string): LocalDraft | undefined {
+const canSeal = (): boolean =>
+  typeof indexedDB !== 'undefined' &&
+  typeof crypto !== 'undefined' &&
+  typeof crypto.subtle !== 'undefined';
+
+const recoveryId = (key: string): string =>
+  `r_${btoa(key).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')}`;
+
+const sealedRecoveryValues = (fid: number): Record<string, unknown> => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+  const legacy: Record<string, unknown> = {};
+  for (const [key, draft] of Object.entries(readScopedLocalDrafts())) {
+    legacy[recoveryId(key)] = draft;
+  }
+  const unscoped = getLocalDraft();
+  if (unscoped) {
+    legacy[recoveryId('legacy')] = unscoped;
+  }
+  return readSealedValues(window.localStorage, fid, 'recovery', legacy);
+};
+
+export const whenLocalDraftsReady = (fid: number): Promise<void> => {
+  if (typeof window === 'undefined') {
+    return Promise.resolve();
+  }
+  // Hydration must start before the caller reads synchronously. Otherwise a
+  // fresh composer awaits an already-resolved empty cache and misses the draft.
+  sealedRecoveryValues(fid);
+  return whenSealedValuesReady(window.localStorage, fid, 'recovery');
+};
+
+export function getLocalDraft(
+  key?: string,
+  fid?: number,
+): LocalDraft | undefined {
   try {
     if (typeof window === 'undefined') {
       return undefined;
+    }
+    if (typeof fid === 'number' && canSeal()) {
+      const value = sealedRecoveryValues(fid)[recoveryId(key ?? 'legacy')];
+      return isValidLocalDraft(value) && !isExpiredLocalDraft(value)
+        ? value
+        : undefined;
     }
     if (typeof key !== 'undefined') {
       return readScopedLocalDrafts()[key];
@@ -225,9 +273,21 @@ export function getLocalDraft(key?: string): LocalDraft | undefined {
 export function setLocalDraft(
   draft: LocalDraft | undefined,
   key?: string,
+  fid?: number,
 ): void {
   try {
     if (typeof window === 'undefined') {
+      return;
+    }
+    if (typeof fid === 'number' && canSeal()) {
+      const values = { ...sealedRecoveryValues(fid) };
+      const id = recoveryId(key ?? 'legacy');
+      if (draft) {
+        values[id] = normalizeLocalDraft(draft);
+      } else {
+        delete values[id];
+      }
+      writeSealedValues(window.localStorage, fid, 'recovery', values);
       return;
     }
     if (typeof key !== 'undefined') {
