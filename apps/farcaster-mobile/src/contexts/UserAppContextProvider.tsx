@@ -55,7 +55,11 @@ type UserAppContextContextValue = {
 // this endpoint.
 const CAST_BYTE_LIMIT_FALLBACK = 320;
 
-const CAST_EMBED_LIMIT_FALLBACK = 2;
+// Hypersnap V20 raised the per-cast embed cap 2 -> 4 for every fid
+// (cf. backmeupplz/quilcast 0.26.2, MIT: MAX_EMBEDS = 4). Server-provided
+// castEmbedLimit stays the source of truth; this is only the stale/missing
+// server value fallback.
+const CAST_EMBED_LIMIT_FALLBACK = 4;
 
 const createDefaultUserAppContext = () => {
   return {

@@ -311,7 +311,11 @@ const LOCAL_USER_APP_CONTEXT = {
   canUploadVideo: false,
   regularCastByteLimit: 320,
   longCastByteLimit: 1024,
-  castEmbedLimit: 2,
+  // Hypersnap V20 raised the per-cast embed cap 2 -> 4 for every fid
+  // (cf. backmeupplz/quilcast 0.26.2, MIT: MAX_EMBEDS = 4). This object is
+  // the server-provided value on the local-node path, so it tracks the
+  // protocol cap, not the client fallback.
+  castEmbedLimit: 4,
   // The one notification tab this client serves. Everything else the hosted
   // API offers (invites, wallet, mini apps) is not on the node.
   notificationTabsV2: [{ id: 'default', name: 'All' }],
