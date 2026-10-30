@@ -17,7 +17,9 @@
  *    than from the source.
  * 2. **The main bundle's growth.** The entry chunk may not grow more than the
  *    card's own ceiling (100 KB) against a recorded baseline, and the report
- *    prints both numbers.
+ *    prints both numbers. The baseline is the last RELEASED entry chunk, taken
+ *    from the origin — re-record it there when it goes stale, and widen the
+ *    ceiling never (see the note at `baselinePath`).
  * 3. **Dead code.** Every export of the new modules must be referenced by
  *    production code (the knip-equivalent check this card asked for, scoped to
  *    the modules it added).
@@ -44,9 +46,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(here, '..');
 const repoRoot = resolve(appRoot, '../..');
 const assetsDir = join(appRoot, 'dist', 'assets');
-/* The pre-change measurement, committed once; the current run is written beside
-   it. Keeping them apart is what makes "it grew by N bytes" a fact rather than a
-   number that resets every time this script runs. */
+/* The baseline is the LAST RELEASED entry chunk, measured from the origin
+   (fiddy.fun), not from a local build; the current run is written beside it.
+   Keeping them apart is what makes "it grew by N bytes" a fact rather than a
+   number that resets every time this script runs.
+
+   When it goes stale, RE-RECORD it: fetch the shell the origin serves, take the
+   /assets/index-*.js it names, and write that byte count here (the note in the
+   file records how the last one was taken). Never widen the ceiling below
+   instead — the ceiling is the guard, this file is only the line it measures
+   from, and a stale baseline here once left the ceiling inert. */
 const baselinePath = join(
   repoRoot,
   'docs',
