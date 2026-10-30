@@ -173,24 +173,44 @@ const makeDevice = async (width, fid = 3, selfHosted = false, remote = new Map()
   await installFixtures(ctx, state, remote, proof);
   const page = await ctx.newPage();
   state.consoleErrors = [];
-  page.on('pageerror', (error) => state.consoleErrors.push(String(error)));
+  page.on('pageerror', (error) =>
+    state.consoleErrors.push(
+      `${page.url()} :: ${String(error?.stack ?? error)}`,
+    ),
+  );
   return { ctx, page, state, remote, server };
 };
 
 const signIn = async (device) => {
   const { page, state, server } = device;
+  // The ready sheet's primary is "Go social — sign in with Farcaster" on a
+  // fresh device and "Save <name> & sign in with Farcaster" once the trial
+  // agent has answered (its state survives a sign-out), so match the tail.
+  const readyButton = () =>
+    [...document.querySelectorAll('button, a, [role=button]')].some((el) =>
+      /sign in with farcaster/i.test(el.innerText || ''),
+    );
   await page.goto(`${server}/welcome/ready`, {
     waitUntil: 'domcontentloaded',
     timeout: 60000,
   });
-  await page.waitForFunction(
-    () =>
-      [...document.querySelectorAll('button, a, [role=button]')].some((el) =>
-        /go social/i.test(el.innerText || ''),
-      ),
-    { timeout: 60000 },
-  );
-  await page.locator('button, a, [role=button]').filter({ hasText: /go social/i }).first().click();
+  // Sign-out is async, and /welcome/ready sends a still-signed-in session
+  // back to the client, so re-enter until the ready sheet really renders.
+  const deadline = Date.now() + 60000;
+  for (;;) {
+    if (await page.evaluate(readyButton)) break;
+    if (Date.now() > deadline) {
+      throw new Error(`ready sheet never rendered; at ${page.url()}`);
+    }
+    await page.waitForTimeout(500);
+    if (new URL(page.url()).pathname !== '/welcome/ready') {
+      await page.goto(`${server}/welcome/ready`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      });
+    }
+  }
+  await page.locator('button, a, [role=button]').filter({ hasText: /sign in with farcaster/i }).first().click();
   await page.waitForFunction(
     () =>
       window.location.pathname === '/' &&
@@ -202,16 +222,35 @@ const signIn = async (device) => {
 };
 
 const openComposer = async (page) => {
-  if (await page.locator('#modal-root [contenteditable="true"]:visible').count()) {
+  const editor = '#modal-root [contenteditable="true"]:visible';
+  if (await page.locator(editor).count()) {
+    return;
+  }
+  if (await page.getByText('Compose', { exact: true }).count()) {
+    await page.getByText('Compose', { exact: true }).click();
+    await page.waitForSelector(editor, { timeout: 30000 });
     return;
   }
   await page.waitForSelector('.fiddy-shell-frame', { timeout: 60000 });
-  const cast = page.locator('button:text-is("Cast"):visible').first();
-  if (await cast.count()) await cast.click();
-  else await page.keyboard.press('n');
-  await page.waitForSelector('#modal-root [contenteditable="true"]:visible', {
-    timeout: 30000,
-  });
+  // The desktop header renders two "Cast" buttons and only one is ever
+  // visible; it can also paint a beat after the shell frame, and a click can
+  // land on a copy the header then re-renders away — so try, verify, retry.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const cast = page.locator('button:text-is("Cast"):visible').first();
+    try {
+      await cast.waitFor({ state: 'visible', timeout: 10000 });
+      await cast.click({ timeout: 5000 });
+    } catch {
+      await page.keyboard.press('n').catch(() => {});
+    }
+    try {
+      await page.waitForSelector(editor, { timeout: 8000 });
+      return;
+    } catch {
+      // try again
+    }
+  }
+  await page.waitForSelector(editor, { timeout: 30000 });
 };
 
 const openDrafts = async (device) => {
@@ -366,6 +405,18 @@ const runHosted = async (width) => {
   await opener.click();
   await a.page.locator('[data-fiddy="account-menu-sign-out"]').click();
   await a.page.locator('[data-fiddy="sign-out-confirm"]').click();
+  // signOut() is async storage work; navigating before it finishes leaves a
+  // half-cleared session that hangs the next boot on "Loading Fiddy…".
+  await a.page
+    .locator('[data-fiddy="sign-out-modal"]')
+    .waitFor({ state: 'detached', timeout: 30000 });
+  await a.page.waitForFunction(
+    () =>
+      !document.querySelector('[data-fiddy="account-menu-button"]') &&
+      !document.querySelector('[data-fiddy="mobile-account-tab"]'),
+    { timeout: 30000 },
+  );
+  await a.page.waitForTimeout(1000);
   a.state.fid = 4;
   await signIn(a);
   await typeDraft(a.page, localFid4);
@@ -382,7 +433,7 @@ const runHosted = async (width) => {
   await a.page.locator('[data-fiddy="draft-sync-enroll"]').click();
   await a.page.waitForSelector('[data-fiddy="draft-sync-error"]', { timeout: 30000 });
   check(`${width}: unavailable service is honest and local text survives`, (await modalText(a.page)).includes(localFid4));
-  check(`${width}: no fixture page errors`, a.state.consoleErrors.length === 0 && b.state.consoleErrors.length === 0, [...a.state.consoleErrors, ...b.state.consoleErrors][0] ?? '');
+  check(`${width}: no fixture page errors`, a.state.consoleErrors.length === 0 && b.state.consoleErrors.length === 0, [...a.state.consoleErrors, ...b.state.consoleErrors].slice(0, 3).join(' || '));
   await a.ctx.close();
   await b.ctx.close();
 };
@@ -423,7 +474,22 @@ try {
     await runSelfHosted(width);
   }
 } catch (error) {
-  check('probe completed without throwing', false, String(error).slice(0, 500));
+  let pageState = '';
+  try {
+    for (const ctx of browser?.contexts() ?? []) {
+      for (const p of ctx.pages()) {
+        const body = await p.evaluate(
+          () => (document.body?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 500),
+        );
+        pageState += `\n[page ${p.url()}] ${body}`;
+      }
+    }
+  } catch {}
+  check(
+    'probe completed without throwing',
+    false,
+    `${String(error?.stack ?? error).slice(0, 600)}${pageState}`,
+  );
 } finally {
   await browser?.close().catch(() => {});
 }

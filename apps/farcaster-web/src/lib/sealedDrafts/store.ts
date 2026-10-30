@@ -87,6 +87,28 @@ export const hydrateSealedEntry = async ({
     entry.values = values;
     entry.records = recordsById;
     entry.lockedCount = lockedCount;
+    return;
+  }
+  // A write landed while the boxes were being decrypted. That write was
+  // computed from the pre-hydration cache, so dropping the whole hydrate
+  // would lose every record it never touched (a reloaded draft vanishing
+  // under the composer's own first auto-save). Merge instead: the write
+  // keeps everything it named, hydration supplies the rest.
+  let merged = false;
+  for (const [id, record] of Object.entries(recordsById)) {
+    if (entry.records[id]) {
+      continue;
+    }
+    entry.records[id] = record;
+    if (id in values && !(id in entry.values)) {
+      entry.values[id] = values[id];
+    }
+    merged = true;
+  }
+  if (merged) {
+    entry.lockedCount = Object.values(entry.records).filter(
+      (record) => record.box !== null && !(record.id in entry.values),
+    ).length;
   }
 };
 

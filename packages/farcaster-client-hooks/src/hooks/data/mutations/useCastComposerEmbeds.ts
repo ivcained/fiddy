@@ -1646,15 +1646,36 @@ export const useCastComposerEmbeds = ({
         urls: string[];
       }) => void;
     }) => {
-      const data = await processCastAttatchments({
-        text: '',
-        embeds,
-      });
+      if (embeds.length === 0) {
+        // A text-only draft has nothing for the indexer to resolve. Calling
+        // anyway round-trips an empty list on the hosted API — and where the
+        // draft is restored without a hosted indexer (the node-backed client
+        // answers 501) the rejection escapes the unawaited caller and lands
+        // as a page error.
+        return;
+      }
+      let data: Awaited<ReturnType<typeof processCastAttatchments>> | null;
+      try {
+        data = await processCastAttatchments({
+          text: '',
+          embeds,
+        });
+      } catch (error) {
+        // The indexer is an enhancement, not a gate: when it cannot answer,
+        // the draft's own text and persisted attachments still restore.
+        // eslint-disable-next-line no-console
+        console.warn(
+          'processCastAttachments failed during draft restore',
+          error,
+        );
+        data = null;
+      }
       if (data === null) {
         // eslint-disable-next-line no-console
         console.warn(
           'data was null: useCastComposerEmbeds:processCastAttachments',
         );
+        return;
       }
       const { result } = data;
 
