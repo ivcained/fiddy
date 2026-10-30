@@ -1145,6 +1145,9 @@ importers:
       eslint-config-custom:
         specifier: workspace:*
         version: link:../../packages/eslint-config-custom
+      fake-indexeddb:
+        specifier: 4.0.2
+        version: 4.0.2
       fork-ts-checker-webpack-plugin:
         specifier: 9.0.0
         version: 9.0.0(@typescript/typescript6@6.0.2)(webpack@5.106.2)

@@ -27,8 +27,15 @@ import { LoadingIndicator } from '~/components/loaders/LoadingIndicator';
 import { MenuItem } from '~/components/popovers/MenuItem';
 import { popoverRootId } from '~/constants/popovers';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
+import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 
 type NoDraftsEmptyStateProps = {};
+
+const DraftSyncPanel = React.lazy(() =>
+  import('./DraftSyncPanel').then((module) => ({
+    default: module.DraftSyncPanel,
+  })),
+);
 
 const NoDraftsEmptyState: React.FC<NoDraftsEmptyStateProps> = React.memo(() => {
   return (
@@ -102,8 +109,22 @@ type DraftsContentProps = {
 
 const DraftsContent: React.FC<DraftsContentProps> = React.memo(
   ({ onEditClick }) => {
-    const { data, onEndReached, isFetchingNextPage, isLoading } =
+    const { data, onEndReached, isFetchingNextPage, isLoading, refetch } =
       useDraftCaststormsWithRefreshOnMount();
+    const currentFid = useCurrentUser()?.fid;
+
+    React.useEffect(() => {
+      if (!currentFid) {
+        return undefined;
+      }
+      const refresh = () => void refetch();
+      window.addEventListener('fiddy:sealed-drafts-changed', refresh);
+      window.addEventListener('fiddy:draft-sync-state', refresh);
+      return () => {
+        window.removeEventListener('fiddy:sealed-drafts-changed', refresh);
+        window.removeEventListener('fiddy:draft-sync-state', refresh);
+      };
+    }, [currentFid, refetch]);
 
     const drafts = React.useMemo(() => {
       return data?.pages.flatMap((o) => o.result.drafts) || [];
@@ -131,6 +152,11 @@ const DraftsContent: React.FC<DraftsContentProps> = React.memo(
 
     return (
       <div className="flex min-h-[200px] flex-col justify-between pb-2 border-default">
+        {currentFid && (
+          <React.Suspense fallback={null}>
+            <DraftSyncPanel fid={currentFid} />
+          </React.Suspense>
+        )}
         <FlatList
           data={drafts}
           keyExtractor={draftKeyExtractor}
@@ -203,6 +229,7 @@ const Draft: React.FC<DraftProps> = ({
   const popoverPortalContainer =
     document.getElementById(popoverRootId) ?? undefined;
   const { trackEvent } = useAnalytics();
+  const currentFid = useCurrentUser()?.fid;
 
   const discardDraftCast = useDiscardDraftCast();
 
@@ -235,9 +262,13 @@ const Draft: React.FC<DraftProps> = ({
         draftId: draft.draftId,
         castChannelKey: undefined,
       });
-      setLocalDraft(undefined, getActiveDraftLocalDraftKey(draft.draftId));
+      setLocalDraft(
+        undefined,
+        getActiveDraftLocalDraftKey(draft.draftId),
+        currentFid,
+      );
     },
-    [discardDraftCast, draft, trackEvent],
+    [discardDraftCast, draft, trackEvent, currentFid],
   );
 
   const firstNonemptyCast = draft.casts.find((draft) => draft.text.trim());

@@ -45,6 +45,9 @@ export default defineConfig(async (env) => {
       path.join(appRoot, '.probe-vite-cache'),
     server: {
       ...resolved.server,
+      // The sealed-draft probe maps fiddy.fun to this loopback server so the
+      // hosted-only opt-in is exercised without touching production.
+      allowedHosts: ['fiddy.fun'],
       proxy: {
         ...resolved.server?.proxy,
         '/api/fiddy/media': {

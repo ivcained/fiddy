@@ -28,6 +28,7 @@ import { Modal } from '~/components/modals/Modal';
 import { Tab } from '~/components/tabs/Tab';
 import { Tabs } from '~/components/tabs/Tabs';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
+import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import {
   asSentence,
   nodeCannotAnswer,
@@ -63,6 +64,7 @@ const ComposeCastModal: React.FC<ComposeCastModalProps> = React.memo(
     const storeDraftCaststorm = useStoreDraftCaststorm();
     const invalidateUserAppContext = useInvalidateUserAppContext();
     const { trackEvent } = useAnalytics();
+    const currentFid = useCurrentUser()?.fid;
 
     React.useEffect(() => {
       invalidateUserAppContext();
@@ -195,11 +197,11 @@ const ComposeCastModal: React.FC<ComposeCastModalProps> = React.memo(
     );
 
     const clearLocalDraftForCurrentComposer = React.useCallback(() => {
-      setLocalDraft(undefined, localDraftKey);
+      setLocalDraft(undefined, localDraftKey, currentFid);
       if (localDraftKey === LOCAL_DRAFT_TOP_LEVEL_KEY) {
-        setLocalDraft(undefined);
+        setLocalDraft(undefined, undefined, currentFid);
       }
-    }, [localDraftKey]);
+    }, [localDraftKey, currentFid]);
 
     const composerErrorDebugData = React.useMemo(
       () => ({
@@ -227,9 +229,9 @@ const ComposeCastModal: React.FC<ComposeCastModalProps> = React.memo(
 
     const getComposerErrorDebugData = React.useCallback(() => {
       const localDraft =
-        getLocalDraft(localDraftKey) ??
+        getLocalDraft(localDraftKey, currentFid) ??
         (localDraftKey === LOCAL_DRAFT_TOP_LEVEL_KEY
-          ? getLocalDraft()
+          ? getLocalDraft(undefined, currentFid)
           : undefined);
       const composerState = composerRef.current?.getComposerState();
       const caststorm = composerState?.caststorm;
@@ -271,7 +273,7 @@ const ComposeCastModal: React.FC<ComposeCastModalProps> = React.memo(
         local_draft_has_scheduled_at:
           typeof localDraft?.scheduledAt !== 'undefined',
       };
-    }, [localDraftKey]);
+    }, [localDraftKey, currentFid]);
 
     return (
       <>

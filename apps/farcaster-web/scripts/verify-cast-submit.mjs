@@ -67,8 +67,8 @@ const SIGNED_IN_FID = 3;
 const MODAL_ROOT = '#modal-root';
 const PLACEHOLDER = 'Start typing a new cast here...';
 const CAST_TEXT = 'a cast typed by the probe, never sent';
-/** Where the node adapter's own store keeps this device's drafts. */
-const DRAFT_KEY_PREFIX = 'fiddy:node-drafts';
+/** Sealed, per-account browser storage for the node adapter's drafts. */
+const DRAFT_KEY_PREFIX = 'fiddy:sealed-drafts:v1';
 
 const account = privateKeyToAccount(
   '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
@@ -434,13 +434,14 @@ const run = async () => {
       Object.keys(window.localStorage)
         .filter((key) => key.startsWith(prefix))
         .map((key) => ({ key, value: window.localStorage.getItem(key) ?? '' }))
-        .map((entry) => ({ ...entry, forThisAccount: entry.key.endsWith(`:${fid}`) })),
+        .map((entry) => ({ ...entry, forThisAccount: entry.key.endsWith(`:${fid}:node`) })),
     { prefix: DRAFT_KEY_PREFIX, fid: SIGNED_IN_FID },
   );
   const thisAccountsDrafts = deviceDrafts.find((entry) => entry.forThisAccount);
   check(
     'the draft the composer saved is really on this device',
-    Boolean(thisAccountsDrafts?.value.includes(CAST_TEXT)),
+    Boolean(thisAccountsDrafts?.value.includes('v1.')) &&
+      !thisAccountsDrafts?.value.includes(CAST_TEXT),
     deviceDrafts.length > 0
       ? `keys=${JSON.stringify(deviceDrafts.map((entry) => entry.key))} holdsText=${Boolean(
           thisAccountsDrafts?.value.includes(CAST_TEXT),
