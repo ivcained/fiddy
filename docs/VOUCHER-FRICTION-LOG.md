@@ -47,9 +47,41 @@ voucher even though it is a one-line fix.
 
 ## 3. Live entries
 
+Populated 2026-10-24 with entries that are verbatim-quoted from the network, not paraphrased. These three are
+**campaign-side** blockers (they stopped the recruitment, not a voucher's run); the first **run-side** entry
+still waits on a voucher's own terminal output.
+
+
 | # | date | voucher | step | command | exact output | stuck | severity | status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | *no voucher has started yet (2026-10-18)* | — | — | — |
+| F-1 | 2026-10-24 | @chriscocreated (fid 5701, 66k followers) | 3 client up | *none: he asked before starting* | "can I try the client without setting up a node etc?" (2026-10-24T05:50:13Z, `0x4a42eb4b0178…`); answered 2026-10-24T07:07:21Z by @ivc with "Client is not really prod ready yet, will keep you posted! <3" | n/a | P1 (a 66k-follower volunteer who had already said "probs up for the experiment :)" was told to wait, on the last day of the campaign) | open |
+| F-2 | 2026-10-24 | n/a (campaign) | 6 outreach | `GET /v2/farcaster/message`, `/message/send`, `/dm`, `/conversation`, `/v2/farcaster/signer` | `/v2/farcaster/message*` → `404 {"code":"NotFound","message":"Route GET /v2/farcaster/message not found"}`; `signer` → `{"signer_uuid":"6129…","status":"approved","fid":3356372}`, i.e. the only signer posts as @fiddy-one, **not** @ivc (191554) | n/a | P1 (13 DMs impossible; the ask went out as public replies instead, and the DM half is still unsent) | open |
+| F-3 | 2026-10-23 | @webthe3rd.eth (fid 374565) | 5 vouch | *vouch cast* | "I just completed @ivc's quick and easy submission to the Farcaster client bounty: https://github.com/ivcained/fiddy#quickstart" (2026-10-23T17:57:05Z, `0x1118d48034a70ceff4993325c31dfff446b2982e`), a public completion statement with **no vouch wording, no node/client detail and no microsite link**, so the entry still has no vouch URL to hand the judge | ~1 day (submission blocked on it) | P0 for the submission (deadline 2026-10-24T14:47:30Z) | open |
+
+### F-1, "can I try the client without setting up a node etc?"
+- step: 3 client up
+- voucher: @chriscocreated (fid 5701, 66k followers)   reporter: agent   date: 2026-10-24T05:50:13Z
+- environment: not stated; he never started
+- command: `<none: question asked before starting>`
+- output: `can I try the client without setting up a node etc?`
+- time_to_symptom: pre-flight
+- time_to_unblock: unresolved at 2026-10-24T10:35Z
+- workaround: none, he was told the client is not production ready yet
+- severity: P1
+- status: open
+
+### F-3, the completion cast that is not a vouch
+- step: 5 vouch
+- voucher: @webthe3rd.eth   reporter: agent   date: 2026-10-23T17:57:05Z
+- environment: he runs his own Snapchain node and did a full restore on a 1 TB Hetzner volume the same day
+- command: `<cast>`
+- output: `I just completed @ivc's quick and easy submission to the Farcaster client bounty: https://github.com/ivcained/fiddy#quickstart`
+- time_to_symptom: the deadline is the symptom
+- time_to_unblock: open
+- workaround: ask him for a dedicated vouch cast naming the node, the client and the microsite; alternatively
+  treat this cast as the vouch URL and accept the risk that a judge reads it as a review, not a voucher post
+- severity: P0
+- status: open
 
 ## 4. Pre-seeded candidates — what to watch for, verbatim
 

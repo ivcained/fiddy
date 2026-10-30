@@ -2,6 +2,13 @@
 
 Status as of 2026-10-18 (IST). Deadline is pinned from the bounty cast itself, not estimated.
 
+> **2026-10-24 update, read this first.** The ask is out (twelve public sends from @fiddy-one, hashes in
+> `docs/VOUCHER-OUTREACH.md` §8) and the deadline is **2026-10-24T14:47:30Z, today**. Still missing: a human vouch
+> cast and the three-URL submission reply, both of which need @ivc's own client. The machine's only signer posts
+> as @fiddy-one (fid 3356372), not @ivc, and Neynar exposes no DM route, so §7's DMs remain unsent. The single
+> cheapest vouch available is @webthe3rd.eth, who publicly said on 2026-10-23T17:57:05Z that he completed the
+> quickstart. Live friction entries: F-1, F-2, F-3 in `docs/VOUCHER-FRICTION-LOG.md`.
+
 ## 1. The bounty, pinned
 
 | Fact | Value | How it was verified |
@@ -74,7 +81,7 @@ protocol's real disk requirement. Cheaper 2 TB VPS hosts (Hetzner/Contabo/OVH cl
 | P1 | AWS path is quoted as **~$100/mo**; the real figure at 2 TB is ~$285/mo (§4). Quote the honest number and point at `--ssh` + cheaper hosts, or a voucher feels misled. | AWS prices, 2026-10-18 | `t_fa420e09` |
 | P2 | The bounty brief says a read node **"does not accept writes"** and that the app key costs **"one small Optimism transaction"**. Both are stale, and our tutorial says so. The tutorial must state the brief's assumption and then show the current behaviour, or a judge diffing the text against the brief reads it as an error. | `snapchain.farcaster.xyz/node-types#message-submission-and-the-mempool`: `submitMessage` works on both roles; a read node has no mempool, validates, gossips to validators; confirm via `MERGE_MESSAGE` or query-back. Gasless `KEY_ADD` since Snapchain V16. | submission reply (§6) + tutorial |
 | P3 | Block pruning is **read-nodes-only and off by default** (`pruning.block_retention`), so "it will prune itself" is not a way to keep a small disk. | snapchain docs, node management table | `t_fa420e09` |
-| P4 | No Farcaster posting credentials exist on this machine (`~/.hermes/.env` has no Farcaster/Neynar keys). **Corrected 2026-10-18: reading is possible** — `nemes.farcaster.xyz` and `hub.pinata.cloud` are DNS-blocked and Neynar answers 402, but the public hub `https://haatz.quilibrium.com` works from here (`/v1/castsByParent?fid=37&hash=…&pageSize=50` returned all 37 replies), so the vouch and the thread can be read and verified programmatically. Posting still must happen from the owner's account: a cast needs a signature from an app key authorised by the owner's FID, and no such key exists here. | probes, 2026-10-18 | owner |
+| P4 | **Partly resolved 2026-10-24.** A posting credential exists on this machine, but it posts as the agent account @fiddy-one (fid 3356372), never as @ivc (191554): `GET /v2/farcaster/signer` returns `fid: 3356372`. Neynar has no direct-cast write route, so DMs still need the owner's client. Public asks were therefore sent as replies from @fiddy-one (see `VOUCHER-OUTREACH.md` §8). Reading works from here with or without a key (Neynar, and the public hub `https://haatz.quilibrium.com`). | probes, 2026-10-24 | owner (DMs + submission) |
 | P5 | **Fixed 2026-10-18.** The live step-0 command read `fiddy provision --ssh [email protected]` — Cloudflare Scrape Shield rewrote the sample `ubuntu@203.0.113.10` into a `__cf_email__` span whose decoder the `/client` CSP blocks. Anyone copy-pasting the command failed instantly. Fixed in `358111f`; re-verified live: the page now serves `ubuntu&#64;203.0.113.10` and no `__cf_email__` remains. | live page fetch, 2026-10-18 | t_4b504279 (done) |
 
 Live-page re-check 2026-10-18 after `358111f`: HTTP 200, quickstart hero intact, `--ssh` sample command copy-safe, `200 GB SSD` still published (P0 open).
