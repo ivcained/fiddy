@@ -132,6 +132,14 @@ const SettingsNav: FC = memo(() => {
         <SettingsNavLinkLabel>Theme</SettingsNavLinkLabel>
       </SettingsNavLink>
       <SettingsNavLink
+        to="settingsDeleteAccount"
+        params={{}}
+        searchParams={{}}
+        title="Delete account"
+      >
+        <SettingsNavLinkLabel>Delete account</SettingsNavLinkLabel>
+      </SettingsNavLink>
+      <SettingsNavLink
         to="#"
         params={{}}
         searchParams={{}}

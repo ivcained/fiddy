@@ -1,13 +1,5 @@
 /** Opt-in, same-origin ciphertext sync. No provider or feed request uses this module. */
-import {
-  type AgentServiceSession,
-  DEFAULT_AGENT_SERVICE_URL,
-  loadAgentSession,
-  saveAgentSession,
-} from '~/lib/agentService';
-import { openOwnerSession } from '~/lib/fiddyAgentAutopair';
-import { loadFiddySetup } from '~/lib/fiddySetup';
-import { clearSiwfProof, loadSiwfProof } from '~/lib/siwfSession';
+import { ensureOwnerSession } from '~/lib/fiddyOwnerSession';
 
 import { compareSealedDraftVersions, openSealedDraftBox } from './crypto';
 import {
@@ -63,55 +55,10 @@ export const getDraftSyncState = (
     lockedCount: sealedCacheEntry(storage, fid, 'node').lockedCount,
   };
 
-const sessionFid = (token: string): number | null => {
-  try {
-    const payload = token.split('.')[1];
-    const parsed = JSON.parse(
-      atob(payload.replaceAll('-', '+').replaceAll('_', '/')),
-    ) as {
-      fid?: unknown;
-      exp?: unknown;
-    };
-    return typeof parsed.fid === 'number' &&
-      typeof parsed.exp === 'number' &&
-      parsed.exp > Date.now()
-      ? parsed.fid
-      : null;
-  } catch {
-    return null;
-  }
-};
-
-const ownerSession = async (fid: number): Promise<AgentServiceSession> => {
-  const existing = await loadAgentSession();
-  if (
-    existing?.baseUrl === DEFAULT_AGENT_SERVICE_URL &&
-    sessionFid(existing.token) === fid
-  ) {
-    return existing;
-  }
-  const outcome = await openOwnerSession({
-    proof: loadSiwfProof(),
-    setup: loadFiddySetup(),
-  });
-  if (!outcome.ok || sessionFid(outcome.session.token) !== fid) {
-    throw new Error(
-      outcome.ok
-        ? 'Sign in again before syncing drafts for this account.'
-        : outcome.sentence,
-    );
-  }
-  const session = {
-    baseUrl: DEFAULT_AGENT_SERVICE_URL,
-    token: outcome.session.token,
-  };
-  await saveAgentSession(session);
-  clearSiwfProof();
-  return session;
-};
+const ownerSession = (fid: number) => ensureOwnerSession(fid);
 
 const request = async <T>(
-  session: AgentServiceSession,
+  session: { token: string },
   method: 'GET' | 'PUT' | 'DELETE',
   body?: SealedDraftRecord,
 ): Promise<T> => {

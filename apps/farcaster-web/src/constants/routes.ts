@@ -119,6 +119,7 @@ import {
   SettingsCastsAndUsersPage,
   SettingsConnectedAccountsPage,
   SettingsConnectedAddressesPage,
+  SettingsDeleteAccountPage,
   SettingsDeveloperToolsPage,
   SettingsDirectCastsOthersPage,
   SettingsDirectCastsPage,
@@ -826,6 +827,13 @@ const routes = {
     search: {},
     family: family('settings'),
     Component: SettingsStarterPacksPage,
+  },
+  settingsDeleteAccount: {
+    path: `${appSettingsPathPrefix}/delete-account`,
+    params: {},
+    search: {},
+    family: family('settings'),
+    Component: SettingsDeleteAccountPage,
   },
   settingsStorage: {
     path: `${appSettingsPathPrefix}/storage`,

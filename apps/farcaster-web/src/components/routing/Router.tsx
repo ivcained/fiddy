@@ -267,6 +267,10 @@ const Router: React.FC = () => {
                   element={<routes.starterPacks.Component />}
                 />
                 <Route
+                  path={routes.settingsDeleteAccount.path}
+                  element={<routes.settingsDeleteAccount.Component />}
+                />
+                <Route
                   path={routes.settingsStorage.path}
                   element={<routes.settingsStorage.Component />}
                 />
