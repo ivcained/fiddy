@@ -723,6 +723,14 @@ export const SettingsStarterPacksPage = lazyWithPreload(() =>
   ),
 );
 
+export const SettingsDeleteAccountPage = lazyWithPreload(() =>
+  import('~/pages/settingsDeleteAccount/SettingsDeleteAccountPage').then(
+    (res) => ({
+      default: res.SettingsDeleteAccountPage,
+    }),
+  ),
+);
+
 export const SettingsStoragePage = lazyWithPreload(() =>
   import('~/pages/settingsStorage/SettingsStoragePage').then((res) => ({
     default: res.SettingsStoragePage,
