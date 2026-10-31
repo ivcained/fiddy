@@ -137,6 +137,10 @@ const SettingsDeleteAccountPage = memo(() => {
   }, [fid]);
 
   const run = useCallback(async () => {
+    // Reset per run: StrictMode's dev-only mount/unmount cycle fires the
+    // cleanup once at mount, which would otherwise poison this flag forever
+    // and leave every run stuck on "Deleting…".
+    cancelled.current = false;
     setStage({ name: 'running' });
     setLines([]);
     try {
@@ -372,7 +376,7 @@ const SettingsDeleteAccountPage = memo(() => {
                       Fiddy forgot {stage.server.drafts} drafts and{' '}
                       {stage.server.media} of your uploads
                       {stage.server.mediaKept > 0
-                        ? `; ${stage.server.mediaKept} file${stage.server.mediaKept === 1 ? '' : 's'} stay because they’re shared with others or were uploaded before we kept track`
+                        ? `; ${stage.server.mediaKept} ${stage.server.mediaKept === 1 ? 'file stays' : 'files stay'} because ${stage.server.mediaKept === 1 ? 'it’s' : 'they’re'} shared with others or ${stage.server.mediaKept === 1 ? 'was' : 'were'} uploaded before we kept track`
                         : ''}
                       .
                     </p>

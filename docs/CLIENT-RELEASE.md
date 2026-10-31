@@ -213,6 +213,36 @@ that make these surfaces exist inside the **served** bundle
 (`account-menu-sign-out`, `fiddy-account-menu-tabbar`) — in the `.js`, never in
 the `.js.map` beside it.
 
+**Delete account** is gated the same way, on the dev server before the
+cut-over — a signed-in shell, a stubbed control plane (owner session, funding
+balance, the `DELETE /api/fiddy/account` poll) and a stubbed node whose five
+erase endpoints the page really drives:
+
+```
+HTTPS=true SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
+  VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com VITE_SNAPCHAIN_DEBUG=true \
+  PROBE_VITE_CACHE_DIR=/tmp/<name> \
+  npx vite --config scripts/probe.vite.config.mjs --port <free port> --strictPort --host 127.0.0.1
+DELETE_ACCOUNT_SERVER=https://fiddy.fun:<port> node scripts/verify-delete-account.mjs
+```
+
+The page runs AS `fiddy.fun` (host-resolver map to the loopback server, so the
+hosted-only purge half is exercised) and again as a self-hosted copy (no purge
+call is allowed there). It signs in through the stubbed SIWF relay, walks
+Settings → Delete account at 390px and 1440px, asserts the intro's plain words
+and the deliberate arm (the destructive button is inert until the person says
+they understand), then decodes the remove messages the page really submitted —
+3 casts, 2 reactions, 2 follows, 2 profile fields — and the purge poll's single
+run id. It also covers the balance screen (a remaining balance must be named
+and acknowledged before anything arms) and the no-key refusal. `52/52` is the
+green state. Note the `--host 127.0.0.1`: the resolver maps `fiddy.fun` to the
+IPv4 loopback, and a dev server bound to `[::1]` only answers `localhost`.
+After the cut-over, the live half is the revision in `/release.json`, the
+`delete-account-confirm` marker inside the **served lazy chunk**
+(`SettingsDeleteAccountPage-*.js`, never the eager `index-*.js`), and
+`curl -X DELETE https://fiddy.fun/api/fiddy/account` answering
+`401 AUTH_REQUIRED`.
+
 nginx is **not** touched by the script. The client needs four locations that
 exist now and are checked in step 6:
 
