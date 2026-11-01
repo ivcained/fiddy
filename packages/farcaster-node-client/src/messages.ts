@@ -30,7 +30,12 @@ import type { LocalAccount } from 'viem';
 
 import { MessageBuildError } from './errors';
 import type { BuiltMessage } from './types';
-import { bytesToHex, encodeMessage, hexToBytes } from './wire';
+import {
+  bytesToHex,
+  encodeMessage,
+  getFarcasterSeconds,
+  hexToBytes,
+} from './wire';
 
 /**
  * The custody signer: a viem `LocalAccount` — exactly what `mnemonicToAccount`
@@ -186,6 +191,28 @@ const dataOptionsFor = ({ fid, timestamp, network }: BaseMessageOptions) => ({
   ...(timestamp === undefined ? {} : { timestamp }),
 });
 
+/**
+ * Nodes resolve a reaction/follow conflict by highest timestamp, and on a tie
+ * the REMOVE beats the ADD. Timestamps have second resolution, so a like and
+ * its undo signed inside one second would tie — and the second toggle is
+ * silently lost. Keep every toggle strictly newer than the toggle before it.
+ * Nodes accept timestamps up to ~10 minutes ahead, so never run further than
+ * that even under a fast toggle storm.
+ * (Ported from quilcast `src/fc.ts`, github.com/backmeupplz/quilcast, MIT.)
+ */
+const MAX_TOGGLE_FUTURE_SECONDS = 590;
+let lastToggleTimestamp = 0;
+
+const toggleDataOptionsFor = (options: BaseMessageOptions) => {
+  const now = getFarcasterSeconds();
+  const timestamp = Math.min(
+    Math.max(options.timestamp ?? now, lastToggleTimestamp + 1),
+    now + MAX_TOGGLE_FUTURE_SECONDS,
+  );
+  lastToggleTimestamp = timestamp;
+  return dataOptionsFor({ ...options, timestamp });
+};
+
 export const buildCastAddMessage = async (
   options: BuildCastAddOptions,
 ): Promise<BuiltMessage> => {
@@ -254,7 +281,7 @@ export const buildReactionAddMessage = async (
     ...(options.targetUrl ? { targetUrl: options.targetUrl } : {}),
   };
   const message = await unwrapAsync(
-    makeReactionAdd(body as never, dataOptionsFor(options), signer),
+    makeReactionAdd(body as never, toggleDataOptionsFor(options), signer),
   );
   return toBuiltMessage(message);
 };
@@ -276,7 +303,7 @@ export const buildReactionRemoveMessage = async (
     ...(options.targetUrl ? { targetUrl: options.targetUrl } : {}),
   };
   const message = await unwrapAsync(
-    makeReactionRemove(body as never, dataOptionsFor(options), signer),
+    makeReactionRemove(body as never, toggleDataOptionsFor(options), signer),
   );
   return toBuiltMessage(message);
 };
@@ -293,7 +320,7 @@ export const buildLinkAddMessage = async (
       : { displayTimestamp: options.displayTimestamp }),
   };
   const message = await unwrapAsync(
-    makeLinkAdd(body, dataOptionsFor(options), signer),
+    makeLinkAdd(body, toggleDataOptionsFor(options), signer),
   );
   return toBuiltMessage(message);
 };
@@ -307,7 +334,7 @@ export const buildLinkRemoveMessage = async (
     targetFid: options.targetFid,
   };
   const message = await unwrapAsync(
-    makeLinkRemove(body, dataOptionsFor(options), signer),
+    makeLinkRemove(body, toggleDataOptionsFor(options), signer),
   );
   return toBuiltMessage(message);
 };
