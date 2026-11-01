@@ -104,6 +104,7 @@ import {
   TRENDING_CANDIDATES,
 } from './publicFeedWindow';
 import { scoreSuggestions } from './recommend';
+import { recoveredTextLinkOf } from './textLinks';
 
 /** Raised when the node genuinely cannot answer a request the app made. */
 export class NodeCannotAnswerError extends Error {
@@ -239,6 +240,13 @@ const embedUrlsOf = (body: NodeCastAddBody | undefined): string[] => {
     if ('url' in embed && typeof embed.url === 'string' && embed.url !== '') {
       urls.push(embed.url);
     }
+  }
+  // A cast with no embeds can still carry a bare link in its text; the
+  // recovered link joins the same classify/card pre-pass a real embed gets,
+  // so `castEmbedsFromNode` finds its kind and card already answered.
+  const recovered = recoveredTextLinkOf(body);
+  if (recovered !== undefined) {
+    urls.push(recovered);
   }
   return urls;
 };

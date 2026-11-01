@@ -60,6 +60,7 @@ import {
 
 import { type EmbedCard, openGraphFromCard } from './embedCards';
 import { type EmbedKindAnswer, embedKindFromExtension } from './embedKinds';
+import { recoveredTextLinkOf } from './textLinks';
 
 /** Zero-safe count with the caveat that produced it. */
 export interface NodeCount {
@@ -280,6 +281,19 @@ export const castEmbedsFromNode = ({
         });
       }
     }
+  }
+
+  // A cast whose message carries no embeds at all still earns a preview when
+  // its text carries a bare http(s) link: the first typed public link stands
+  // in as one link embed and reads its card through the same `cardOf` chain a
+  // real embed gets (`textLinks.ts`, adapted from quilcast). Embeds always
+  // win — with any embed present this recovers nothing.
+  const recovered = recoveredTextLinkOf(body);
+  if (recovered !== undefined) {
+    urls.push({
+      type: 'url',
+      openGraph: openGraphFromCard(recovered, cardOf?.(recovered)),
+    });
   }
 
   return {
