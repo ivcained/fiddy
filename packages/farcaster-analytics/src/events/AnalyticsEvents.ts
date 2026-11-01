@@ -622,6 +622,8 @@ enum AnalyticsEvent {
   CastComposerVideoPressed = 'cast_composer.video_pressed',
   CastComposerEmojiPressed = 'cast_composer.emoji_pressed',
   CastComposerEmojiSelected = 'cast_composer.emoji_selected',
+  CastComposerGifPressed = 'cast_composer.gif_pressed',
+  CastComposerGifSelected = 'cast_composer.gif_selected',
   CastComposerChannelSelectorPressed = 'cast_composer.channel_selector_pressed',
   CastComposerChannelSelected = 'cast_composer.channel_selected',
   CastComposerTokenSelectorPressed = 'cast_composer.token_selector_pressed',

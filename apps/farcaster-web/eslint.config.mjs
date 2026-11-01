@@ -223,6 +223,7 @@ export default [
     files: ['server/**/*.mjs'],
     languageOptions: {
       globals: {
+        AbortController: 'readonly',
         AbortSignal: 'readonly',
         Buffer: 'readonly',
         clearTimeout: 'readonly',
@@ -250,6 +251,9 @@ export default [
       // …and the same for the connect service a copy of Fiddy answers for
       // itself (card t_745ed5be).
       'src/__tests__/instanceConnect.test.ts',
+      // …and the same for the GIF search the composers' picker reads
+      // (card t_41e2e2c2).
+      'src/__tests__/instanceGifs.test.ts',
       // …and the same for cast translations, whose two halves (the client's
       // detector and the server's service) are held to each other here
       // (card t_bb7cca3b).
