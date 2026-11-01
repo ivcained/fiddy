@@ -15,7 +15,7 @@ import {
   ReactionType,
   UserDataType,
 } from '@farcaster/core';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { generateAppKey } from '../appKey';
 import { MessageBuildError } from '../errors';
@@ -261,6 +261,59 @@ describe('reactions, follows and profile data', () => {
     expect(data?.type).toBe(MessageType.USER_DATA_ADD);
     expect(data?.userDataBody?.type).toBe(UserDataType.DISPLAY);
     expect(data?.userDataBody?.value).toBe('Fiddy');
+  });
+});
+
+describe('toggle timestamps never tie', () => {
+  // Ported from quilcast src/fc.test.ts (github.com/backmeupplz/quilcast, MIT):
+  // a like and its undo in the same second would tie, and a tie goes to the
+  // remove — so every toggle must be strictly newer than the one before it.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('gives a like, its undo and the re-like from one frozen second strictly increasing timestamps', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date()); // freeze the clock at the real "now"
+
+    const key = await appKey();
+    const target = { fid: 2, hash: `0x${'77'.repeat(20)}` };
+    const toggle = {
+      fid: TEST_FID,
+      signerPrivateKey: key.privateKey,
+      reactionType: 'like' as const,
+      targetCastId: target,
+    };
+    const like = await buildReactionAddMessage(toggle);
+    const unlike = await buildReactionRemoveMessage(toggle);
+    const relike = await buildReactionAddMessage(toggle);
+
+    const likeAt = (await verifyBytes(like.bytes))?.timestamp ?? 0;
+    const unlikeAt = (await verifyBytes(unlike.bytes))?.timestamp ?? 0;
+    const relikeAt = (await verifyBytes(relike.bytes))?.timestamp ?? 0;
+
+    // Same wall-clock second, three different messages — and the re-like wins
+    // over the remove instead of tying with it.
+    expect(unlikeAt).toBeGreaterThan(likeAt);
+    expect(relikeAt).toBeGreaterThan(unlikeAt);
+    expect(new Set([like.hash, unlike.hash, relike.hash]).size).toBe(3);
+  });
+
+  it('orders two back-to-back toggles even when the caller passes the same timestamp', async () => {
+    const key = await appKey();
+    const toggle = {
+      fid: TEST_FID,
+      signerPrivateKey: key.privateKey,
+      targetFid: 3,
+      timestamp: 12_000_100,
+    };
+    const follow = await buildLinkAddMessage(toggle);
+    const unfollow = await buildLinkRemoveMessage(toggle);
+
+    const followAt = (await verifyBytes(follow.bytes))?.timestamp ?? 0;
+    const unfollowAt = (await verifyBytes(unfollow.bytes))?.timestamp ?? 0;
+    expect(unfollowAt).toBeGreaterThan(followAt);
+    expect(follow.hash).not.toBe(unfollow.hash);
   });
 });
 
