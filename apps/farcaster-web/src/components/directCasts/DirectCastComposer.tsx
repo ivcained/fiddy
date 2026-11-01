@@ -32,7 +32,9 @@ import React, {
   useState,
 } from 'react';
 
+import type { GifSearchResult } from '~/components/composer/gifs/gifSearch';
 import { EmojiComposerPicker } from '~/components/composer/pickers/EmojiComposerPicker';
+import { GifComposerPicker } from '~/components/composer/pickers/GifComposerPicker';
 import { useDirectCastsLinkifyComposerPlugin } from '~/components/composer/plugins/DirectCastsLinkifyComposerPlugin';
 import { useDirectCastsMentionsComposerPlugin } from '~/components/composer/plugins/DirectCastsMentionsComposerPlugin';
 import { DefaultButton } from '~/components/forms/buttons/DefaultButton';
@@ -118,6 +120,13 @@ const DirectCastComposer: FC<DirectCastFormProps> = memo(
       undefined,
     );
     const [selectedFile, setSelectedFile] = useState<File | undefined>(
+      undefined,
+    );
+    // A GIF picked from the picker (components/composer/gifs): it is staged
+    // like a selected photo (the same preview modal) but never uploads — on
+    // send the message carries the `.gif` URL as its text, with the medias
+    // metadata the search answered with.
+    const [selectedGif, setSelectedGif] = useState<GifSearchResult | undefined>(
       undefined,
     );
 
@@ -293,6 +302,13 @@ const DirectCastComposer: FC<DirectCastFormProps> = memo(
       if (input) {
         input.click();
       }
+    }, []);
+
+    // Quilcast's staging pattern: the picked GIF waits as the preview modal's
+    // thumbnail and only joins the message as its URL on send.
+    const onGifPick = useCallback((gif: GifSearchResult) => {
+      setSelectedGif(gif);
+      setSelectedImage(gif.preview);
     }, []);
 
     const [existingImageUploadPromise, setExistingImageUploadPromise] =
@@ -475,10 +491,39 @@ const DirectCastComposer: FC<DirectCastFormProps> = memo(
 
     const onSendImageClick = useCallback(
       async ({ message }: { message: string | undefined }) => {
-        if (
-          typeof selectedImage === 'undefined' ||
-          typeof selectedFile === 'undefined'
-        ) {
+        if (typeof selectedImage === 'undefined') {
+          return;
+        }
+
+        // A picked GIF never uploads: the message carries the `.gif` URL, and
+        // the medias metadata is what the search answered with.
+        if (typeof selectedGif !== 'undefined') {
+          const directCastMessageText =
+            typeof message !== 'undefined' && message.length > 0
+              ? `${selectedGif.cast} ${message}`
+              : selectedGif.cast;
+
+          sendDirectCastMessage({
+            directCastMessageText,
+            directCastMetadata: {
+              medias: [
+                {
+                  staticRaster: selectedGif.cast,
+                  height: selectedGif.h,
+                  width: selectedGif.w,
+                  version: '2',
+                },
+              ],
+            },
+          });
+
+          setSelectedImage(undefined);
+          setSelectedFile(undefined);
+          setSelectedGif(undefined);
+          return;
+        }
+
+        if (typeof selectedFile === 'undefined') {
           return;
         }
 
@@ -536,6 +581,7 @@ const DirectCastComposer: FC<DirectCastFormProps> = memo(
         existingImageUploadPromise,
         optimisticallyFetchImageMetadata,
         selectedFile,
+        selectedGif,
         selectedImage,
         sendDirectCastMessage,
         trackEvent,
@@ -813,6 +859,11 @@ const DirectCastComposer: FC<DirectCastFormProps> = memo(
               iconClassName="text-action-purple"
               onEmojiPick={onEmojiPick}
             />
+            <GifComposerPicker
+              className="!mb-px flex size-10 min-w-10 items-center justify-center self-end !rounded-full !bg-transparent !p-0 hover:!bg-overlay-faint disabled:hover:!bg-transparent"
+              iconClassName="text-action-purple"
+              onGifPick={onGifPick}
+            />
             <DefaultButton
               className="!mb-px flex size-10 min-w-10 items-center justify-center self-end !bg-transparent !p-0 hover:!bg-overlay-faint disabled:hover:!bg-transparent"
               type="button"
@@ -890,6 +941,7 @@ const DirectCastComposer: FC<DirectCastFormProps> = memo(
               onClose={() => {
                 setSelectedImage(undefined);
                 setSelectedFile(undefined);
+                setSelectedGif(undefined);
               }}
               onSendImage={onSendImageClick}
             />

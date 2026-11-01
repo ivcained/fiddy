@@ -32,6 +32,7 @@ import {
   useOptimisticallyAddNewCastToThread,
   useProcessCastAttachments,
   useSetCastAttachmentCache,
+  useSetCastAttachmentPreviewCache,
   useStoreDraftCaststorm,
   useTrackCastReaction,
 } from 'farcaster-client-hooks';
@@ -41,7 +42,13 @@ import { ScheduledCastComposerBanner } from '~/components/banners/ScheduledCastB
 import { CastLengthCounter } from '~/components/composer/components/CastLengthCounter';
 import { ComposerChannelSelector } from '~/components/composer/components/ComposerChannelSelector';
 import { ComposerParentCast } from '~/components/composer/components/ComposerParentCast';
+import {
+  buildGifPreviewCacheEmbeds,
+  buildGifUrlEmbed,
+} from '~/components/composer/gifs/gifEmbed';
+import type { GifSearchResult } from '~/components/composer/gifs/gifSearch';
 import { EmojiComposerPicker } from '~/components/composer/pickers/EmojiComposerPicker';
+import { GifComposerPicker } from '~/components/composer/pickers/GifComposerPicker';
 import { MediaComposerPicker } from '~/components/composer/pickers/MediaComposerPicker';
 import { FarcasterProUnlockFeaturesModal } from '~/components/farcasterPro/FarcasterProUnlockFeaturedModal';
 import { DefaultButton } from '~/components/forms/buttons/DefaultButton';
@@ -520,6 +527,7 @@ const ComposerInner = React.forwardRef<
       getEmbedsToSubmit,
       hasPendingMediaUploads,
       uploadingStatuses,
+      addEmbed,
     } = castComposerEmbedsReturn;
 
     // Keep the ref in sync so resolveUrlEmbedsOnFailure sees fresh snap state.
@@ -1788,6 +1796,42 @@ const ComposerInner = React.forwardRef<
       [focusedCastEditorState, updateEditorState, focusedCastLocalKey],
     );
 
+    // A picked GIF is a direct `.gif` URL embed through the canonical addEmbed
+    // path — medium/full/tiny fallback is chosen server-side, nothing is
+    // uploaded — and the embed respects the server-driven castEmbedLimit. The
+    // picked GIF waits as a staged card in the composer and only joins the
+    // cast as its URL on send (getEmbedsToSubmit reads the canonical store).
+    const setGifPreviewCache = useSetCastAttachmentPreviewCache();
+    const gifEmbedIdRef = React.useRef(0);
+    const onGifPick = React.useCallback(
+      (gif: GifSearchResult) => {
+        if (getRemainingEmbedsCount(focusedCastLocalKey) <= 0) {
+          showComposerAttachmentLimitToast({ castEmbedLimit });
+          return;
+        }
+        const metadata = buildGifUrlEmbed(gif);
+        setGifPreviewCache({ embeds: buildGifPreviewCacheEmbeds(gif) });
+        addEmbed({
+          castLocalKey: focusedCastLocalKey,
+          embed: {
+            id: `gif-${++gifEmbedIdRef.current}`,
+            kind: 'url',
+            url: gif.cast,
+            source: 'other',
+            metadata,
+            metadataStatus: 'loaded',
+          },
+        });
+      },
+      [
+        addEmbed,
+        castEmbedLimit,
+        focusedCastLocalKey,
+        getRemainingEmbedsCount,
+        setGifPreviewCache,
+      ],
+    );
+
     const nextCastLocalKeyRef = React.useRef(1);
     const addCast = React.useCallback(() => {
       const localKey = nextCastLocalKeyRef.current++;
@@ -2017,6 +2061,11 @@ const ComposerInner = React.forwardRef<
                   className="!px-2 bg-action-muted hover:!bg-tertiary"
                   iconClassName="text-muted"
                   onEmojiPick={onEmojiPick}
+                />
+                <GifComposerPicker
+                  className="!px-2 bg-action-muted hover:!bg-tertiary"
+                  iconClassName="text-muted"
+                  onGifPick={onGifPick}
                 />
               </div>
               <div className="relative flex flex-row items-center space-x-2">

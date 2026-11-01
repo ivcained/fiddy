@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite';
 import { instanceConnectPlugin } from './server/instance/plugin.mjs';
+import { gifsPlugin } from './server/instance/gifsPlugin.mjs';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
@@ -106,6 +107,12 @@ export default defineConfig(({ mode }) => {
       // runs themselves. Inert without FIDDY_INSTANCE_APP_FID/KEY; see
       // server/instance/connect.mjs.
       instanceConnectPlugin({
+        env: { ...process.env, ...environment },
+      }),
+      // The same-origin GIF search the composers' GIF picker reads
+      // (server/instance/gifs.mjs). Needs no key; FIDDY_GIFS=off turns it off
+      // and the picker says so in place.
+      gifsPlugin({
         env: { ...process.env, ...environment },
       }),
       react(),
