@@ -47,22 +47,62 @@ export const EMBED_KIND_STORAGE_KEY = 'fiddy:embed-kinds:v1';
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(?:[?#]|$)/i;
 /**
- * Video containers the fork's renderer actually plays. An HLS manifest
- * (`…m3u8`) is deliberately *not* here: the web client has no HLS player, so
- * calling it a video would render a broken player instead of an honest link.
+ * Video containers the renderer actually plays — plain files, plus HLS.
+ *
+ * `…m3u8` is here because the player grew an HLS provider (Vidstack's, backed by
+ * a lazy `hls.js` — `components/attachments/hlsSource.ts`), so the reason the
+ * exclusion used to carry ("the web client has no HLS player, so calling it a
+ * video would render a broken player instead of an honest link") no longer
+ * holds. It cost real casts while it did: Farcaster's own video host serves
+ * `https://stream.farcaster.xyz/…m3u8`, so a Farcaster-native video cast drew
+ * as a bare link. The two ship together, always: flipping this without a player
+ * brings the broken player back.
  */
-const VIDEO_EXTENSIONS = /\.(mp4|m4v|mov|webm|ogv)(?:[?#]|$)/i;
+const VIDEO_EXTENSIONS = /\.(mp4|m4v|mov|webm|ogv|m3u8)(?:[?#]|$)/i;
 
-/** The media type a URL's own file name names, when it names one at all. */
+/**
+ * The part of a URL that can name a file: its path.
+ *
+ * The query and the fragment are excluded on purpose. `https://a.test/post/1?next=a.m3u8`
+ * is a page that *mentions* a playlist, and this answer short-circuits the probe
+ * (a URL that names a media file is not probed), so a match on the query would
+ * render a dead player with no network evidence behind it. A URL that does not
+ * parse falls back to the whole string: a caller validating a half-typed URL
+ * gets the old text answer rather than an exception.
+ */
+const pathOf = (url: string): string => {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
+};
+
+/** The media type a URL's own path names, when it names one at all. */
 export const embedKindFromExtension = (url: string): EmbedKind | undefined => {
-  if (IMAGE_EXTENSIONS.test(url)) {
+  const path = pathOf(url);
+  if (IMAGE_EXTENSIONS.test(path)) {
     return 'image';
   }
-  if (VIDEO_EXTENSIONS.test(url)) {
+  if (VIDEO_EXTENSIONS.test(path)) {
     return 'video';
   }
   return undefined;
 };
+
+/**
+ * The media types an HLS playlist is served as. A playlist has no video
+ * container in its own bytes — it is a text manifest pointing at segments — so
+ * the `video/` prefix below is not enough, and one served from a URL with no
+ * extension (`…/v1/video/<id>/playlist`) would otherwise answer `link`.
+ */
+const HLS_CONTENT_TYPES = new Set([
+  'application/vnd.apple.mpegurl',
+  'application/x-mpegurl',
+  'application/mpegurl',
+  'audio/mpegurl',
+  'audio/x-mpegurl',
+]);
 
 /**
  * A `Content-Type` header as an answer — `undefined` when the header says
@@ -77,6 +117,9 @@ export const embedKindFromContentType = (
   const type = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
   if (type === '') {
     return undefined;
+  }
+  if (HLS_CONTENT_TYPES.has(type)) {
+    return 'video';
   }
   if (type.startsWith('image/')) {
     return 'image';

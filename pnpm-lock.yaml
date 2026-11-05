@@ -976,6 +976,9 @@ importers:
       goober:
         specifier: ^2.1.16
         version: 2.1.18(csstype@3.2.3)
+      hls.js:
+        specifier: ^1.5.0
+        version: 1.7.4
       html2canvas:
         specifier: ^1.4.1
         version: 1.4.1
@@ -10927,6 +10930,9 @@ packages:
 
   hey-listen@1.0.8:
     resolution: {integrity: sha512-COpmrF2NOg4TBWUJ5UVyaCU2A88wEMkUPK4hNqyCkqHbxT92BbvfjoSozkAIIm6XhicGlJHhFdullInrdhwU8Q==}
+
+  hls.js@1.7.4:
+    resolution: {integrity: sha512-3GlxGdPvT2YHvQYOt+yOzT/DEior/qJVNIylHA77kgeoBTdQQqi70GwefNEUmHQeNGyjC8U62+bruqW/Tpm+tg==}
 
   hmac-drbg@1.0.1:
     resolution: {integrity: sha512-Tti3gMqLdZfhOQY1Mzf/AanLiqh1WTiJgEj26ZuYQ9fbkLomzGchCws4FyrSd4VkpBfiNhaE1On+lOz894jvXg==}
@@ -33809,6 +33815,8 @@ snapshots:
       hermes-estree: 0.35.0
 
   hey-listen@1.0.8: {}
+
+  hls.js@1.7.4: {}
 
   hmac-drbg@1.0.1:
     dependencies:
