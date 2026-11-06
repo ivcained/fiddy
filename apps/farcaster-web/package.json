@@ -68,6 +68,7 @@
     "farcaster-cryptography-web": "workspace:*",
     "farcaster-node-client": "workspace:^",
     "goober": "^2.1.16",
+    "hls.js": "^1.5.0",
     "html2canvas": "^1.4.1",
     "jotai": "^2.20.0",
     "linkify-it": "5.0.0",

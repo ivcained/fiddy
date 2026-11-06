@@ -111,6 +111,7 @@ import {
   gateMiniAppWire,
   pinnedMiniAppOrigin,
 } from '~/components/miniApp/miniAppWireGate';
+import { useMiniAppSleep } from '~/components/miniApp/useMiniAppSleep';
 import { MiniAppQualityModal } from '~/components/modals/MiniAppQualityModal';
 import {
   FavoriteFrameProvider,
@@ -1637,6 +1638,49 @@ function InnerMiniAppContent({
     setShowMiniAppAsMinimized(considerMiniAppMinimized);
   }, [considerMiniAppMinimized]);
 
+  /*
+    A collapsed mini app is UNLOADED, not merely hidden
+    (`~/components/miniApp/miniAppSleep`, ported from backmeupplz/quilcast 0.67.0
+    `e4d1c71c1952`). Before this, collapsing the panel only set `basis-0`, so a
+    third-party page's timers, sockets and heap kept running behind a
+    zero-height window — on a phone, in a browser the OS may kill for exactly
+    that — with nothing on screen to say so.
+
+    `miniAppBusy` is the load-bearing half: anything the reader is being asked
+    to decide, or anything the app is waiting on, must never be unmounted under
+    them. Each signal here is one of those — the composer the app opened, the
+    agent ask card asking for an answer, the wallet sheet a request is drawn in,
+    a primary-button action the app is waiting on. Everything else in flight
+    lives inside the frame and dies with it, which is the point.
+  */
+  const { isWarpcastWalletOpen } = useOpenableWarpcastWallet();
+  const agentAskPhase = React.useSyncExternalStore(
+    agentAskApproval.subscribe,
+    () => agentAskApproval.getState().phase,
+  );
+  const miniAppBusy =
+    castIntentAndPromise !== undefined ||
+    agentAskPhase === 'asking' ||
+    agentAskPhase === 'working' ||
+    isWarpcastWalletOpen ||
+    primaryButton?.loading === true;
+  const { asleep: miniAppAsleepState } = useMiniAppSleep({
+    minimized: showMiniAppAsMinimized,
+    busy: miniAppBusy,
+  });
+  // A window being animated open is awake even if the last poll said otherwise,
+  // so the frame is never missing from a panel the reader is looking at.
+  const miniAppAsleep = showMiniAppAsMinimized && miniAppAsleepState;
+  React.useEffect(() => {
+    if (!miniAppAsleep) {
+      return;
+    }
+    // Nothing to resume: a wake reloads from the splash and the app calls
+    // `ready` again, exactly like a fresh open.
+    iframeLoadedRef.current = false;
+    setShowSplashScreen(true);
+  }, [miniAppAsleep]);
+
   return (
     <div
       className={cn(
@@ -1680,7 +1724,13 @@ function InnerMiniAppContent({
           </div>
         ) : (
           <>
-            {showSplashScreen && (
+            {/*
+              Asleep: the frame is gone and nothing is drawn in its place. The
+              panel is collapsed to zero height in this state, so there is
+              nothing to see; the dock still shows the app, and opening it
+              remounts the frame from the splash below.
+            */}
+            {!miniAppAsleep && showSplashScreen && (
               <SplashScreen
                 imageUrl={splashImageUrl}
                 backgroundColor={splashBackgroundColor}
@@ -1690,21 +1740,23 @@ function InnerMiniAppContent({
                 isDevPreview={isDevPreview}
               />
             )}
-            <AppFrameIFrame
-              ref={iframeLoaderRef}
-              url={url}
-              splashBackgroundColor={splashBackgroundColor}
-              disablePointerEvents={isKebabMenuOpen}
-              primaryButton={primaryButton}
-              handlePrimaryButtonPress={handlePrimaryButtonPress}
-              onLoaded={() => {
-                iframeLoadedRef.current = true;
-                if (addRejectedBeforeLoadRef.current) {
-                  addRejectedBeforeLoadRef.current = false;
-                  setShowSplashScreen(false);
-                }
-              }}
-            />
+            {!miniAppAsleep && (
+              <AppFrameIFrame
+                ref={iframeLoaderRef}
+                url={url}
+                splashBackgroundColor={splashBackgroundColor}
+                disablePointerEvents={isKebabMenuOpen}
+                primaryButton={primaryButton}
+                handlePrimaryButtonPress={handlePrimaryButtonPress}
+                onLoaded={() => {
+                  iframeLoadedRef.current = true;
+                  if (addRejectedBeforeLoadRef.current) {
+                    addRejectedBeforeLoadRef.current = false;
+                    setShowSplashScreen(false);
+                  }
+                }}
+              />
+            )}
             {castIntentAndPromise && (
               /* The editor's own chunk (see `~/lazy/components`): a mini app
                  that asked the host to post a cast is the only thing here that
