@@ -179,8 +179,22 @@ export const createFixtureNodeFetch = ({
         return read('castsByFid.fid3.json');
       case '/v1/castsByMention':
         return read('castsByMention.fid3.json');
-      case '/v1/castById':
-        return read('castById.sample.json');
+      case '/v1/castById': {
+        // The recorded cast whose hash is asked for, searched across the
+        // recorded pages — what a real node answers for a hash it keeps —
+        // falling back to the sample cast for the hash-less shape checks.
+        const hash = params.get('hash')?.replace(/^0x/i, '').toLowerCase();
+        const found = hash
+          ? [read('castsByFid.fid3.json'), read('castsByFid.fid327154.json')]
+              .flatMap((page) => page.messages as Json[])
+              .find(
+                (message) =>
+                  String(message.hash).replace(/^0x/i, '').toLowerCase() ===
+                  hash,
+              )
+          : undefined;
+        return found ?? read('castById.sample.json');
+      }
       case '/v1/castsByParent': {
         const url = params.get('url') ?? '';
         return url.includes('~/channel/')
