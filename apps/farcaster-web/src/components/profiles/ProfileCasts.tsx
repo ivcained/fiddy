@@ -13,6 +13,7 @@ import { DebugLogger } from '~/components/debug/DebugLogger';
 import { DefaultEmptyListView } from '~/components/lists/DefaultEmptyListView';
 import { FlatList } from '~/components/lists/FlatList';
 import { FullScreenLoadingIndicator } from '~/components/loaders/FullScreenLoadingIndicator';
+import { ProfileCastSearch } from '~/components/profiles/ProfileCastSearch';
 import { ProfileContent } from '~/components/profiles/ProfileContent';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useCastsWithContext } from '~/hooks/casts/useCastsWithContext';
@@ -114,18 +115,23 @@ const ProfileCastsContent: FC<Pick<ApiUserProfile, 'user'>> = memo(
       <>
         <DebugLogger name="Profile Casts" data={{ castsWithContext, user }} />
 
-        <FlatList
-          data={castsWithContext}
-          renderItem={renderItem}
-          keyExtractor={castWithContextKeyExtractor}
-          onEndReached={onEndReached}
-          isFetchingNextPage={isFetchingNextPage}
-          emptyView={
-            <DefaultEmptyListView
-              message={`${user.displayName} hasn't casted yet.`}
-            />
-          }
-        />
+        <ProfileCastSearch
+          name={user.username ?? user.displayName}
+          fid={user.fid}
+        >
+          <FlatList
+            data={castsWithContext}
+            renderItem={renderItem}
+            keyExtractor={castWithContextKeyExtractor}
+            onEndReached={onEndReached}
+            isFetchingNextPage={isFetchingNextPage}
+            emptyView={
+              <DefaultEmptyListView
+                message={`${user.displayName} hasn't casted yet.`}
+              />
+            }
+          />
+        </ProfileCastSearch>
       </>
     );
   },

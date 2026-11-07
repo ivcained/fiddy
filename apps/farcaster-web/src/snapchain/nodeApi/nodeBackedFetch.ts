@@ -723,6 +723,29 @@ export const createNodeBackedFetch = ({
           return jsonResponse({ result: { casts }, next: {} });
         }
 
+        case '/v2/user-cast-search': {
+          // One account's casts, searched by words. The node keeps no
+          // author-narrowable search index, so the reader reads the account's
+          // own casts page by page and matches here (castSearch.ts); the read
+          // is bounded there, and a bare "no matches" that actually hit the
+          // bound comes back `capped` so the empty state can say so.
+          const fid = Number(searchParams.get('fid'));
+          const q = searchParams.get('q') ?? '';
+          const cursor = searchParams.get('cursor') ?? undefined;
+          if (!Number.isFinite(fid) || fid <= 0) {
+            return errorResponse(400, 'This search needs a fid.');
+          }
+          if (q.trim().length === 0) {
+            return errorResponse(400, 'This search needs words to look for.');
+          }
+          const answer = await reader.searchUserCasts({ fid, q, cursor });
+          return jsonResponse({
+            result: { casts: answer.casts },
+            next: { cursor: answer.next.cursor },
+            ...(answer.capped ? { capped: true, most: answer.most } : {}),
+          });
+        }
+
         case '/v2/verifications': {
           const fid = Number(searchParams.get('fid'));
           const verifications = await reader.readVerifications(fid);

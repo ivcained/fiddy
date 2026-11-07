@@ -112,6 +112,11 @@ const NODE_ROUTES: { method: string; path: string; why: string }[] = [
   },
   {
     method: 'GET',
+    path: '/v2/user-cast-search',
+    why: "the node keeps no author-narrowable search index, so one account's casts are read page by page and matched here (castSearch.ts)",
+  },
+  {
+    method: 'GET',
     path: '/v2/thread-casts',
     why: 'a thread is castsByParent (replies) plus castById (ancestors)',
   },

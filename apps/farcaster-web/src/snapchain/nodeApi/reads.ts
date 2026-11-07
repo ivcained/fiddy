@@ -2419,6 +2419,63 @@ export class NodeBackedReads {
     return await this.buildCasts(messages);
   }
 
+  /**
+   * `GET /v2/user-cast-search`: one account's casts, searched by words, from
+   * this client's own read (quilcast 0.77.0, MIT — see `castSearch.ts`).
+   *
+   * The node keeps no author-narrowable search index, so the search reads the
+   * account's own casts page by page (`/v1/castsByFid`, newest first) and
+   * matches here, then reads its hits in full through the same build chain
+   * every feed's casts go through. The page cache and the load cap live in
+   * `castSearch.ts`; the read is bounded there, and the empty answer carries
+   * `capped` when the bound, not the account, stopped it.
+   */
+  async searchUserCasts({
+    fid,
+    q,
+    cursor,
+  }: {
+    fid: number;
+    q: string;
+    cursor?: string;
+  }): Promise<{
+    casts: ApiCast[];
+    next: { cursor: string | null };
+    capped?: true;
+    most?: number;
+  }> {
+    // Loaded on first use, so a reader who never searches a profile never
+    // carries the module.
+    const { searchPageOf, searchUserCasts, SEARCH_PAGE_SIZE } =
+      await import('./castSearch');
+
+    return await searchUserCasts({
+      fid,
+      q,
+      cursor,
+      readPage: async (pageFid, pageToken) =>
+        searchPageOf(
+          await this.node.castsByFid({
+            fid: pageFid,
+            pageSize: SEARCH_PAGE_SIZE,
+            reverse: true,
+            pageToken,
+          }),
+        ),
+      readFull: async (fullFid, hashes) => {
+        // The page cache keys hashes bare; the node addresses a cast with its
+        // `0x` form. A cast the node cannot answer (gone, or not there yet) is
+        // left out, and the page read on for others.
+        const messages = (
+          await Promise.all(
+            hashes.map((hash) => this.castById(fullFid, `0x${hash}`)),
+          )
+        ).filter((message): message is NodeMessage => message !== undefined);
+        return messages.length > 0 ? await this.buildCasts(messages) : [];
+      },
+    });
+  }
+
   // -------------------------------------------------------- people to follow
 
   /**
