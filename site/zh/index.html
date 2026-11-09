@@ -80,6 +80,9 @@ header.hero { padding: 72px 0 40px; }
 h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.18; letter-spacing: -0.01em; font-weight: 750; }
 h1 .lime { color: var(--lime); }
 .lede { color: var(--ink-dim); font-size: 18px; margin-top: 16px; max-width: 34em; }
+/* 答案先行：留给答案引擎整段摘走的那一句，压在长文之上。
+   只用排版，不加容器：hero 本身是纯文字，再放一块实心面板会和右边的手递卡打架。 */
+.answer-lead { color: var(--ink); font-size: 18px; line-height: 1.75; margin-top: 14px; max-width: 34em; }
 
 /* ---- quickstart ---- */
 .quickstart { margin: 36px 0 8px; padding: 6px; }
@@ -155,6 +158,7 @@ footer .rule { height: 1px; background: rgba(255 255 255 / 0.08); margin-bottom:
     <a href="/client" hreflang="en" style="margin-left:auto;border:0;font:600 12px/1 var(--mono);letter-spacing:0.1em">English</a>
   </div>
   <h1>你自己的 Farcaster 客户端。<br>你自己的节点。<span class="lime">三条命令。</span></h1>
+  <p class="answer-lead"><strong>简而言之：</strong>Fiddy 是一个由你自己运行的 Farcaster 客户端。先准备一台机器，同步一个属于你的 Snapchain 节点，然后在浏览器里打开 fiddy.fun 就能用。它面向的是想要自己的节点、自己的 agent 的人，不必向任何人申请 API key。托管型 Farcaster 应用免费，现在就能用；Fiddy 先要你一块约 2&nbsp;TB 的磁盘，再等上几个小时的同步。</p>
   <p class="lede">不需要任何人的 API key。机器由你提供；Snapchain 读节点同步全网数据；
   Fiddy 客户端通过它读、也通过它写。然后是别家客户端都没有的那一段——孵化一个属于你自己的
   Hermes agent，24 小时替你干活。</p>
