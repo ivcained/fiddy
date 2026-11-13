@@ -121,3 +121,39 @@ npx expo prebuild --clean -p ios   # regenerates ios/ including the scene-lifecy
 
 `tools/ocr.py` is the OCR helper used above:
 `uv run --no-project --with pyobjc-framework-Vision python tools/ocr.py shot.png`
+
+## 7. "N new posts", 2026-11-13 (t_cba10fa2)
+
+The feed now polls the head of the follow graph and offers what arrived in a
+floating pill (quilcast #640 port). What follows is what ran, on this machine,
+and what could not.
+
+**Ran, and passed** (all on Node 20.19.5, the version `.npmrc` pins):
+
+| Command | Result |
+| --- | --- |
+| `pnpm --filter fiddy-mobile test` | 26 tests pass (17 for `newOnTop`/`newPostsFor`/`mergeNew`, 9 for the poll schedule with a fake clock) |
+| `pnpm --filter farcaster-node-client test` | 93 passed, 9 skipped (5 new: head read, request count, unread authors, cancellation, a remove at the top) |
+| `pnpm --filter fiddy-mobile typecheck` | clean |
+| `pnpm --filter farcaster-node-client lint` | 14 prettier errors, every one on a line `origin/main` already fails (`http.ts`, `http.test.ts`, `feedPagination.test.ts`, `clientFilter.test.ts`, `feed.ts:46/68`); none in this change |
+| `expo export --platform ios` | bundles: 3,650 modules, `main.jsbundle` 10,368,231 → 10,384,660 bytes (+16,429, +0.16%) |
+| `xcodebuild … -configuration Release -destination generic/platform=iOS Simulator` | **BUILD SUCCEEDED**, `Fiddy.app/main.jsbundle` 10,384,680 bytes, Hermes bytecode v96 |
+
+No dependency was added: `pnpm-lock.yaml` is untouched, and the production
+bundle is grepped for the new strings (`new posts` present; the `__DEV__` cost
+log absent, as it should be).
+
+**Could not run — environment, not code:**
+
+- **The iOS simulator.** `xcrun simctl list devices` hangs, and `xcodebuild`
+  says why: `CoreSimulator is out of date. Current version (1174.9.2) is older
+  than build version (1174.21.0). Simulator device support disabled.` The Xcode
+  27.2 install also has no `Contents/Developer/Applications/Simulator.app`, and
+  repairing CoreSimulator needs sudo, which this session does not have. So the
+  pill over a scrolled feed, the tap, the at-top insert and the 390 pt
+  screenshot are **not verified**.
+- **The build node**, `http://34.101.47.167:3381`: connection time out. So
+  `scripts/measure-feed-head.mjs` (one head poll against a live graph) and any
+  live feed run are **not verified** either. The request count is asserted in
+  the unit tests instead: one `castsByFid` page per author, `follows + 1`
+  requests per poll, no follow-graph re-read.
