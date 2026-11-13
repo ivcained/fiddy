@@ -138,7 +138,7 @@ measurement script, which needs Node >= 22.15 for `module.registerHooks`):
 | `pnpm --filter fiddy-mobile typecheck` | clean |
 | `pnpm --filter farcaster-node-client lint` | 14 prettier errors, every one on a line `origin/main` already fails (`http.ts`, `http.test.ts`, `feedPagination.test.ts`, `clientFilter.test.ts`, `feed.ts:46/68`); none in this change |
 | `node scripts/measure-feed-head.mjs https://crackle.farcaster.xyz:3381 3` | **79 requests, 3.4-3.7 s**, 79 follows (see §7.1) |
-| `expo export --platform ios` | 3,650 modules, `main.jsbundle` 10,368,231 → **10,387,003 bytes** (+18,772, +0.18%), measured against a clean `d424656b` worktree |
+| `expo export --platform ios` | 3,650 modules, `main.jsbundle` 10,366,498 → **10,387,003 bytes** (+20,505, +0.20%), both sides exported from a clean worktree |
 | `xcodebuild … -configuration Release -destination "platform=iOS Simulator,id=59B83F72…"` | **BUILD SUCCEEDED**, installed and launched on a booted iPhone 16e (iOS 27.0) — see §7.3 |
 
 No dependency was added: `pnpm-lock.yaml` is untouched, and the production
