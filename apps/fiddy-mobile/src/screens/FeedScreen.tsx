@@ -89,13 +89,14 @@ export const FeedScreen = () => {
     }
   }, [clearFound, found, reduceMotion]);
 
-  // Already at the top: new casts go straight on, no pill. (Upstream #640 does
-  // the same; the pill is only for a reader who is scrolled away.)
+  // At the top: new casts go straight on, no pill. That is also what happens
+  // when a reader scrolls back up on their own while one is held, so a held
+  // count never becomes an affordance-less state. (Upstream #640 does both.)
   useEffect(() => {
-    if (found && atTopRef.current) {
+    if (found && atTop) {
       show();
     }
-  }, [found, show]);
+  }, [atTop, found, show]);
 
   const onScroll = useCallback((offsetY: number) => {
     const top = offsetY <= TOP_SLOP;
