@@ -13,6 +13,8 @@ export interface Profile {
   fid: number;
   display: string | null;
   username: string | null;
+  /** The picture the author published; `null` when the node has none. */
+  pfp: string | null;
 }
 
 const cache = new Map<number, Profile>();
@@ -25,7 +27,7 @@ export const loadProfile = async (
   if (cached) {
     return cached;
   }
-  const profile: Profile = { fid, display: null, username: null };
+  const profile: Profile = { fid, display: null, username: null, pfp: null };
   try {
     const page = await client.userDataByFid({ fid, pageSize: 30 });
     // Newest wins: a user can set the same field twice, and the later message
@@ -45,6 +47,14 @@ export const loadProfile = async (
         if (!newest.username || message.timestamp > newest.username) {
           profile.username = body.value;
           newest.username = message.timestamp;
+        }
+      } else if (body.userDataType === 'USER_DATA_TYPE_PFP') {
+        // Read for the "N new posts" pill's faces. The URL is the author's own,
+        // so showing one means the device fetches an image from whoever they
+        // chose; nothing else in the app loads a remote image.
+        if (!newest.pfp || message.timestamp > newest.pfp) {
+          profile.pfp = body.value;
+          newest.pfp = message.timestamp;
         }
       }
     }

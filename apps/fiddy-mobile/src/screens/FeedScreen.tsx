@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import type { NodeMessage } from 'farcaster-node-client';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,11 +14,18 @@ import {
 import { CastCard } from '~/components/CastCard';
 import { FidSheet } from '~/components/FidSheet';
 import { GlassCard } from '~/components/GlassCard';
+import { NewPostsPill } from '~/components/NewPostsPill';
+import { entryKey, mergeNew } from '~/feed/newPosts';
+import { useAppActive, useNewPosts } from '~/feed/useNewPosts';
 import { useHomeFeed, useNodeSession } from '~/node/nodeSession';
 import { useProfiles } from '~/node/profiles';
 import { colors, fonts, spacing } from '~/theme';
+import { useReduceMotion } from '~/utils/useReduceMotion';
 
 const AUTHORS_CAP = 24;
+
+/** Distance from the top that still counts as "at the top of the feed". */
+const TOP_SLOP = 4;
 
 /** The Feed tab: your follow graph, their casts, read through your own node. */
 export const FeedScreen = () => {
@@ -25,24 +33,102 @@ export const FeedScreen = () => {
   const feed = useHomeFeed(session);
   const [fidSheetOpen, setFidSheetOpen] = useState(false);
 
+  // The list on screen is what the poll diffs against, plus whatever a tap on
+  // the pill put on top of it.
+  const listRef = useRef<FlatList<NodeMessage>>(null);
+  const [inserted, setInserted] = useState<NodeMessage[]>([]);
+  const [atTop, setAtTop] = useState(true);
+  const atTopRef = useRef(true);
+  const reduceMotion = useReduceMotion();
+
+  const casts = useMemo(
+    () => mergeNew(inserted, feed.casts),
+    [inserted, feed.casts],
+  );
+  const haveRef = useRef<NodeMessage[]>(casts);
+  haveRef.current = casts;
+
+  // A re-read of the feed replaces the list, so anything a tap put on top of
+  // the old one goes with it.
+  useEffect(() => {
+    if (feed.status === 'loading') {
+      setInserted([]);
+    }
+  }, [feed.status]);
+
+  const appActive = useAppActive();
+  const { found, clear: clearFound } = useNewPosts({
+    session,
+    following: feed.following,
+    have: haveRef,
+    // Nothing is polled while the node is known to be down: the health pill is
+    // already saying so, and a poll would only add failed requests.
+    enabled: appActive && session.status !== 'down' && feed.status === 'ready',
+  });
+
+  const reload = useRef(feed.reload);
+  reload.current = feed.reload;
+
+  const show = useCallback(() => {
+    if (!found) {
+      return;
+    }
+    clearFound();
+    if (found.replace) {
+      // The page could not be anchored to the list (more is new than one page
+      // holds), so merging would leave a hole: re-read the feed instead.
+      reload.current();
+      return;
+    }
+    setInserted((previous) => mergeNew(previous, found.items));
+    if (!atTopRef.current) {
+      listRef.current?.scrollToOffset({
+        offset: 0,
+        animated: !reduceMotion,
+      });
+    }
+  }, [clearFound, found, reduceMotion]);
+
+  // Already at the top: new casts go straight on, no pill. (Upstream #640 does
+  // the same; the pill is only for a reader who is scrolled away.)
+  useEffect(() => {
+    if (found && atTopRef.current) {
+      show();
+    }
+  }, [found, show]);
+
+  const onScroll = useCallback((offsetY: number) => {
+    const top = offsetY <= TOP_SLOP;
+    atTopRef.current = top;
+    setAtTop((current) => (current === top ? current : top));
+  }, []);
+
   const authorFids = useMemo(() => {
     const unique = new Set<number>();
-    for (const cast of feed.casts) {
+    for (const cast of casts) {
       unique.add(cast.fid);
       if (unique.size >= AUTHORS_CAP) {
         break;
       }
     }
+    // The pill's faces may not be in the list yet: they are the whole point.
+    for (const fid of found?.authors ?? []) {
+      unique.add(fid);
+    }
     return [...unique];
-  }, [feed.casts]);
+  }, [casts, found]);
 
   const profiles = useProfiles(session.client, authorFids);
+  const pill = found && found.news.length > 0 && !atTop ? found : null;
 
   return (
     <View style={styles.screen}>
       <FlatList
-        data={feed.casts}
-        keyExtractor={(item) => `${item.fid}:${item.hash}`}
+        ref={listRef}
+        data={casts}
+        keyExtractor={(item) => entryKey(item)}
+        onScroll={(event) => onScroll(event.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
         renderItem={({ item }) => (
           <CastCard cast={item} profile={profiles.get(item.fid)} />
         )}
@@ -51,6 +137,7 @@ export const FeedScreen = () => {
           <RefreshControl
             refreshing={feed.status === 'loading'}
             onRefresh={() => {
+              clearFound();
               feed.reload();
               void session.refreshHealth();
             }}
@@ -138,7 +225,7 @@ export const FeedScreen = () => {
           </View>
         }
         ListFooterComponent={
-          feed.casts.length > 0 ? (
+          casts.length > 0 ? (
             <Text style={styles.footer}>
               read-only in v1 · posting with a gasless app key is v2 · no key of
               any kind is in this build
@@ -146,6 +233,17 @@ export const FeedScreen = () => {
           ) : null
         }
       />
+      {pill ? (
+        <View style={styles.pillDock} pointerEvents="box-none">
+          <NewPostsPill
+            count={pill.count}
+            authors={pill.authors}
+            profiles={profiles}
+            replace={pill.replace}
+            onPress={show}
+          />
+        </View>
+      ) : null}
       <FidSheet
         open={fidSheetOpen}
         fid={session.fid}
@@ -234,5 +332,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     paddingTop: spacing.lg,
+  },
+  /**
+   * The pill floats at the bottom of the Feed tab: inside this screen it is
+   * already clear of the tab bar above it, out of the header card's way, and
+   * under a thumb. `box-none` so the list still scrolls around it.
+   */
+  pillDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: spacing.md,
+    alignItems: 'center',
   },
 });
