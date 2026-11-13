@@ -128,8 +128,9 @@ The feed now polls the head of the follow graph and offers what arrived in a
 floating pill (quilcast #640 port). What follows is what ran, on this machine,
 and what could not.
 
-**Ran, and passed** (all on Node 20.19.5, the version `.npmrc` pins, except the
-measurement script, which needs Node >= 22.15 for `module.registerHooks`):
+**Ran, and passed** (all on Node 20.19.5, the version `.npmrc` pins; the
+measurement script uses `module.register()` with a loader file so it runs on the
+pinned Node too, not just on a newer one):
 
 | Command | Result |
 | --- | --- |
@@ -150,8 +151,10 @@ log absent, as it should be).
 `scripts/measure-feed-head.mjs` could not run at all before this round: it
 `require`d `dist/index.js`, which is TypeScript's ESM output with extensionless
 relative imports (`export * from './appKey'`), so Node refused it with
-`ERR_MODULE_NOT_FOUND .../dist/appKey`. It now registers a resolve hook that
-appends `.js` the way the app's bundler does, and it runs:
+`ERR_MODULE_NOT_FOUND .../dist/appKey`. It now registers a resolve hook
+(`scripts/esm-extensionless-loader.mjs`, via `module.register()`, which exists on
+the pinned Node 20.19.5 as well as 22+) that appends `.js` the way the app's
+bundler does, and it runs:
 
 ```
 $ node scripts/measure-feed-head.mjs https://crackle.farcaster.xyz:3381 3
