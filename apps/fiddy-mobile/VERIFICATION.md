@@ -121,3 +121,139 @@ npx expo prebuild --clean -p ios   # regenerates ios/ including the scene-lifecy
 
 `tools/ocr.py` is the OCR helper used above:
 `uv run --no-project --with pyobjc-framework-Vision python tools/ocr.py shot.png`
+
+## 7. "N new posts", 2026-11-13 (t_cba10fa2)
+
+The feed now polls the head of the follow graph and offers what arrived in a
+floating pill (quilcast #640 port). What follows is what ran, on this machine,
+and what could not.
+
+**Ran, and passed** (all on Node 20.19.5, the version `.npmrc` pins; the
+measurement script uses `module.register()` with a loader file so it runs on the
+pinned Node too, not just on a newer one):
+
+| Command | Result |
+| --- | --- |
+| `pnpm --filter fiddy-mobile test` | **59 tests pass** (22 for the diff, 17 for the pill's words, 9 for the poll gate, 7 for the poll schedule with a fake clock, plus the node-client head read) |
+| `pnpm --filter farcaster-node-client test` | 93 passed, 9 skipped (5 new: head read, request count, unread authors, cancellation, a remove at the top) |
+| `pnpm --filter fiddy-mobile typecheck` | clean |
+| `pnpm --filter farcaster-node-client lint` | 14 prettier errors, every one on a line `origin/main` already fails (`http.ts`, `http.test.ts`, `feedPagination.test.ts`, `clientFilter.test.ts`, `feed.ts:46/68`); none in this change |
+| `node scripts/measure-feed-head.mjs https://crackle.farcaster.xyz:3381 3` | **79 requests, 3.4-3.7 s**, 79 follows (see §7.1) |
+| `expo export --platform ios` | 3,650 modules, `main.jsbundle` 10,366,498 → **10,387,003 bytes** (+20,505, +0.20%), both sides exported from a clean worktree |
+| `xcodebuild … -configuration Release -destination "platform=iOS Simulator,id=59B83F72…"` | **BUILD SUCCEEDED**, installed and launched on a booted iPhone 16e (iOS 27.0) — see §7.3 |
+
+No dependency was added: `pnpm-lock.yaml` is untouched, and the production
+bundle is grepped for the new strings (`new posts` present; the `__DEV__` cost
+log absent, as it should be).
+
+### 7.1 What one poll costs, measured, and the cadence it bought
+
+`scripts/measure-feed-head.mjs` could not run at all before this round: it
+`require`d `dist/index.js`, which is TypeScript's ESM output with extensionless
+relative imports (`export * from './appKey'`), so Node refused it with
+`ERR_MODULE_NOT_FOUND .../dist/appKey`. It now registers a resolve hook
+(`scripts/esm-extensionless-loader.mjs`, via `module.register()`, which exists on
+the pinned Node 20.19.5 as well as 22+) that appends `.js` the way the app's
+bundler does, and it runs:
+
+```
+$ node scripts/measure-feed-head.mjs https://crackle.farcaster.xyz:3381 3
+follow graph: 1675ms
+follows: 79
+head read (one small page per author): 3663ms
+{ "authors": 80, "requests": 79, "unread": 0, "casts": 155, "newest": … }
+second head read: 3434ms
+second read: 79 requests, 155 casts
+```
+
+Requests are `follows + 1` and cannot be fewer: a read node answers
+`castsByFid` per author, so a head read is one small page per follow. Bytes,
+sampled over 30 real responses: ~1.6 KB each, so **~131 KB per poll**.
+
+At upstream's 60 s that is **~5,000 requests and ~7.9 MB per hour** of screen
+time on the reader's own node — the same order as re-running the whole feed read
+every minute, which is exactly what the card says not to do. So the card's
+fallback applies and is what shipped: **the poller exists all the time, runs
+immediately when the app returns to the foreground or the Feed tab comes back
+(after an interval away), and reads every five minutes while the reader stays on
+the feed** (~1,000 requests and ~1.6 MB per hour). Pull-to-refresh is unchanged.
+`EXPO_PUBLIC_FIDDY_POLL_MS` overrides the cadence for verification builds.
+
+### 7.2 A live-data bug the port needed: a cast dated 2061
+
+Running the shipped diff against the real graph (not a fixture) returned
+`null` on every poll, forever:
+
+```
+poll 0: req 79 page 155 unread 0 anchor 0 raw 0 gap false -> null
+top five keys: 0x8ae98f90…:347 @2061-09-12   ← the top of the feed
+               0x464361c5…:1325 @2026-11-13T06:09:38Z
+```
+
+The node really serves a cast timestamped **2061** (its text: "oh so we're time
+traveling now?"), and the feed sorts on the timestamp, so it sits on top
+forever. Upstream's rule ("take what is above the first top-five entry") then
+has nothing above it, so nothing is ever new. `newOnTop` now keeps
+future-dated entries (`timestampMs > now + 60 s`) out of the *anchor* set while
+still showing them and still treating a genuinely unseen future cast as new.
+Five tests cover it (`newOnTop, a future-dated cast on top`).
+
+### 7.3 The simulator does run: a live run at 390 pt
+
+The previous version of this section blamed CoreSimulator. That was wrong for
+this machine at review time: `xcrun simctl list devices` answers, and a device
+boots.
+
+- `xcrun simctl create "Fiddy 16e" com.apple.CoreSimulator.SimDeviceType.iPhone-16e com.apple.CoreSimulator.SimRuntime.iOS-27-0`
+  → a **1170×2532 @3x screenshot = 390×844 pt**, the width the card asks for.
+- Release build + `simctl install` + `simctl launch`, with the session pointed at
+  a reachable read node (`EXPO_PUBLIC_FIDDY_NODE_URL=https://crackle.farcaster.xyz:3381`,
+  `EXPO_PUBLIC_FIDDY_FID=1325` for a busier graph, `EXPO_PUBLIC_FIDDY_POLL_MS=20000`
+  so a verification run does not take five minutes a step).
+- The feed rendered live data from that node ("60 casts from
+  crackle.farcaster.xyz:3381", relative times counting up).
+
+**At-top insert, verified on that run.** With the list at the top, a real poll
+found a real new cast and put it straight on top, no pill, which is the
+behaviour the card asks for:
+
+```
+[watch] 06:50:25 poll 9: FOUND 1 (count 1)
+[watch]   0x3dfcc5fc fid 352276 2026-11-13T06:50:07.000Z
+```
+
+and the next screenshot of the running app showed `Njal @cryptonjal 3m · Happy
+Fork Day!` as the first cast with no pill on screen.
+
+**The pill, on that same run, over a scrolled feed.** A second later cast from the
+same graph (`0x300aa697 fid 1116896 07:19:52Z`) arrived while the list was
+scrolled, and the app held it:
+
+> screenshot `pill-390.png`: `↑` + two overlapping author faces + `2 new posts`,
+> chartreuse pill, horizontally centred near the bottom of a 390 pt screen,
+> above the feed and well clear of the header and the tab area.
+
+The scroll that got the list there was driven by a **temporary three-line
+effect** (`listRef.current?.scrollToOffset({ offset: 700 })` after 25 s), because
+this simulator cannot be touched; it was removed before the commit, so what the
+screenshot proves is the pill's layout, faces, count and position — not the
+gesture. The count (2, not 1) is the poll's own diff: a second cast landed
+between two polls.
+
+**Not verified, and why:** the tap, and the scroll gesture. `Simulator.app` is
+not installed in this Xcode (`/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app`
+does not exist), so the simulator is headless: `simctl io … screenshot` works,
+but there is no window to click and no touch or scroll injection (`idb` is not
+installed, and `brew` has no formula for it). So "tap inserts them and scrolls
+up" is covered by the at-top insert above (same `show()` path minus the
+`scrollToOffset` call, which is plain RN) and by the unit tests, but it was not
+driven by a finger.
+
+### 7.4 The node that ships with the build
+
+`http://34.101.47.167:3381` still times out from this machine (8 s, no
+response), and `docs/CLIENT-PARITY.md:184` records the same unreachability from
+weeks earlier. Every live claim above was therefore made against
+`https://crackle.farcaster.xyz:3381`, a public read node, which is what the
+`EXPO_PUBLIC_FIDDY_NODE_URL` override exists for; nothing in the app was
+changed to make that work.
