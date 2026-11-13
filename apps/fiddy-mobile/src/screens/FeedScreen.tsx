@@ -16,7 +16,8 @@ import { FidSheet } from '~/components/FidSheet';
 import { GlassCard } from '~/components/GlassCard';
 import { NewPostsPill } from '~/components/NewPostsPill';
 import { entryKey, mergeNew } from '~/feed/newPosts';
-import { useAppActive, useNewPosts } from '~/feed/useNewPosts';
+import { shouldPoll } from '~/feed/pollGate';
+import { useAppStateName, useNewPosts } from '~/feed/useNewPosts';
 import { useHomeFeed, useNodeSession } from '~/node/nodeSession';
 import { useProfiles } from '~/node/profiles';
 import { colors, fonts, spacing } from '~/theme';
@@ -28,7 +29,7 @@ const AUTHORS_CAP = 24;
 const TOP_SLOP = 4;
 
 /** The Feed tab: your follow graph, their casts, read through your own node. */
-export const FeedScreen = () => {
+export const FeedScreen = ({ focused = true }: { focused?: boolean } = {}) => {
   const session = useNodeSession();
   const feed = useHomeFeed(session);
   const [fidSheetOpen, setFidSheetOpen] = useState(false);
@@ -56,14 +57,21 @@ export const FeedScreen = () => {
     }
   }, [feed.status]);
 
-  const appActive = useAppActive();
+  const appState = useAppStateName();
+  const polling = shouldPoll({
+    appState,
+    sessionStatus: session.status,
+    feedStatus: feed.status,
+    tabFocused: focused,
+  });
   const { found, clear: clearFound } = useNewPosts({
     session,
     following: feed.following,
     have: haveRef,
     // Nothing is polled while the node is known to be down: the health pill is
-    // already saying so, and a poll would only add failed requests.
-    enabled: appActive && session.status !== 'down' && feed.status === 'ready',
+    // already saying so, and a poll would only add failed requests. The whole
+    // rule lives in `pollGate.ts`, which has its matrix under test.
+    enabled: polling,
   });
 
   const reload = useRef(feed.reload);

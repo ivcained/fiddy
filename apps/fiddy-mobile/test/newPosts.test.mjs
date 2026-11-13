@@ -243,3 +243,55 @@ describe('the entry key and the merge', () => {
     ]);
   });
 });
+
+describe('newOnTop, a future-dated cast on top (live-data case)', () => {
+  // A read node really serves these: the graph used for the card's verification
+  // had one dated 2061 sitting at the top of the feed ("oh so we're time
+  // traveling now?"). It is above everything forever, so if it were allowed to
+  // anchor the diff, nothing would ever count as new.
+  const NOW = 1_800_000_000_000;
+  const future = cast('time-travel', 347, NOW + 35 * 365 * 24 * 3600 * 1000);
+
+  it('does not anchor on the future cast, so what is new is still found', () => {
+    const have = [future, cast('b', 2, NOW - 1_000), cast('c', 3, NOW - 5_000)];
+    const page = [future, cast('n', 4, NOW - 500), cast('b', 2, NOW - 1_000)];
+    const { items, gap } = newOnTop(have, page, { now: NOW });
+
+    assert.equal(gap, false);
+    assert.deepEqual(texts(items), ['n']);
+  });
+
+  it('reports nothing new when the only page entry above the anchor is the future cast itself', () => {
+    const have = [future, cast('b', 2, NOW - 1_000)];
+    const page = [future, cast('b', 2, NOW - 1_000)];
+    const { items, gap } = newOnTop(have, page, { now: NOW });
+
+    assert.equal(gap, false);
+    assert.deepEqual(texts(items), []);
+  });
+
+  it('treats a future cast as an ordinary entry when reading it as a new post', () => {
+    // A future cast that the list does not show yet is still new content: it is
+    // not withheld, only kept out of the anchor set.
+    const have = [cast('b', 2, NOW - 1_000)];
+    const page = [future, cast('b', 2, NOW - 1_000)];
+    const { items } = newOnTop(have, page, { now: NOW });
+    assert.deepEqual(texts(items), ['time-travel']);
+  });
+
+  it('falls back to a gap when every top entry is future-dated', () => {
+    const have = [future, cast('other-future', 9, NOW + 10 * 365 * 24 * 3600 * 1000)];
+    const page = [cast('n', 4, NOW - 500)];
+    const { gap } = newOnTop(have, page, { now: NOW });
+    assert.equal(gap, true);
+  });
+
+  it('still anchors on an entry that is only a few seconds ahead of the clock', () => {
+    const slight = cast('ahead-by-a-second', 2, NOW + 1_000);
+    const have = [slight, cast('b', 3, NOW - 1_000)];
+    const page = [cast('n', 4, NOW - 100), slight, cast('b', 3, NOW - 1_000)];
+    const { items, gap } = newOnTop(have, page, { now: NOW });
+    assert.equal(gap, false);
+    assert.deepEqual(texts(items), ['n']);
+  });
+});

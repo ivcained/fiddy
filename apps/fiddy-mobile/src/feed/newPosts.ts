@@ -15,6 +15,11 @@
  *      more is new than one page holds). Then the page replaces the list rather
  *      than being merged into it, and no count can be stood behind.
  *
+ * One rule is ours, not upstream's, because live data needed it: a future-dated
+ * cast (a node really serves them; the verification graph had one dated 2061)
+ * sorts above everything forever, so it cannot be the top anchor or the feed
+ * would never report anything as new. See `FUTURE_SKEW_MS`.
+ *
  * The adaptation for Fiddy's node reads: upstream's `Cast` carries an `up`
  * chain of the casts it re-upped and a `recaster`. `farcaster-node-client`
  * returns a recast as the *recaster's own* cast message — `fid` is the
@@ -42,6 +47,22 @@ export const entryKey = (entry: FeedEntry): string =>
 /** How far down the list an anchor is looked for. */
 const ANCHOR_DEPTH = 5;
 
+/**
+ * How far into the future a timestamp may be before the entry stops being a
+ * usable anchor.
+ *
+ * Nodes do serve future-dated casts: the starter graph used for verification
+ * has one dated 2061 at the top of the feed ("oh so we're time traveling now?"),
+ * and it stays there because the list is sorted on the timestamp. Such an entry
+ * is a fine thing to *show*, but a terrible anchor: everything genuinely new
+ * sorts below it, so "what is above the anchor" is always nothing and the pill
+ * could never appear. Real clocks also drift by seconds, hence the slack.
+ */
+export const FUTURE_SKEW_MS = 60_000;
+
+const isAnchorable = (entry: FeedEntry, now: number): boolean =>
+  entry.timestampMs <= now + FUTURE_SKEW_MS;
+
 /** Distinct faces the pill has room for at 390 pt. */
 export const AUTHORS_SHOWN = 3;
 
@@ -62,9 +83,10 @@ export interface NewOnTop<T extends FeedEntry> {
 export const newOnTop = <T extends FeedEntry>(
   have: FeedEntry[],
   page: T[],
-  options: { byTime?: boolean } = {},
+  options: { byTime?: boolean; now?: number } = {},
 ): NewOnTop<T> => {
   const shown = new Set(have.map((entry) => entry.hash));
+  const now = options.now ?? Date.now();
 
   if (options.byTime) {
     const newest = have.reduce(
@@ -83,8 +105,15 @@ export const newOnTop = <T extends FeedEntry>(
   // its cast *and* who it came from, so a fresh recast of one of the top casts
   // is not taken for that cast itself (which would hide whatever is new below
   // it). A recast of something further down does not count either way: it is
-  // already on screen.
-  const top = new Set(have.slice(0, ANCHOR_DEPTH).map(entryKey));
+  // already on screen. A future-dated cast is skipped as an anchor: it sorts
+  // above everything forever, so anchoring on it would mean nothing is ever
+  // new (see `FUTURE_SKEW_MS`).
+  const top = new Set(
+    have
+      .slice(0, ANCHOR_DEPTH)
+      .filter((entry) => isAnchorable(entry, now))
+      .map(entryKey),
+  );
   const anchor = page.findIndex((entry) => top.has(entryKey(entry)));
 
   return {

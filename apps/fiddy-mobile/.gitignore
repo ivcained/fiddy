@@ -2,6 +2,7 @@
 build-ios-sim/
 build-ios-rel/
 build-ios-device/
+build-ios-16e/
 *.xcresult
 
 # Expo export / bundler scratch

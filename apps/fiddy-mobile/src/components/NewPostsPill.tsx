@@ -23,41 +23,25 @@ import {
 } from 'react-native';
 
 import { Avatar } from '~/components/Avatar';
+import {
+  allHandlesKnown,
+  knownHandles,
+  newPostsAccessibilityLabel,
+  newPostsLabel,
+} from '~/feed/pillLabel';
 import type { Profile } from '~/node/profiles';
 import { colors, fonts, radii, spacing } from '~/theme';
 
-/** "3 new posts", "1 new post", or "New posts" when there is no honest count. */
-export const newPostsLabel = (count: number | null): string => {
-  if (count === null) {
-    return 'New posts';
-  }
-  return count === 1 ? '1 new post' : `${count} new posts`;
-};
-
-/** What VoiceOver says: the count, who posted, and what the tap does. */
-export const newPostsAccessibilityLabel = ({
-  count,
-  authors,
-  profiles,
-  replace,
-}: {
-  count: number | null;
-  authors: number[];
-  profiles: Map<number, Profile>;
-  replace: boolean;
-}): string => {
-  const handles = authors.map((fid) => {
-    const profile = profiles.get(fid);
-    return profile?.username ? `@${profile.username}` : `fid ${fid}`;
-  });
-  const from =
-    handles.length === 0
-      ? ''
-      : handles.length === 1
-        ? ` from ${handles[0]}`
-        : ` from ${handles.slice(0, -1).join(', ')} and ${handles[handles.length - 1]}`;
-  return `${newPostsLabel(count)}${from}. ${replace ? 'Reload the feed.' : 'Show them.'}`;
-};
+/**
+ * How long the announcement waits for the new authors' handles to land.
+ *
+ * The authors of a new post are almost never in the profile cache yet:
+ * `useProfiles` fills it after the pill mounts. Announcing on the first render
+ * would speak FIDs (or nothing); waiting forever would mean no announcement at
+ * all when a profile read fails. So: speak as soon as everyone can be named,
+ * and anyway after this long, naming whoever has landed.
+ */
+const ANNOUNCE_WAIT_MS = 1_200;
 
 export const NewPostsPill = ({
   count,
@@ -73,24 +57,38 @@ export const NewPostsPill = ({
   replace?: boolean;
   onPress: () => void;
 }) => {
+  const handles = knownHandles(authors, profiles);
   const label = newPostsAccessibilityLabel({
     count,
-    authors,
-    profiles,
+    handles,
     replace,
   });
 
   // One announcement when the pill appears, not one per poll: the ref survives
   // the re-renders that a later poll causes, and the pill unmounts when it is
-  // dismissed, so the next appearance announces again.
+  // dismissed, so the next appearance announces again. The sentence is read from
+  // a ref so the deferred announcement speaks the *latest* label (handles that
+  // landed while we waited), never the one captured on the first render.
   const announced = useRef(false);
+  const labelRef = useRef(label);
+  labelRef.current = label;
+  const complete = allHandlesKnown(authors, profiles);
+
   useEffect(() => {
-    if (announced.current) {
-      return;
+    const speak = () => {
+      if (announced.current) {
+        return;
+      }
+      announced.current = true;
+      AccessibilityInfo.announceForAccessibility(labelRef.current);
+    };
+    if (complete) {
+      speak();
+      return undefined;
     }
-    announced.current = true;
-    AccessibilityInfo.announceForAccessibility(label);
-  }, [label]);
+    const timer = setTimeout(speak, ANNOUNCE_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [complete]);
 
   return (
     <Pressable
