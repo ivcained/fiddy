@@ -30,6 +30,9 @@ const body = (text: string, embeds: NodeEmbed[] = []): NodeCastAddBody => ({
   embedsDeprecated: [],
   mentions: [],
   mentionsPositions: [],
+  // Plain text: what every cast was before the article FIP, and what the node
+  // reports for a cast that does not say otherwise (`CastAddBody.format_version`).
+  formatVersion: 0,
 });
 
 describe('a cast with no embeds', () => {
