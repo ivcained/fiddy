@@ -93,7 +93,7 @@ import {
   fetchFrameCardFromNeynar,
 } from './neynarMap';
 import { neynarApiKeyFromEnv } from './preferences';
-import type { NodeProvider } from './providerTypes';
+import { NEYNAR_PROVIDER_ID, type NodeProvider } from './providerTypes';
 import {
   PUBLIC_SERVER_OFF_THE_WEB_STATUS,
   publicServerCannotAnswer,
@@ -118,6 +118,20 @@ export interface ProviderBackedFetchOptions {
    * can pass a status check and still fail every read, and only the reads know.
    */
   onRead?: (providerId: string, ok: boolean) => void;
+  /**
+   * Called with every write's evidence — the server that was asked to carry it,
+   * whether the node took it, whether its state showed it, how many times the
+   * same bytes had to be offered, and whether the node was busy rather than
+   * refusing.
+   *
+   * A write is never *rerouted* (see `capabilities.ts`): it commits something
+   * under the reader's name, and moving it behind their back is not this
+   * client's decision. But a server that keeps saying "my queue is full" cannot
+   * take this reader's work, and that is the same kind of fact the failover
+   * engine already acts on for reads — so it is recorded here rather than only
+   * backed off inside one node.
+   */
+  onWrite?: (providerId: string, evidence: WriteEvidence) => void;
   /** Test seam: stand in for the node-backed adapter. */
   createNodeAdapter?: typeof createNodeBackedFetch;
   /**
@@ -277,6 +291,7 @@ export const createProviderBackedFetch = ({
   neynarApiKey,
   countCap,
   onRead,
+  onWrite,
   createNodeAdapter = createNodeBackedFetch,
   requestLog: requestLogOption,
   getProviderOrder,
@@ -361,7 +376,16 @@ export const createProviderBackedFetch = ({
         ? {}
         : { askForPostingKey }),
       ...(onCountsRead === undefined ? {} : { onCountsRead }),
-      ...(onWriteEvidence === undefined ? {} : { onWriteEvidence }),
+      // One sink, two readers: the mini app bridge's post ask, and the failover
+      // chain — which learns here that a server's submit queue stayed full.
+      ...(onWriteEvidence === undefined && onWrite === undefined
+        ? {}
+        : {
+            onWriteEvidence: (evidence: WriteEvidence) => {
+              onWriteEvidence?.(evidence);
+              onWrite?.(provider.id, evidence);
+            },
+          }),
     });
     adapters.set(baseUrl, created);
     return created;
@@ -465,6 +489,7 @@ export const createProviderBackedFetch = ({
       onEvidence: (evidence) => {
         entry.write = evidence;
         onWriteEvidence?.(evidence);
+        onWrite?.(NEYNAR_PROVIDER_ID, evidence);
       },
     });
 

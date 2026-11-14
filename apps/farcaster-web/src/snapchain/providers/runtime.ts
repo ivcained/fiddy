@@ -323,6 +323,39 @@ export const readErrorsFor = (providerId: string): number =>
   snapshot.readErrors[providerId] ?? 0;
 
 /**
+ * Tell the runtime how one write went.
+ *
+ * A write is never *rerouted* — it commits something under the reader's name, and
+ * this client does not move that behind their back (`capabilities.ts`). What a
+ * busy server earns is the same strike a failed read earns, in the same counter
+ * the failover engine acts on: `unavailable/mempool channel is full` means this
+ * machine cannot take the reader's work right now, which is exactly the fact that
+ * moves the chain for reads. Without this, a full queue was backed off inside one
+ * node and the chain never learned about it — so the next write was offered to the
+ * same busy machine.
+ *
+ * A write that merely failed because the message was wrong (a signer this account
+ * never authorised, a cast gone) is not counted: that is about this device, not
+ * about the server.
+ */
+export const noteProviderWriteResult = ({
+  providerId,
+  ok,
+  busy,
+}: {
+  providerId: string;
+  /** Did the write land, or was it accepted and only not visible yet? */
+  ok: boolean;
+  /** Was the refusal the node being busy, rather than the message being wrong? */
+  busy: boolean;
+}): void => {
+  if (ok || !busy) {
+    return;
+  }
+  noteProviderReadResult({ providerId, ok: false });
+};
+
+/**
  * Run the decision on measurements already in hand, and publish it.
  */
 export const decideFromCurrentHealth = (): void =>

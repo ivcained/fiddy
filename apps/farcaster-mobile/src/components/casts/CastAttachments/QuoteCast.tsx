@@ -10,7 +10,9 @@ import {
 import {
   CastClickType,
   getCastSnap,
+  peekOf,
   processMediasForRendering,
+  quotedOf,
   useHydratedQuoteCast,
   useTrackCastClick,
 } from 'farcaster-client-hooks';
@@ -47,6 +49,8 @@ import { useUserAppContext } from '~/contexts/UserAppContextProvider';
 import { useAnimatedImageFeedViewability } from '~/contexts/VideoFeedViewablilityProvider';
 import { useUserLevel } from '~/hooks/data/useUserLevel';
 import { usePush } from '~/hooks/navigation/usePush';
+
+import { QUOTED_CAST_COPY, QuotedCastRow } from './QuotedCastRow';
 
 // Fixed thumbnail dimension shared between the carousel ScrollView and its
 // children. Hard-coding this on the wrapper (not just the children) keeps
@@ -154,25 +158,42 @@ const QuoteCast: React.FC<QuoteCastProps> = ({
     return quotedCastText.slice(0, regularCastByteLimit);
   }, [quotedCastText, regularCastByteLimit]);
 
-  const shouldShowShowMoreIndicator = React.useMemo(() => {
-    return (
-      quotedCastImageEmbeds.length === 0 &&
-      quoteCastVideoEmbeds.length === 0 &&
-      quotedCastSpaceEmbedUrls.length === 0 &&
-      !quotedCastSnap &&
-      truncatedQuotedCastText === ''
-    );
-  }, [
-    quoteCastVideoEmbeds.length,
-    quotedCastImageEmbeds.length,
-    quotedCastSpaceEmbedUrls.length,
-    quotedCastSnap,
-    truncatedQuotedCastText,
-  ]);
+  const hasOwnMedia =
+    quotedCastImageEmbeds.length > 0 ||
+    quoteCastVideoEmbeds.length > 0 ||
+    quotedCastSpaceEmbedUrls.length > 0 ||
+    !!quotedCastSnap;
 
-  const hasAnyTextContentToShow = React.useMemo(() => {
-    return shouldShowShowMoreIndicator || truncatedQuotedCastText !== '';
-  }, [truncatedQuotedCastText, shouldShowShowMoreIndicator]);
+  /**
+   * A quoted cast that says nothing of its own: no words, no picture, no video,
+   * no space, no snap.
+   *
+   * This is the quote of a quote — a cast with one `cast_id` embed and no text.
+   * It used to answer "Show more..." here, which promised content that does not
+   * exist: the card has nothing to open and nothing to expand. See
+   * `peekOf`/`quotedOf` in `farcaster-client-hooks`.
+   */
+  const isWordlessQuotedCast = !hasOwnMedia && truncatedQuotedCastText === '';
+
+  /**
+   * The inner cast, when this cast (or its hydration) says which one it quotes.
+   * Absent means the card cannot name it — and then the card's own tap is the
+   * way through, which the line below says in words.
+   */
+  const innerQuotedCast = React.useMemo(() => {
+    if (peekOf(hydratedCast).kind !== 'quote') {
+      return undefined;
+    }
+    return hydratedCast.embeds?.casts?.[0];
+  }, [hydratedCast]);
+
+  const innerQuotedRef = React.useMemo(
+    () => quotedOf(hydratedCast),
+    [hydratedCast],
+  );
+
+  const hasAnyTextContentToShow =
+    isWordlessQuotedCast || truncatedQuotedCastText !== '';
 
   const isProUser = useUserLevel(author) === 'pro';
 
@@ -224,16 +245,32 @@ const QuoteCast: React.FC<QuoteCastProps> = ({
                 t.pX3,
                 t.mT1,
                 ...textStyles,
-                shouldShowShowMoreIndicator
+                isWordlessQuotedCast
                   ? t.texts.tertiary
                   : inversedTextColors
                     ? { color: '#ffffff' }
                     : t.texts.primary,
               ]}
             >
-              {shouldShowShowMoreIndicator
-                ? 'Show more...'
+              {isWordlessQuotedCast
+                ? QUOTED_CAST_COPY.headline
                 : truncatedQuotedCastText}
+            </Text>
+          )}
+          {isWordlessQuotedCast && !innerQuotedCast && (
+            // No inner cast to name (its payload was stripped and the hydration
+            // fetch did not answer): the card's own tap still opens the cast, so
+            // say that rather than leaving a headline with nothing under it.
+            <Text
+              style={[
+                t.pX3,
+                t.mT1,
+                t.textSm,
+                t.fontNormal,
+                inversedTextColors ? t.texts.light : t.texts.tertiary,
+              ]}
+            >
+              {QUOTED_CAST_COPY.detail}
             </Text>
           )}
           {(quoteCastVideoEmbeds.length !== 0 ||
@@ -271,6 +308,17 @@ const QuoteCast: React.FC<QuoteCastProps> = ({
           )}
         </View>
       </Pressable>
+      {isWordlessQuotedCast && innerQuotedCast && innerQuotedRef && (
+        // Sibling of the Pressable, for the same reason the snap card is: the row
+        // has its own destination, and two nested tap targets make one gesture
+        // ambiguous.
+        <View style={[t.pX3, t.pB3]}>
+          <QuotedCastRow
+            cast={innerQuotedCast}
+            inversedTextColors={inversedTextColors}
+          />
+        </View>
+      )}
       {quotedCastSnap && (
         // Sibling of the Pressable so snap taps don't race with the
         // quoted-cast navigation gesture.
@@ -297,6 +345,13 @@ const QuoteCast: React.FC<QuoteCastProps> = ({
 function QuoteCastVideoEmbed({ video }: { video: ApiCastVideoEmbed }) {
   const t = useTheme();
 
+  // A video whose payload carries no poster — an HLS stream (Firefly), a plain
+  // mp4 upload — has nothing to draw. adapted from quilcast (backmeupplz), MIT
+  // (`e42029a`): draw the video's own stand-in tile instead of leaving a blank
+  // square that reads as a picture that failed to load.
+  const hasPoster =
+    typeof video.thumbnailUrl === 'string' && video.thumbnailUrl !== '';
+
   return (
     <View
       style={[
@@ -307,27 +362,43 @@ function QuoteCastVideoEmbed({ video }: { video: ApiCastVideoEmbed }) {
         },
       ]}
     >
-      <RemoteImage
-        uri={video.thumbnailUrl}
-        width={QUOTE_CAST_CAROUSEL_HEIGHT}
-        height={QUOTE_CAST_CAROUSEL_HEIGHT}
-        containerStyle={[
-          t.borderHairline,
-          { borderColor: t.colors.feed.threadLine },
-          {
-            borderRadius: 12,
-          },
-        ]}
-        style={[
-          {
-            aspectRatio: 1,
-            borderRadius: 12,
-          },
-        ]}
-        cachePolicy="memory-disk"
-        contentFit="cover"
-        contentPosition="center"
-      />
+      {hasPoster ? (
+        <RemoteImage
+          uri={video.thumbnailUrl}
+          width={QUOTE_CAST_CAROUSEL_HEIGHT}
+          height={QUOTE_CAST_CAROUSEL_HEIGHT}
+          containerStyle={[
+            t.borderHairline,
+            { borderColor: t.colors.feed.threadLine },
+            {
+              borderRadius: 12,
+            },
+          ]}
+          style={[
+            {
+              aspectRatio: 1,
+              borderRadius: 12,
+            },
+          ]}
+          cachePolicy="memory-disk"
+          contentFit="cover"
+          contentPosition="center"
+        />
+      ) : (
+        <View
+          style={[
+            t.borderHairline,
+            t.flex,
+            t.directCasts.bgImagePreview,
+            {
+              borderColor: t.colors.feed.threadLine,
+              borderRadius: 12,
+              height: QUOTE_CAST_CAROUSEL_HEIGHT,
+              width: QUOTE_CAST_CAROUSEL_HEIGHT,
+            },
+          ]}
+        />
+      )}
       <View
         style={[
           t.wFull,

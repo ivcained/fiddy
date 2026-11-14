@@ -369,6 +369,19 @@ original snapshot is a one-way generated reference whose `main` branch may be
 replaced by future snapshots. This fork maintains its wallet changes separately;
 review upstream snapshot updates before merging them.
 
+## Third-party adaptations
+
+- **quilcast** ([backmeupplz/quilcast](https://github.com/backmeupplz/quilcast)),
+  MIT. Two behaviours are adapted from it, with a header comment on each adapted
+  file naming the upstream source:
+  - the quote-of-a-quote card — `peekOf`, `quotedOf` and `CastRef` in
+    `packages/farcaster-client-hooks/src/utils/quotedCastPeek.ts`, and the
+    "Quoted a cast" card in the mobile client;
+  - retrying a write when a node's submit queue is full, in
+    `apps/farcaster-web/src/snapchain/nodeApi/nodeWrites.ts`.
+
+  Nothing else from that project (locales, styles, sticker code) is vendored.
+
 ## License
 
 MIT. See [`LICENSE`](./LICENSE).

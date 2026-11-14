@@ -71,11 +71,10 @@ const VideoCastActionsBar = memo(
     const deleteCastLike = useDeleteCastLike();
     const prefetchThread = usePrefetchThread();
     const prefetchShareCast = usePrefetchShareCast();
-    const {
-      replies: { count: replyCount },
-      reactions: { count: reactionCount },
-      recasts: { count: recastCount },
-    } = cast;
+    const { replies, reactions, recasts } = cast;
+    const replyCount = replies.count;
+    const reactionCount = reactions?.count ?? 0;
+    const recastCount = recasts?.count ?? 0;
 
     const recasted = cast.viewerContext?.recast || false;
     const reacted = cast.viewerContext?.reacted || false;
