@@ -25,6 +25,7 @@ import {
 } from '~/lib/publicFeedBoot';
 import {
   feedTypeForWindow,
+  hostFeedKey,
   PUBLIC_FEED_KEY,
   type PublicFeedKind,
   type PublicWindowTopic,
@@ -65,7 +66,25 @@ const noop = () => {
   // already say everything a visitor needs, so there is nothing to add.
 };
 
-export const usePublicWindow = (variant: PublicBrowseVariant): PublicWindow => {
+/**
+ * `as`: read ONE account's Following feed instead of the anchored window.
+ *
+ * This is the continue-as read (`~/lib/miniAppHost`): inside a Farcaster client
+ * whose sign-in was refused, the host has named the person, so `/feed?as=<fid>`
+ * shows their Following feed from public data. It is the SAME seam and the same
+ * hook — only the feed key changes (`as:<fid>`, `publicFeedWindow.ts`) — so
+ * there is no second reader, no second paging rule and no auth anywhere.
+ *
+ * The ranked view and the topic chips do not apply: a person's own follow graph
+ * has no "getting attention" ordering this client could compute honestly, and
+ * its casts' channels are not what the surface is about.
+ */
+export const usePublicWindow = (
+  variant: PublicBrowseVariant,
+  options?: { as?: number },
+): PublicWindow => {
+  const asFid = options?.as;
+  const isHostFeed = asFid !== undefined;
   // `/feed` opens on what is newest; `/explore` opens on what is getting
   // attention, which is the whole difference between the two surfaces.
   const [kind, setKind] = useState<PublicFeedKind>(
@@ -76,10 +95,12 @@ export const usePublicWindow = (variant: PublicBrowseVariant): PublicWindow => {
   // The server-drawn recent page, if this document carried one. Consumed once:
   // it is a first paint, not a second definition of the feed, and it seeds
   // exactly the same query the page would otherwise ask for.
+  // The server-drawn page is the ANCHORED window's first paint; somebody's
+  // Following feed is not that page, so it never consumes the seed.
   const [boot] = useState(() =>
-    variant === 'feed' ? consumePublicFeedBoot() : undefined,
+    variant === 'feed' && !isHostFeed ? consumePublicFeedBoot() : undefined,
   );
-  const feedType = feedTypeForWindow({ kind, topic });
+  const feedType = isHostFeed ? 'recent' : feedTypeForWindow({ kind, topic });
 
   // Only the opening recent window matches what the server drew; a topic or
   // the ranked view is the reader's own question and starts from its own read.
@@ -107,7 +128,7 @@ export const usePublicWindow = (variant: PublicBrowseVariant): PublicWindow => {
     isFetchingNextPage,
     hasNextPage,
   } = useNonSuspenseFeedItems({
-    feedKey: PUBLIC_FEED_KEY,
+    feedKey: asFid !== undefined ? hostFeedKey(asFid) : PUBLIC_FEED_KEY,
     feedType,
     // Nothing about a browse window is the viewer's own state: no seen
     // bookkeeping, no updateState write.

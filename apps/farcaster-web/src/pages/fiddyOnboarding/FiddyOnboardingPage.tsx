@@ -73,6 +73,13 @@ import {
   saveFiddySetup,
   useFiddySetup,
 } from '~/lib/fiddySetup';
+import {
+  continueAsHref,
+  hostAt,
+  offered,
+  retryHostSignIn,
+  useHost,
+} from '~/lib/miniAppHost';
 import { clearTrialExchange, loadTrialExchange } from '~/lib/trialChat';
 
 /**
@@ -163,6 +170,16 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
   const stepMeta = position ? { index: position, total: TOTAL_STEPS } : null;
   const go = (to: OnboardingRouteName) =>
     navigate({ to, params: {}, searchParams: {} });
+  // Inside a Farcaster client, the host already named whoever is looking
+  // (`~/lib/miniAppHost`). Fiddy did not get a session out of it — that is what
+  // the automatic sign-in is for, and this page is where a refusal lands — so
+  // the person is offered their own Following feed, read-only, instead of a QR
+  // code they could not scan with the phone holding this page.
+  //
+  // Offered over an EMPTY signed-in list on purpose: this page only ever
+  // renders for a signed-out visitor (the redirect above), so there is no
+  // account it could be re-offering.
+  const hostOffer = offered(useHost(), []);
   const hasProgress =
     setup.onboardingStep !== null || setup.completedAt !== null;
   const resumeSetup = () => {
@@ -365,26 +382,99 @@ export const FiddyOnboardingPage = ({ step }: FiddyOnboardingPageProps) => {
             model="hero"
             title="Meet Fiddy — your agent, living in your pocket."
             sub="Chat like you message a friend. Fiddy does the busywork, and asks before it acts."
-            primary={{
-              label: 'Look around first',
-              onClick: () => go('publicFeed'),
-              testId: 'browse-cta',
-            }}
+            // In a Farcaster client the order is the person's own account
+            // first, signing in second, and a NEW account last — because the
+            // one mistake worth preventing is somebody tapping through to an
+            // empty second account while their real one is one press away.
+            primary={
+              hostOffer
+                ? {
+                    label: `Continue as ${hostAt(hostOffer)}`,
+                    // A real navigation, not a router push: the refusal notice
+                    // is mounted above the router and owns its own state, so
+                    // rebooting is what leaves it behind (the same reboot the
+                    // host sign-in itself ends in). `continueAsHref` is the one
+                    // definition of where this goes.
+                    onClick: () =>
+                      window.location.assign(continueAsHref(hostOffer.fid)),
+                    testId: 'host-continue',
+                  }
+                : {
+                    label: 'Look around first',
+                    onClick: () => go('publicFeed'),
+                    testId: 'browse-cta',
+                  }
+            }
             // Reading is not a commitment: no name, no brain, no account. It is
             // the primary action because a visitor can see Fiddy's public posts
             // before deciding whether to set anything up.
-            secondary={{
-              label: hasProgress ? `Resume with ${setup.agentName}` : 'Say hi',
-              onClick: hasProgress ? resumeSetup : () => go('fiddyWelcomeName'),
-              testId: hasProgress ? 'resume-setup' : 'start-setup',
-            }}
-            quiet={{
-              label: 'Already have an account? Sign in',
-              onClick: () => setIsSigningIn(true),
-            }}
-            note="No account needed to look around or say hi. Your Fiddy account lives on Farcaster, the network Fiddy posts to. You only need one when you want to post."
+            secondary={
+              hostOffer
+                ? {
+                    // The host's own sign-in, not the QR sheet: the code cannot
+                    // be scanned by the phone displaying it, and the person has
+                    // already seen Fiddy ask (`retryHostSignIn`).
+                    label: 'Sign in to post',
+                    onClick: retryHostSignIn,
+                    testId: 'host-sign-in',
+                  }
+                : {
+                    label: hasProgress
+                      ? `Resume with ${setup.agentName}`
+                      : 'Say hi',
+                    onClick: hasProgress
+                      ? resumeSetup
+                      : () => go('fiddyWelcomeName'),
+                    testId: hasProgress ? 'resume-setup' : 'start-setup',
+                  }
+            }
+            quiet={
+              hostOffer
+                ? {
+                    // A separate, empty account, named as one: the person is
+                    // already on Farcaster, so "make an account" here can only
+                    // mean another one.
+                    label: 'Make a new, empty account',
+                    onClick: () => go('fiddyWelcomeName'),
+                    testId: 'host-create-account',
+                  }
+                : {
+                    label: 'Already have an account? Sign in',
+                    onClick: () => setIsSigningIn(true),
+                  }
+            }
+            note={
+              hostOffer
+                ? `Carrying on as ${hostAt(hostOffer)} only reads: nothing posts, likes or follows until you say so. A new account is a separate, empty one with a name you pick — not ${hostAt(hostOffer)}.`
+                : 'No account needed to look around or say hi. Your Fiddy account lives on Farcaster, the network Fiddy posts to. You only need one when you want to post.'
+            }
             titleRef={titleRef}
           >
+            {hostOffer ? (
+              // Who the client says is looking, so the buttons below are about
+              // a person they can recognise rather than a label.
+              <div
+                className="mb-4 flex items-center gap-3 rounded-2xl bg-white/5 p-3"
+                data-fiddy="host-identity"
+              >
+                {hostOffer.pfpUrl ? (
+                  <img
+                    src={hostOffer.pfpUrl}
+                    alt=""
+                    width={40}
+                    height={40}
+                    className="h-10 w-10 shrink-0 rounded-full object-cover"
+                  />
+                ) : null}
+                <div className="min-w-0">
+                  <b className="block truncate">{hostAt(hostOffer)}</b>
+                  <span className="block text-xs text-muted">
+                    That is who the Farcaster app you opened this in says is
+                    here.
+                  </span>
+                </div>
+              </div>
+            ) : null}
             <ul className="fiddy-promise">
               <li>Your agent, your choice of brain — no lock-in.</li>
               <li>It connects to the apps you already use.</li>

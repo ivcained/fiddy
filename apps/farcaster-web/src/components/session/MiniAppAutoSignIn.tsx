@@ -5,6 +5,14 @@ import { authTokenKey, getOnboardingStateKey } from '~/constants/storage';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useAuth } from '~/contexts/AuthProvider';
 import {
+  beginHostSignInAttempt,
+  continueAsHref,
+  hostAt,
+  hostSignInAttempted,
+  type MiniAppHostAccount,
+  rememberHost,
+} from '~/lib/miniAppHost';
+import {
   announceMiniAppReady,
   isInsideMiniAppHost,
   loadMiniAppHostSdk,
@@ -42,15 +50,18 @@ import { getItem, setItem } from '~/utils/storageUtils';
  * one attempt per tab session, and if it fails the ordinary sign-in door is
  * still right there.
  */
-const AUTO_SIGN_IN_ATTEMPT_KEY = 'fiddy.miniapp.auto-sign-in';
-
 /** How long the "you're in" line stays up before the client reboots. */
 const SUCCESS_HOLD_MS = 1_100;
 
 type AutoSignInState =
   | { status: 'idle' }
   | { status: 'working' }
-  | { status: 'refused'; reason: string };
+  | {
+      status: 'refused';
+      reason: string;
+      /** Whom the host named before refusing, when it named anyone. */
+      host: MiniAppHostAccount | null;
+    };
 
 const MiniAppAutoSignIn: FC = memo(() => {
   const { signIn } = useAuth();
@@ -90,8 +101,7 @@ const MiniAppAutoSignIn: FC = memo(() => {
         return;
       }
 
-      const alreadyAttempted =
-        window.sessionStorage?.getItem(AUTO_SIGN_IN_ATTEMPT_KEY) === 'true';
+      const alreadyAttempted = hostSignInAttempted();
 
       if (alreadyAttempted) {
         // The person is in a host and a previous attempt in this tab did not
@@ -100,11 +110,7 @@ const MiniAppAutoSignIn: FC = memo(() => {
         return;
       }
 
-      try {
-        window.sessionStorage?.setItem(AUTO_SIGN_IN_ATTEMPT_KEY, 'true');
-      } catch (error) {
-        // Private-mode storage: the guard is a nicety, not a requirement.
-      }
+      beginHostSignInAttempt();
 
       setState({ status: 'working' });
 
@@ -119,7 +125,14 @@ const MiniAppAutoSignIn: FC = memo(() => {
       }
 
       if (outcome.status !== 'signed-in') {
-        setState({ status: 'refused', reason: outcome.reason });
+        // The host named this account before it refused — kept for the rest of
+        // the tab so the refusal path can offer to continue as them
+        // (`~/lib/miniAppHost`), and so a reload does not ask again. A
+        // `failed` outcome is our side breaking, which named nobody.
+        const host = outcome.status === 'refused' ? outcome.host : null;
+
+        rememberHost(host);
+        setState({ status: 'refused', reason: outcome.reason, host });
         return;
       }
 
@@ -173,14 +186,51 @@ const MiniAppAutoSignIn: FC = memo(() => {
   }
 
   if (state.status === 'refused') {
+    // NOT a screen and not a wall. The refusal is a line at the foot of
+    // whatever the person was reading, because the feed is still theirs to
+    // read: the host named them before it refused, so "continue as that
+    // account" is a press away instead of a QR code aimed at the phone that is
+    // already showing this page (`~/lib/miniAppHost`, `PublicBrowsePage`).
+    const named = state.host;
+
     return (
       <div
-        className="fixed inset-x-0 top-0 z-50 flex justify-center p-2"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center p-2 pb-3"
         data-fiddy="miniapp-auto-sign-in-refused"
+        role="status"
       >
-        <div className="max-w-md rounded-md bg-[#141414] px-3 py-2 text-center text-xs text-light">
-          {state.reason}. Use the sign-in button instead — nothing was signed in
-          on this device.
+        <div className="pointer-events-auto flex w-full max-w-md items-center gap-2 rounded-md bg-[#141414] px-3 py-2 text-xs text-light">
+          <span className="min-w-0 flex-1" data-fiddy="miniapp-refused-line">
+            Your Farcaster app won’t sign this one in.{' '}
+            {named
+              ? `You can still read as ${hostAt(named)} here.`
+              : 'Nothing was signed in, and nothing was sent.'}
+          </span>
+          {named ? (
+            <button
+              type="button"
+              className="shrink-0 rounded-full bg-[#d4ff3f] px-3 py-1 font-semibold text-[#1a1c10]"
+              data-fiddy="miniapp-continue-as"
+              onClick={() =>
+                // `?as=<fid>`: that account's Following feed, read-only
+                // (`PublicBrowsePage`). A plain navigation rather than a router
+                // call — this component sits ABOVE the browser router, on
+                // purpose, so it can exist before any page does.
+                window.location.assign(continueAsHref(named.fid))
+              }
+            >
+              Continue as {hostAt(named)}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="shrink-0 px-1 text-muted"
+            aria-label="Close"
+            data-fiddy="miniapp-refused-dismiss"
+            onClick={() => setState({ status: 'idle' })}
+          >
+            ✕
+          </button>
         </div>
       </div>
     );

@@ -2068,6 +2068,68 @@ export class NodeBackedReads {
   }
 
   /**
+   * `POST /v2/feed-items` for a key of the shape `as:<fid>`: ONE ACCOUNT'S
+   * Following feed, read with no session at all.
+   *
+   * WHY THIS EXISTS
+   * Inside a Farcaster client the host says who is looking before it refuses to
+   * sign them in (a declined approval, an unanswerable sign-in, a tab that
+   * already tried). Dropping that person on the signed-out wall is the wrong
+   * middle state — they are named by the app they are already holding — so this
+   * is what the refused path lands on: their Following feed, from public
+   * protocol data. Nothing is signed, no key is minted, no session is built,
+   * and `followingFeedMessages` is the SAME read the signed-in home feed uses,
+   * pointed at the host's fid instead of `requireFid()`'s viewer.
+   *
+   * WHAT IT DELIBERATELY LEAVES OUT
+   * No viewer, so no reaction context and no mutes: withViewer false means a
+   * signed-out reader's own likes are not folded in, and the reader's mutes are
+   * device-local to a session this surface does not have (`mutePreferences` is
+   * keyed by FID). Nothing is invented to fill the gap.
+   *
+   * A FID that is not a positive safe integer, and a read where no account
+   * answered, both THROW: the first is a request that cannot be honoured, the
+   * second is an unreadable feed. Only a follow graph with genuinely nothing in
+   * it answers empty.
+   */
+  async readFollowingFeedFor({
+    fid,
+    olderThan,
+    limit = 25,
+  }: {
+    fid: number;
+    olderThan?: number;
+    limit?: number;
+  }): Promise<ApiFeedItemsResult> {
+    if (!Number.isSafeInteger(fid) || fid <= 0) {
+      throw new NodeCannotAnswerError(
+        'That is not a Farcaster account number, so there is no Following feed to read.',
+      );
+    }
+
+    const messages = await this.followingFeedMessages({
+      fid,
+      limit,
+      includeSelf: false,
+      ...(olderThan !== undefined ? { olderThan } : {}),
+    });
+
+    if (messages.length === 0) {
+      return { items: [], latestMainCastTimestamp: Date.now() };
+    }
+
+    const casts = await this.buildCasts(messages, {
+      withCounts: true,
+      withViewer: false,
+    });
+
+    return {
+      items: casts.map((cast) => apiCastFeedItemFromNode({ cast })),
+      latestMainCastTimestamp: casts[0]?.timestamp ?? Date.now(),
+    };
+  }
+
+  /**
    * The accounts a public window is read from: the newest follows of the named
    * anchors, deduplicated and capped.
    *

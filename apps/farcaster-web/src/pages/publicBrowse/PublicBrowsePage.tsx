@@ -44,6 +44,14 @@ import {
   type PublicWindow,
   usePublicWindow,
 } from '~/hooks/data/usePublicWindow';
+import { useSearchParams } from '~/hooks/navigation/useSearchParams';
+import {
+  hostAt,
+  type MiniAppHostAccount,
+  retryHostSignIn,
+  useHost,
+} from '~/lib/miniAppHost';
+import { hostFidOf } from '~/snapchain/nodeApi/publicFeedWindow';
 import { type ApiCastWithContext } from '~/types';
 import { castWithContextKeyExtractor } from '~/utils/keyExtractorUtils';
 
@@ -87,6 +95,44 @@ PublicWindowSkeletons.displayName = 'PublicWindowSkeletons';
  * It says what reading costs (nothing) and what signing in buys (posting), and
  * it is a note rather than a wall: the casts are on the page below it.
  */
+/**
+ * What a person is told when the feed is ONE ACCOUNT'S Following feed.
+ *
+ * This is the continue-as surface: a Farcaster client named them and then would
+ * not sign them in (a declined approval, an unanswerable request, a tab that
+ * already tried). So the note says two things and nothing else — who this is,
+ * and that reading costs no account — and the way to post is a real press
+ * rather than a QR code aimed at the phone already holding the app.
+ *
+ * No technical reason is printed here. "The host did not answer the sign-in
+ * request in time" is a sentence for a log, not for a person who wanted to read
+ * their feed.
+ */
+const ContinueAsNote: FC<{
+  host: MiniAppHostAccount | null;
+  onSignIn: () => void;
+}> = memo(({ host, onSignIn }) => (
+  <div className="fiddy-public-note" data-fiddy="public-continue-as">
+    <span>
+      <b>
+        {host
+          ? `Carrying on as ${hostAt(host)}.`
+          : 'Reading that account’s Following feed.'}
+      </b>{' '}
+      Reading only: nothing here posts, likes or follows until you say so.
+    </span>
+    <DefaultButton
+      className="fiddy-public-note-btn"
+      data-fiddy="continue-as-sign-in"
+      onClick={onSignIn}
+    >
+      Sign in to post
+    </DefaultButton>
+  </div>
+));
+
+ContinueAsNote.displayName = 'ContinueAsNote';
+
 const PublicReadingNote: FC<{
   onSignIn: () => void;
   variant: PublicBrowseVariant;
@@ -180,10 +226,19 @@ PublicTopicRow.displayName = 'PublicTopicRow';
 
 const PublicBrowseColumn: FC<{
   variant: PublicBrowseVariant;
+  asFid?: number;
   onSignIn: () => void;
-}> = memo(({ variant, onSignIn }) => {
+}> = memo(({ variant, asFid, onSignIn }) => {
   const isSignedIn = useIsSignedIn();
-  const window = usePublicWindow(variant);
+  const window = usePublicWindow(
+    variant,
+    asFid !== undefined ? { as: asFid } : {},
+  );
+  // The account the Farcaster client named, when this surface was reached from
+  // inside one. Null for a hand-typed `?as=<fid>` in a plain browser, where the
+  // read still works and the note simply does not claim to know them.
+  const host = useHost();
+  const namedHost = host && host.fid === asFid ? host : null;
 
   const renderItem = useCallback(
     ({ item }: { item: ApiCastWithContext }) => (
@@ -198,12 +253,18 @@ const PublicBrowseColumn: FC<{
       className="fiddy-public"
       data-fiddy="public-browse"
       data-variant={variant}
+      data-as={asFid !== undefined ? String(asFid) : undefined}
     >
-      {!isSignedIn && (
-        <PublicReadingNote onSignIn={onSignIn} variant={variant} />
-      )}
+      {!isSignedIn &&
+        (asFid !== undefined ? (
+          <ContinueAsNote host={namedHost} onSignIn={onSignIn} />
+        ) : (
+          <PublicReadingNote onSignIn={onSignIn} variant={variant} />
+        ))}
 
-      {variant === 'feed' ? (
+      {/* Somebody's Following feed has one shape: there is no ranked view of it
+          and its channels are not what the surface is about. */}
+      {asFid !== undefined ? null : variant === 'feed' ? (
         <PublicWindowTabs window={window} />
       ) : (
         <PublicTopicRow window={window} />
@@ -279,14 +340,15 @@ const PublicBrowseColumn: FC<{
       )}
 
       <p className="fiddy-public-source" data-fiddy="public-source">
-        This window is assembled from the network itself: the newest casts from
-        the accounts a few long-standing public Farcaster accounts follow, read
-        from the server this app is pointed at.
-        {window.kind === 'trending'
-          ? ' It is ordered by the likes and recasts the network really holds for those casts, not by a recommendation service.'
-          : ''}{' '}
-        No account of yours is involved, and signing in changes nothing about
-        what is shown here.
+        {asFid !== undefined
+          ? `This is the newest from the accounts ${
+              namedHost ? hostAt(namedHost) : 'this account'
+            } follows, read from the network itself. Nothing here acts as them, and no account of yours is involved.`
+          : `This window is assembled from the network itself: the newest casts from the accounts a few long-standing public Farcaster accounts follow, read from the server this app is pointed at.${
+              window.kind === 'trending'
+                ? ' It is ordered by the likes and recasts the network really holds for those casts, not by a recommendation service.'
+                : ''
+            } No account of yours is involved, and signing in changes nothing about what is shown here.`}
       </p>
     </div>
   );
@@ -294,42 +356,92 @@ const PublicBrowseColumn: FC<{
 
 PublicBrowseColumn.displayName = 'PublicBrowseColumn';
 
-const PublicBrowsePage: FC<{ variant: PublicBrowseVariant }> = memo(
-  ({ variant }) => {
-    const [isSigningIn, setIsSigningIn] = useState(false);
+const PublicBrowsePage: FC<{
+  variant: PublicBrowseVariant;
+  asFid?: number;
+}> = memo(({ variant, asFid }) => {
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const host = useHost();
+  const inHost = host !== null;
 
-    const onSignIn = useCallback(() => {
-      setIsSigningIn(true);
-    }, []);
+  /**
+   * What "Sign in to post" does.
+   *
+   * Inside a Farcaster client the QR sheet is the exact dead end this surface
+   * exists to avoid (the code cannot be scanned by the phone displaying it), so
+   * the press asks the HOST again — the same, proven sign-in the automatic path
+   * runs, cleared of its one-shot mark so one deliberate press is enough
+   * (`retryHostSignIn`). In a plain browser the ordinary sign-in sheet is
+   * right.
+   */
+  const onSignIn = useCallback(() => {
+    if (asFid !== undefined && inHost) {
+      retryHostSignIn();
+      return;
+    }
 
-    return (
-      <Page
-        meta={{
-          title: variant === 'explore' ? 'Fiddy / Explore' : 'Fiddy / Feed',
-          description:
-            'Read what Farcaster is saying right now, with no account needed.',
-        }}
-      >
-        <BorderedMainContent>
-          <PageHeader footer={undefined}>
-            <PageTitle>{variant === 'explore' ? 'Explore' : 'Feed'}</PageTitle>
-          </PageHeader>
-          {/* The column's own reads report through the eventing provider, the
-              same way the home feed's do. */}
-          <EventingProvider on="explore" feed={variant}>
-            <PublicBrowseColumn variant={variant} onSignIn={onSignIn} />
-          </EventingProvider>
-        </BorderedMainContent>
-        {isSigningIn && <LoginModal onClose={() => setIsSigningIn(false)} />}
-      </Page>
-    );
-  },
-);
+    setIsSigningIn(true);
+  }, [asFid, inHost]);
+
+  const title =
+    asFid !== undefined
+      ? 'Following'
+      : variant === 'explore'
+        ? 'Explore'
+        : 'Feed';
+
+  return (
+    <Page
+      meta={{
+        title:
+          asFid !== undefined
+            ? 'Fiddy / Following'
+            : variant === 'explore'
+              ? 'Fiddy / Explore'
+              : 'Fiddy / Feed',
+        description:
+          asFid !== undefined
+            ? 'Read an account’s Following feed on Farcaster, with nothing signed.'
+            : 'Read what Farcaster is saying right now, with no account needed.',
+      }}
+    >
+      <BorderedMainContent>
+        <PageHeader footer={undefined}>
+          <PageTitle>{title}</PageTitle>
+        </PageHeader>
+        {/* The column's own reads report through the eventing provider, the
+            same way the home feed's do. */}
+        <EventingProvider on="explore" feed={variant}>
+          <PublicBrowseColumn
+            variant={variant}
+            asFid={asFid}
+            onSignIn={onSignIn}
+          />
+        </EventingProvider>
+      </BorderedMainContent>
+      {isSigningIn && <LoginModal onClose={() => setIsSigningIn(false)} />}
+    </Page>
+  );
+});
 
 PublicBrowsePage.displayName = 'PublicBrowsePage';
 
-/** `/feed`: the public window, newest first, with the ranked view beside it. */
-const PublicFeedPage: FC = memo(() => <PublicBrowsePage variant="feed" />);
+/**
+ * `/feed`: the public window, newest first, with the ranked view beside it.
+ *
+ * `?as=<fid>` is the continue-as read: that account's Following feed instead of
+ * the anchored window (`~/lib/miniAppHost`). The FID is validated here so a URL
+ * someone typed can only ever ask for a real account number, and an invalid one
+ * falls back to the ordinary public window rather than an error page.
+ */
+const PublicFeedPage: FC = memo(() => {
+  const { as } = useSearchParams('publicFeed');
+  const asFid = hostFidOf(typeof as === 'string' ? as : null);
+
+  return (
+    <PublicBrowsePage variant="feed" {...(asFid !== null ? { asFid } : {})} />
+  );
+});
 PublicFeedPage.displayName = 'PublicFeedPage';
 
 /** `/explore`: the same window by topic, ranked by real engagement. */

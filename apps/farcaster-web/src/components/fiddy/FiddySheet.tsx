@@ -153,6 +153,7 @@ export const FiddySheet = memo<FiddySheetProps>(
               <button
                 type="button"
                 className="fiddy-quiet-btn"
+                data-fiddy={quiet.testId}
                 onClick={quiet.onClick}
                 disabled={quiet.disabled}
               >
