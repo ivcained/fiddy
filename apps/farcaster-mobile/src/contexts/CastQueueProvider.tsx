@@ -15,6 +15,35 @@ import { useSubmitCastsInQueue } from '~/screens/CreateCast/useSubmitCastsInQueu
 import { ComposerOnSuccessCallback, QueuedCastInfoWithEmbeds } from '~/types';
 import { createUUID } from '~/utils/UUIDUtils';
 
+/**
+ * Where a thread that failed partway goes on from.
+ *
+ * A publish that sends a thread post by post can fail with some posts already
+ * public. Nothing that went out is deleted (a delete is visible to the network,
+ * cannot un-notify the parent's author, and a failed delete turns the retry into
+ * duplicates). Instead the queue record keeps only the posts that never went
+ * out, and this remembers the rest, so the toast's "Try again" posts the
+ * remainder as replies to the last cast that did -- the thread continues rather
+ * than forking from its original parent.
+ *
+ * Borrowed in shape from quilcast (MIT), src/write.ts `postThread`/`ThreadStart`
+ * and src/compose.tsx `cont`: there the resume point lives in the composer;
+ * here it lives in the queue record so it survives the composer closing (Fiddy
+ * closes the composer as soon as a cast is queued).
+ */
+export type CastQueueResume = {
+  /** The thread's first cast: what a success reports, mini apps included. */
+  rootCastHash: string;
+  rootCastAuthorUsername: string | undefined;
+  rootCastText: string | undefined;
+  rootCastEmbeds: string[] | undefined;
+  /** The cast the whole thread replies to, before any of it went out. */
+  rootParentCastHash: string | undefined;
+  /** Posts of the whole thread that are public, out of how many it has. */
+  postedCount: number;
+  totalCount: number;
+};
+
 type CastQueueParams = {
   casts: QueuedCastInfoWithEmbeds[];
   activeDraftId: string | undefined;
@@ -36,6 +65,12 @@ type CastQueueParams = {
   queueIdOverrideForEmbeds: string | undefined;
   onSuccess: ComposerOnSuccessCallback | undefined;
   onError?: (message: string) => void;
+  /**
+   * Set once a publish sent some of this thread: the posts still in `casts` are
+   * the ones that never went out, `parentCastHash` is the last cast that did, and
+   * this is where the thread began. A fresh publish leaves it undefined.
+   */
+  resume?: CastQueueResume;
 };
 
 type QueueState = {

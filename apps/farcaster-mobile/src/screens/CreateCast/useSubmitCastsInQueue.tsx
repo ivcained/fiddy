@@ -11,7 +11,6 @@ import {
   CastReactionType,
   sleep,
   useCreateCast,
-  useDeleteCast,
   useDiscardDraftCast,
   useFetchOpenGraphMetadata,
   useOptimisticallyAddNewCastToThread,
@@ -24,9 +23,13 @@ import { useCallback, useRef } from 'react';
 
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useAppStoreReview } from '~/contexts/AppStoreReviewProvider';
-import { useCastQueue } from '~/contexts/CastQueueProvider';
+import {
+  type CastQueueResume,
+  useCastQueue,
+} from '~/contexts/CastQueueProvider';
 import { useUserAppContext } from '~/contexts/UserAppContextProvider';
 import { useCurrentUser_UNSAFE } from '~/hooks/data/useCurrentUser';
+import type { QueuedCastInfoWithEmbeds } from '~/types';
 import { buildApiCastUrlEmbedFromMetadata } from '~/utils/CastUtils';
 import { trackError } from '~/utils/ErrorUtils';
 
@@ -44,6 +47,21 @@ function getErrorMessage(error: unknown): string | undefined {
 
 const GENERIC_CAST_ERROR_MESSAGE = 'Failed to cast';
 
+/**
+ * What a thread that failed partway says in its toast: what is already public,
+ * and that the rest follows as replies. Plain words, no hashes (the product
+ * voice never names protocol internals).
+ */
+function getPartialThreadMessage({
+  posted,
+  total,
+}: {
+  posted: number;
+  total: number;
+}): string {
+  return `${posted} of ${total} already posted. The rest will go out as replies.`;
+}
+
 function useSubmitCastsInQueue() {
   const { fid: currentUserFid } = useCurrentUser_UNSAFE();
   const { regularCastByteLimit } = useUserAppContext();
@@ -59,7 +77,6 @@ function useSubmitCastsInQueue() {
   const optimisticallyAddNewCastToThread =
     useOptimisticallyAddNewCastToThread('bottom');
   const trackCastReaction = useTrackCastReaction();
-  const deleteCast = useDeleteCast();
   const discardDraftCast = useDiscardDraftCast();
   const storeDraftCaststorm = useStoreDraftCaststorm();
   const prefetchThread = usePrefetchUserThreadCasts();
@@ -70,8 +87,17 @@ function useSubmitCastsInQueue() {
   const { getCachedOpenGraphMetadataSnapshot } = useFetchOpenGraphMetadata();
 
   const markCastAsErrored = useCallback(
-    ({ queueId, error }: { queueId: string; error?: unknown }) => {
-      const errorMessage = getErrorMessage(error) ?? GENERIC_CAST_ERROR_MESSAGE;
+    ({
+      queueId,
+      error,
+      message,
+    }: {
+      queueId: string;
+      error?: unknown;
+      message?: string;
+    }) => {
+      const errorMessage =
+        message ?? getErrorMessage(error) ?? GENERIC_CAST_ERROR_MESSAGE;
       const payload = state[queueId];
 
       payload?.params.onError?.(errorMessage);
@@ -87,16 +113,6 @@ function useSubmitCastsInQueue() {
       });
     },
     [dispatch, state, toast],
-  );
-
-  const deletePostedCasts = useCallback(
-    async ({ postedCasts }: { postedCasts: { hash: string }[] }) =>
-      await Promise.all(
-        postedCasts.map(({ hash }) =>
-          deleteCast({ cast: { author: { fid: currentUserFid }, hash } }),
-        ),
-      ),
-    [currentUserFid, deleteCast],
   );
 
   // Tracks the pre-publish auto-saved draftId per cast identity
@@ -138,15 +154,36 @@ function useSubmitCastsInQueue() {
           ? queueIdOverrideForEmbeds
           : queueId;
 
+      // A publish that failed partway leaves only the posts that never went out
+      // in `casts`, with `parentCastHash` pointing at the last cast that did and
+      // this remembering where the thread began (see CastQueueResume).
+      const resume: CastQueueResume | undefined = payload.params.resume;
+      const postedBefore = resume?.postedCount ?? 0;
+      const threadLength = resume?.totalCount ?? queuedCasts.length;
+      // The cast the whole thread replies to. After a partial failure
+      // `parentCastHash` is the last cast that went out instead, so the original
+      // target is read from the resume record.
+      const threadParentCastHash: string | undefined =
+        resume?.rootParentCastHash ?? parentCastHash;
+
       const storeRecoveryDraft = async ({
         draftId,
+        casts,
+        replyParentCastHash,
       }: {
         draftId: string | undefined;
+        /**
+         * The posts this draft holds. Usually the whole queue, but after a
+         * thread failed partway it holds only what never went out, so reopening
+         * the draft cannot post what is already public again.
+         */
+        casts: QueuedCastInfoWithEmbeds[];
+        replyParentCastHash: string | undefined;
       }): Promise<string | undefined> => {
         try {
           const autoSaveResponse = await storeDraftCaststorm({
             caststorm: {
-              casts: queuedCasts.map((queuedCast) => ({
+              casts: casts.map((queuedCast) => ({
                 text: queuedCast.text.trim(),
                 embeds: dedupeEmbedReferences([
                   ...(queuedCast.embeds ?? []),
@@ -156,8 +193,8 @@ function useSubmitCastsInQueue() {
                 ]),
               })),
               parent:
-                typeof parentCastHash !== 'undefined'
-                  ? { hash: parentCastHash }
+                typeof replyParentCastHash !== 'undefined'
+                  ? { hash: replyParentCastHash }
                   : undefined,
               channelKey,
               draftId,
@@ -200,6 +237,8 @@ function useSubmitCastsInQueue() {
         activeDraftId;
       let autoSavedDraftId = await storeRecoveryDraft({
         draftId: previousAutoSavedDraftId,
+        casts: queuedCasts,
+        replyParentCastHash: parentCastHash,
       });
       let shouldRefreshRecoveryDraft = false;
 
@@ -294,19 +333,49 @@ function useSubmitCastsInQueue() {
       if (shouldRefreshRecoveryDraft) {
         const refreshedDraftId = await storeRecoveryDraft({
           draftId: autoSavedDraftId ?? previousAutoSavedDraftId,
+          casts: queuedCasts,
+          replyParentCastHash: parentCastHash,
         });
         autoSavedDraftId = refreshedDraftId ?? autoSavedDraftId;
       }
 
       const postedCasts: { hash: string }[] = [];
+      /**
+       * The quote and reply reactions belong to the thread's first post going
+       * out -- true whether or not the rest of the thread lands -- so they are
+       * credited exactly once, by the run that posted it.
+       */
+      const creditThreadStartReactions = () => {
+        for (const quoteReaction of quoteReactions) {
+          trackCastReaction({
+            castHash: quoteReaction.castHash,
+            type: CastReactionType.Quote,
+            undo: false,
+            castFid: quoteReaction.castFid,
+            ...(feed ? { feed } : {}),
+            ...(includeReason ? { includeReason } : {}),
+          });
+        }
+
+        if (typeof parentCastHash !== 'undefined') {
+          trackCastReaction({
+            castHash: parentCastHash,
+            type: CastReactionType.Reply,
+            undo: false,
+            ...(includeReason ? { includeReason } : {}),
+          });
+        }
+      };
+      // Hoisted out of the try so a failure partway can report what already went
+      // out: the thread's first cast and the replies that landed.
+      let firstData: ApiCreateCast201Response | undefined = undefined;
+      const publishedReplies: {
+        parentCastHash: string;
+        cast: ApiCast;
+      }[] = [];
 
       try {
         let nextParentCastHash = parentCastHash;
-        let firstData: ApiCreateCast201Response | undefined = undefined;
-        const publishedReplies: {
-          parentCastHash: string;
-          cast: ApiCast;
-        }[] = [];
 
         for (let i = 0; i < queuedCasts.length; i++) {
           const queuedCast = queuedCasts[i];
@@ -345,11 +414,9 @@ function useSubmitCastsInQueue() {
           if (data === null) {
             trackError('Received empty response after casting');
 
-            markCastAsErrored({ queueId });
-
-            await deletePostedCasts({ postedCasts });
-
-            return;
+            // Let the catch decide what to do with whatever already went out:
+            // a thread that failed partway resumes from its last post.
+            throw new Error(GENERIC_CAST_ERROR_MESSAGE);
           }
 
           if (typeof castParentHash !== 'undefined') {
@@ -404,55 +471,132 @@ function useSubmitCastsInQueue() {
 
         await setLocalDraft(undefined, localDraftKey);
 
-        if (typeof firstData !== 'undefined') {
-          for (const quoteReaction of quoteReactions) {
-            trackCastReaction({
-              castHash: quoteReaction.castHash,
-              type: CastReactionType.Quote,
-              undo: false,
-              castFid: quoteReaction.castFid,
-              ...(feed ? { feed } : {}),
-              ...(includeReason ? { includeReason } : {}),
-            });
-          }
+        if (typeof firstData !== 'undefined' || typeof resume !== 'undefined') {
+          // The thread's first cast: on a retry that cast went out on an earlier
+          // run, so the resume record supplies it and this run reports the
+          // thread as a whole (mini apps hear the first cast, not the last).
+          const rootCastHash =
+            resume?.rootCastHash ?? firstData?.result.cast.hash;
 
-          if (typeof parentCastHash !== 'undefined') {
-            trackCastReaction({
-              castHash: parentCastHash,
-              type: CastReactionType.Reply,
-              undo: false,
-              ...(includeReason ? { includeReason } : {}),
-            });
-          }
+          if (typeof rootCastHash !== 'undefined') {
+            // Quote and reply reactions belong to the first post going out; a
+            // retry only posts the rest and must not credit them twice.
+            if (typeof resume === 'undefined') {
+              creditThreadStartReactions();
+            }
 
-          return {
-            castAuthorUsername: firstData.result.cast.author.username,
-            castHash: firstData.result.cast.hash,
-            castText: firstQueuedCastString,
-            castChannelKey: channelKey,
-            castEmbeds: firstQueuedCastEmbeds,
-            castParent:
-              typeof parentCastHash !== 'undefined'
-                ? { type: 'cast' as const, hash: parentCastHash }
-                : undefined,
-            publishedReplies,
-          };
+            return {
+              castAuthorUsername:
+                resume?.rootCastAuthorUsername ??
+                firstData?.result.cast.author.username,
+              castHash: rootCastHash,
+              castText: resume?.rootCastText ?? firstQueuedCastString,
+              castChannelKey: channelKey,
+              castEmbeds: resume?.rootCastEmbeds ?? firstQueuedCastEmbeds,
+              castParent:
+                typeof threadParentCastHash !== 'undefined'
+                  ? { type: 'cast' as const, hash: threadParentCastHash }
+                  : undefined,
+              publishedReplies,
+            };
+          }
         }
       } catch (error) {
         trackError(JSON.stringify(error));
 
-        markCastAsErrored({ queueId, error });
+        const sentThisRun = postedCasts.length;
 
-        await deletePostedCasts({ postedCasts });
+        if (sentThisRun > 0) {
+          // A thread that failed partway. Nothing already public is deleted:
+          // a delete is visible to the network, cannot un-notify the parent's
+          // author, and a failed delete turns the retry into duplicates. What
+          // is left stays queued, replying to the last cast that went out, and
+          // the queue record remembers where the thread began so "Try again"
+          // continues it instead of forking from the original parent.
+          const leftCasts = queuedCasts.slice(sentThisRun);
+          const lastSentCastHash = postedCasts[sentThisRun - 1].hash;
+
+          payload.params.casts = leftCasts;
+          payload.params.parentCastHash = lastSentCastHash;
+          // Credited when the first post went out; a retry posts the rest only.
+          payload.params.quoteReactions = [];
+          payload.params.resume = {
+            rootCastHash: resume?.rootCastHash ?? postedCasts[0].hash,
+            rootCastAuthorUsername:
+              resume?.rootCastAuthorUsername ??
+              firstData?.result.cast.author.username,
+            rootCastText: resume?.rootCastText ?? firstQueuedCastString,
+            rootCastEmbeds: resume?.rootCastEmbeds ?? firstQueuedCastEmbeds,
+            rootParentCastHash: threadParentCastHash,
+            postedCount: postedBefore + sentThisRun,
+            totalCount: threadLength,
+          };
+
+          // The recovery draft follows what is left, so reopening it cannot
+          // repost what is already public.
+          autoSavedDraftId =
+            (await storeRecoveryDraft({
+              draftId: autoSavedDraftId ?? previousAutoSavedDraftId,
+              casts: leftCasts,
+              replyParentCastHash: lastSentCastHash,
+            })) ?? autoSavedDraftId;
+
+          // The draft this publish was opened from still holds the whole
+          // thread; once part of it is public, reopening that draft and sending
+          // it would post the rest of the thread twice.
+          if (
+            typeof activeDraftId !== 'undefined' &&
+            activeDraftId !== autoSavedDraftId
+          ) {
+            try {
+              await discardDraftCast({
+                draftId: activeDraftId,
+                castChannelKey: undefined,
+              });
+            } catch (discardError) {
+              trackError(discardError);
+            }
+          }
+
+          // The replies that landed are public, and the queue is about to leave
+          // its publishing state, so reconcile them into the thread now.
+          for (const publishedReply of publishedReplies) {
+            optimisticallyAddNewCastToThread(publishedReply);
+          }
+
+          // The thread's first post is out, so the reply and quote it carried
+          // are true even though the rest did not land. Credited here, once:
+          // the retry that finishes the thread does not credit them again.
+          if (typeof resume === 'undefined') {
+            creditThreadStartReactions();
+          }
+
+          // The on-device copy holds the whole thread too: restoring it would
+          // repost what is already public. The server recovery draft above is
+          // what keeps the rest.
+          await setLocalDraft(undefined, localDraftKey);
+        }
+
+        markCastAsErrored({
+          queueId,
+          error,
+          message:
+            sentThisRun > 0
+              ? getPartialThreadMessage({
+                  posted: postedBefore + sentThisRun,
+                  total: threadLength,
+                })
+              : undefined,
+        });
       }
     },
     [
       createCast,
       currentUserFid,
-      deletePostedCasts,
       discardDraftCast,
       getCachedOpenGraphMetadataSnapshot,
       markCastAsErrored,
+      optimisticallyAddNewCastToThread,
       optimisticMediaEmbedsState,
       regularCastByteLimit,
       state,

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Image, View } from 'react-native';
 
+import { ButtonV2 } from '~/components/ButtonV2';
 import { Text2 } from '~/components/Text';
 import { useTheme } from '~/contexts/ThemeProvider';
 
@@ -9,8 +10,15 @@ import emptyLight from './emptyDirectCastsLight.png';
 
 export function EmptyDirectCastsInbox({
   text = 'No direct casts',
+  onStartConversation,
 }: {
   text?: string;
+  /**
+   * Omitted where starting a conversation makes no sense (a search that found
+   * nothing), so the same empty state can offer the one thing a person with an
+   * empty inbox wants.
+   */
+  onStartConversation?: () => void;
 }) {
   const t = useTheme();
 
@@ -24,6 +32,15 @@ export function EmptyDirectCastsInbox({
         />
       </View>
       <Text2>{text}</Text2>
+      {typeof onStartConversation !== 'undefined' && (
+        <ButtonV2
+          title="New message"
+          onPress={onStartConversation}
+          variant="primary"
+          margin={{ marginTop: 16 }}
+          testID="empty-inbox-new-message"
+        />
+      )}
     </View>
   );
 }
