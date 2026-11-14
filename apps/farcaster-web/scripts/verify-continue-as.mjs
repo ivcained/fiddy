@@ -31,7 +31,16 @@
  *       primary action), with no host card anywhere;
  *     - /feed is the anchored public window, with no continue-as surface.
  *
+ * BOTH DEV SERVERS NEED `VITE_SNAPCHAIN_DEBUG=true`: the request log the
+ * "no signer was minted / nothing was written" checks read is the adapter's own,
+ * and a build without the flag has no log to read. The script fails loudly on an
+ * absent log rather than passing those checks on nothing.
+ *
  * Run:
+ *   VITE_SNAPCHAIN_DEBUG=true VITE_SNAPCHAIN_HTTP_URL=... \
+ *     npx vite --config scripts/probe-continue-as.vite.config.mjs --port 5234
+ *   VITE_SNAPCHAIN_DEBUG=true VITE_SNAPCHAIN_HTTP_URL=... \
+ *     npx vite --config scripts/probe.vite.config.mjs --port 5233
  *   CONTINUE_AS_HOST_SERVER=https://localhost:5234 \
  *   CONTINUE_AS_PLAIN_SERVER=https://localhost:5233 \
  *   node apps/farcaster-web/scripts/verify-continue-as.mjs
@@ -322,6 +331,13 @@ const runInHost = async (browser, width) => {
       path: entry.path,
       status: entry.status,
     })),
+  );
+  // An absent log would make every check below pass on nothing, which is the
+  // shape of a green run that proves nothing. Name the cause instead.
+  check(
+    reads.length > 0,
+    'the adapter kept its request log (both dev servers need VITE_SNAPCHAIN_DEBUG=true)',
+    `${reads.length} entries`,
   );
   const hostFeedRead = reads.find((entry) =>
     entry.path.endsWith('/v2/feed-items'),
