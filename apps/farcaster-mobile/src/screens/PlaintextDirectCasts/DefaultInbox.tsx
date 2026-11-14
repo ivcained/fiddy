@@ -1,5 +1,6 @@
 import { useIsFocused } from '@react-navigation/native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
+import { AnalyticsEvent } from 'farcaster-analytics';
 import {
   ApiDirectCastConversationFilter,
   ApiDirectCastInboxConversationInfoV3,
@@ -16,7 +17,9 @@ import { ViewToken } from 'react-native';
 import { FullScreenLoadingIndicator } from '~/components/FullScreenLoadingIndicator';
 import { NewVersionAvailableDirectCastsIndicator } from '~/components/NewVersionAvailableDirectCastsIndicator';
 import { feedOnEndReachedThreshold } from '~/constants/FlatList';
+import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useDirectCasts } from '~/contexts/DirectCastsProvider';
+import { usePush } from '~/hooks/navigation/usePush';
 import { useCommonFlatListExtraData } from '~/hooks/useCommonFlatListExtraData';
 import { useHaptics } from '~/hooks/useHaptics';
 import { STANDARD_FLASHLIST_PERF_PROPS } from '~/utils/FlashListPerfUtils';
@@ -32,6 +35,8 @@ import { PlaintextDirectCastConversationListItem } from './PlaintextDirectCastCo
 
 const DefaultInbox: React.FC = React.memo(() => {
   const { triggerImpactAsync } = useHaptics();
+  const { trackEvent } = useAnalytics();
+  const push = usePush();
 
   const {
     currentUserFid,
@@ -67,6 +72,13 @@ const DefaultInbox: React.FC = React.memo(() => {
   );
 
   const prefetchConversation = usePrefetchDirectCastConversation();
+  // Same route the inbox's floating compose button opens, so a person with no
+  // conversations is not left staring at an empty list with nothing to press.
+  const startConversation = useCallback(() => {
+    triggerImpactAsync();
+    trackEvent(AnalyticsEvent.ClickCreateDirectCast, {});
+    push('PlaintextDirectCastsCreateConversation', {});
+  }, [push, trackEvent, triggerImpactAsync]);
   const prefetchMessages = usePrefetchDirectCastConversationMessages();
   const prefetchRecentMessages =
     usePrefetchDirectCastConversationRecentMessages();
@@ -168,9 +180,12 @@ const DefaultInbox: React.FC = React.memo(() => {
     return isPending && uniqueConversations.length === 0 ? (
       <FullScreenLoadingIndicator debugName="DefaultInbox" />
     ) : !isPending ? (
-      <EmptyDirectCastsInbox text={emptyMessage} />
+      <EmptyDirectCastsInbox
+        text={emptyMessage}
+        onStartConversation={startConversation}
+      />
     ) : undefined;
-  }, [emptyMessage, isPending, uniqueConversations.length]);
+  }, [emptyMessage, isPending, startConversation, uniqueConversations.length]);
 
   return (
     <FlashList
