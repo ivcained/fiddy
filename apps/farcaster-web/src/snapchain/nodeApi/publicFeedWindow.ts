@@ -173,6 +173,52 @@ export const windowFromFeedType = (
 export const isPublicFeedKey = (feedKey: string | undefined): boolean =>
   feedKey === PUBLIC_FEED_KEY;
 
+/**
+ * The OTHER public window: one account's Following feed, keyed by its FID.
+ *
+ * WHY IT IS THE SAME KIND OF KEY
+ * Inside a Farcaster client the host has already said who is looking, and when
+ * its sign-in is refused the person should still be able to read (`~/lib/miniAppHost`
+ * says why). That read is not anyone's session either: it is somebody's follow
+ * graph read out of public protocol messages, exactly like the anchored window
+ * above, so it travels the same seam — the client's own `/v2/feed-items`
+ * request, answered by the node adapter through whichever server the provider
+ * chain has live — and needs no new reader, key or client.
+ *
+ * `as:<fid>`, never `as:<handle>`: the host's word arrives as a number, and a
+ * handle would have to be resolved before it could be trusted to mean anyone.
+ */
+export const HOST_FEED_KEY_PREFIX = 'as:';
+
+/** The feed key that asks for one account's Following feed. */
+export const hostFeedKey = (fid: number): string =>
+  `${HOST_FEED_KEY_PREFIX}${fid}`;
+
+/**
+ * The FID a host feed key names, or null.
+ *
+ * Strict on purpose, and the same rule as the host identity itself: a positive
+ * safe integer or nothing. A key is a URL parameter someone can type, and
+ * `as:1.5` / `as:0` / `as:-3` are not accounts.
+ */
+export const hostFeedFid = (feedKey: string | undefined): number | null =>
+  hostFidOf(
+    feedKey?.startsWith(HOST_FEED_KEY_PREFIX)
+      ? feedKey.slice(HOST_FEED_KEY_PREFIX.length)
+      : null,
+  );
+
+/** A FID someone typed into a URL (`?as=3`), or null when it is not one. */
+export const hostFidOf = (raw: string | null | undefined): number | null => {
+  if (typeof raw !== 'string' || !/^\d{1,15}$/.test(raw)) {
+    return null;
+  }
+
+  const fid = Number(raw);
+
+  return Number.isSafeInteger(fid) && fid > 0 ? fid : null;
+};
+
 /** A cast that can stand on its own in the main public feed. */
 export const isTopLevelWindowMessage = (message: NodeMessage): boolean =>
   message.castAdd !== undefined &&

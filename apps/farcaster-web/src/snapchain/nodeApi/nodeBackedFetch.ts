@@ -61,7 +61,11 @@ import {
   type WriteEvidence,
   writeIntentFor,
 } from './nodeWrites';
-import { isPublicFeedKey, windowFromFeedType } from './publicFeedWindow';
+import {
+  hostFeedFid,
+  isPublicFeedKey,
+  windowFromFeedType,
+} from './publicFeedWindow';
 import {
   castAuthorOf,
   type CastCountsSink,
@@ -932,6 +936,23 @@ export const createNodeBackedFetch = ({
           // follow graph: it is anchored on named public accounts and needs no
           // session at all (`reads.ts`, `readPublicFeed`). Everything else is
           // the viewer's own feed and does need one.
+          // ...and the other public window: ONE account's Following feed,
+          // asked for as `as:<fid>` (see `readFollowingFeedFor` for why the
+          // host's word may open a feed but never a session).
+          const hostFid = hostFeedFid(requestBody.feedKey);
+          if (hostFid !== null) {
+            return jsonResponse({
+              result: await reader.readFollowingFeedFor({
+                fid: hostFid,
+                ...(requestBody.olderThan !== undefined
+                  ? { olderThan: requestBody.olderThan }
+                  : {}),
+                ...(requestBody.limit !== undefined
+                  ? { limit: requestBody.limit }
+                  : {}),
+              }),
+            });
+          }
           if (isPublicFeedKey(requestBody.feedKey)) {
             const window = windowFromFeedType(requestBody.feedType);
             return jsonResponse({

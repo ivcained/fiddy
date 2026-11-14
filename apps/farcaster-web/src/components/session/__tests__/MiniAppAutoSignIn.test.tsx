@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MiniAppAutoSignIn } from '~/components/session/MiniAppAutoSignIn';
 import { installFakeStorage } from '~/lib/__tests__/fakeStorage';
+import { continueAsHref } from '~/lib/miniAppHost';
 
 const { signIn, trackEvent, getItem, setItem, loadMiniAppHostSdk, hostFns } =
   vi.hoisted(() => ({
@@ -117,16 +124,49 @@ describe('MiniAppAutoSignIn', () => {
   it('keeps the sign-in door open and says why when the host refuses', async () => {
     hostFns.signInInsideMiniApp.mockResolvedValue({
       status: 'refused',
-      reason: 'that sign-in was not approved in Farcaster',
+      reason: 'that sign-in was not approved in Farcaster, so nothing was in',
+      host: null,
     });
 
     render(<MiniAppAutoSignIn />);
 
-    const notice = await screen.findByText(
-      /that sign-in was not approved in Farcaster/,
+    // The card speaks to the person, not to a log: the refusal is one plain
+    // sentence, and the reason string is not printed at them.
+    const notice = await screen.findByText(/won’t sign this one in/);
+
+    expect(notice.textContent).toContain('Nothing was signed in');
+    expect(screen.queryByText(/that sign-in was not approved/)).toBeNull();
+    // Nobody to continue as, so no offer and no dead-end button either.
+    expect(screen.queryByText(/Continue as/)).toBeNull();
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it('offers to continue as the account the host named, read-only', async () => {
+    hostFns.signInInsideMiniApp.mockResolvedValue({
+      status: 'refused',
+      reason: 'that sign-in was not approved in Farcaster',
+      host: { fid: 191554, username: 'ivc', displayName: 'Ivc' },
+    });
+
+    render(<MiniAppAutoSignIn />);
+
+    const offer = await screen.findByText('Continue as @ivc');
+
+    expect(screen.getByText(/You can still read as @ivc here/)).toBeTruthy();
+    // Still no session, and the offer does NOT sign anything by itself.
+    expect(signIn).not.toHaveBeenCalled();
+
+    // The account survives the rest of the tab, so the front door and a reload
+    // both know who this is without asking the host again.
+    expect(window.sessionStorage.getItem('fiddy.miniapp.host')).toContain(
+      '191554',
     );
 
-    expect(notice.textContent).toContain('nothing was signed in');
+    // Pressing it leaves for that account's Following feed, read-only. jsdom
+    // cannot navigate, so the destination is pinned through the helper the
+    // button calls.
+    expect(continueAsHref(191554)).toBe('/feed?as=191554');
+    fireEvent.click(offer);
     expect(signIn).not.toHaveBeenCalled();
   });
 

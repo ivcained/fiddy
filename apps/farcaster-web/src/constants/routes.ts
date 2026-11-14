@@ -206,7 +206,19 @@ const routes = {
   publicFeed: {
     path: '/feed',
     params: {},
-    search: {},
+    /**
+     * `as` = read ONE account's Following feed, read-only.
+     *
+     * The FID is the account a Farcaster client named when it refused to sign
+     * this person in (`~/lib/miniAppHost`), never a session: the read is public
+     * protocol data (`readFollowingFeedFor`). Typing it by hand is allowed and
+     * equally read-only.
+     */
+    search: {
+      as: undefined,
+    } as {
+      as?: string;
+    },
     family: family('explore'),
     Component: PublicFeedPage,
   },

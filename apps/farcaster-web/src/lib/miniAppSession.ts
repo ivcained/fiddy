@@ -1,10 +1,20 @@
-import type { Context } from '@farcaster/miniapp-core';
 import type {
   ApiGetOnboardingState200Response,
   AuthToken,
 } from 'farcaster-client-data';
 import { parseSiweMessage } from 'viem/siwe';
 
+import {
+  hostFromContext,
+  type MiniAppHostAccount,
+  rememberHost,
+} from '~/lib/miniAppHost';
+import {
+  announceMiniAppReady,
+  isInsideMiniAppHost,
+  type MiniAppHostSdk,
+  SIWF_FID_RESOURCE,
+} from '~/lib/miniAppHostSdk';
 import {
   buildLocalAuthToken,
   buildLocalOnboardingState,
@@ -58,14 +68,8 @@ import {
  * touches storage or the auth context — the caller does that.
  */
 
-/** How long we let a host answer "are you there?" before giving up. */
-const MINI_APP_HOST_TIMEOUT_MS = 1_000;
-
 /** How long we wait for the host's own sign-in approval. */
 const MINI_APP_SIGN_IN_TIMEOUT_MS = 120_000;
-
-/** The `farcaster://fid/<n>` resource a SIWF message carries. */
-const SIWF_FID_RESOURCE = /^farcaster:\/\/fid\/(\d+)$/;
 
 /** Raised when a host accepted a call and never answered it. */
 class MiniAppTimeoutError extends Error {
@@ -75,26 +79,22 @@ class MiniAppTimeoutError extends Error {
   }
 }
 
-/** The slice of `@farcaster/miniapp-sdk` this module drives. */
-type MiniAppHostSdk = {
-  isInMiniApp: (timeoutMs?: number) => Promise<boolean>;
-  context: Promise<Context.MiniAppContext>;
-  actions: {
-    ready: () => Promise<void>;
-    signIn: (options: {
-      nonce: string;
-    }) => Promise<{ message: string; signature: `0x${string}` }>;
-    openUrl?: (url: string) => Promise<void>;
-  };
-  back?: {
-    enableWebNavigation: () => Promise<void>;
-  };
-};
-
 type MiniAppSignInOutcome =
   | { status: 'not-a-host' }
   /** The host answered, but would not or could not prove who this is. */
-  | { status: 'refused'; reason: string }
+  | {
+      status: 'refused';
+      /** What went wrong, in a sentence a screen can print. */
+      reason: string;
+      /**
+       * Whom the host named, when it named anyone before refusing.
+       *
+       * The host's word is UNVERIFIED, so this is not a session: it is only
+       * enough to offer that account's public Following feed read-only
+       * (`~/lib/miniAppHost`). Null when the host never said.
+       */
+      host: MiniAppHostAccount | null;
+    }
   /** Our side broke — the SDK threw something the host did not name. */
   | { status: 'failed'; reason: string }
   | {
@@ -110,79 +110,6 @@ type MiniAppSignInOutcome =
       /** True when the host accepted `sdk.actions.ready()`. */
       readyAnnounced: boolean;
     };
-
-/**
- * The SDK, loaded on demand.
- *
- * It is imported lazily rather than at module load because every ordinary web
- * visitor pays for a bundle they cannot use: the SDK only does anything inside
- * a host's iframe or webview. A missing or broken SDK is `undefined`, not a
- * crash — the client's own sign-in must keep working whatever the host does.
- */
-const loadMiniAppHostSdk = async (): Promise<MiniAppHostSdk | undefined> => {
-  try {
-    const sdk = (await import('@farcaster/miniapp-sdk')).default;
-
-    if (!sdk?.isInMiniApp || !sdk.actions) {
-      return undefined;
-    }
-
-    return sdk as unknown as MiniAppHostSdk;
-  } catch (error) {
-    return undefined;
-  }
-};
-
-/**
- * Are we inside a Farcaster client?
- *
- * The SDK answers this itself: no RN webview and `window === window.parent`
- * short-circuits to false, and otherwise it waits for the host to hand over its
- * context within the timeout. A plain page embedded in a random iframe gets
- * `false`, which is what keeps this from firing on a marketing page.
- */
-const isInsideMiniAppHost = async ({
-  sdk,
-  timeoutMs = MINI_APP_HOST_TIMEOUT_MS,
-}: {
-  sdk: MiniAppHostSdk;
-  timeoutMs?: number;
-}): Promise<boolean> => {
-  try {
-    const inside = await sdk.isInMiniApp(timeoutMs);
-    if (inside) {
-      // Host-only code stays out of the ordinary browser's bundle. A refused
-      // back-button setup is recorded by the helper, never fatal to the app.
-      const { enableMiniAppHostNavigation } =
-        await import('~/lib/miniAppHostNavigation');
-      await enableMiniAppHostNavigation({ sdk });
-    }
-    return inside;
-  } catch (error) {
-    return false;
-  }
-};
-
-/**
- * Tell the host we have something to show.
- *
- * Separate from the sign-in below because a person who is ALREADY signed in
- * still needs this: a Mini App that never calls `ready()` keeps the host's
- * loading splash up over a working client. Returns whether the host took it —
- * callers record the answer rather than assume it.
- */
-const announceMiniAppReady = async ({
-  sdk,
-}: {
-  sdk: MiniAppHostSdk;
-}): Promise<boolean> => {
-  try {
-    await sdk.actions.ready();
-    return true;
-  } catch (error) {
-    return false;
-  }
-};
 
 /** A nonce only this page knows: 32 random bytes, hex. */
 const createMiniAppNonce = (): string => {
@@ -246,18 +173,36 @@ const signInInsideMiniApp = async ({
   // below is the thing that has to hold up.
   const readyAnnounced = await announceMiniAppReady({ sdk });
 
-  let context: Context.MiniAppContext;
+  let context: unknown;
 
   try {
     context = await sdk.context;
   } catch (error) {
-    return { status: 'refused', reason: 'the host did not say who you are' };
+    return {
+      status: 'refused',
+      reason: 'the host did not say who you are',
+      host: null,
+    };
   }
 
-  const contextFid = context?.user?.fid;
+  // Whom the host named, kept from the promise already awaited above rather
+  // than asked for again: a refusal is the one outcome that has to leave the
+  // person something to do, and "read as @you" only takes a name. Unverified,
+  // so it buys public reads and nothing else (`~/lib/miniAppHost`).
+  const host = hostFromContext(context);
 
-  if (!contextFid) {
-    return { status: 'refused', reason: 'the host did not say who you are' };
+  if (host) {
+    rememberHost(host);
+  }
+
+  const contextFid = host?.fid;
+
+  if (!host || !contextFid) {
+    return {
+      status: 'refused',
+      reason: 'the host did not say who you are',
+      host: null,
+    };
   }
 
   const nonce = createMiniAppNonce();
@@ -283,6 +228,7 @@ const signInInsideMiniApp = async ({
       return {
         status: 'refused',
         reason: 'the host did not answer the sign-in request in time',
+        host,
       };
     }
 
@@ -290,6 +236,7 @@ const signInInsideMiniApp = async ({
       status: 'refused',
       reason:
         'that sign-in was not approved in Farcaster, so nothing was signed in',
+      host,
     };
   } finally {
     if (timer) {
@@ -301,6 +248,7 @@ const signInInsideMiniApp = async ({
     return {
       status: 'refused',
       reason: 'the host approved nothing it could prove',
+      host,
     };
   }
 
@@ -319,6 +267,7 @@ const signInInsideMiniApp = async ({
     return {
       status: 'refused',
       reason: verification.reason ?? 'the signature did not hold up',
+      host,
     };
   }
 
@@ -328,23 +277,24 @@ const signInInsideMiniApp = async ({
     return {
       status: 'refused',
       reason: `the signature names fid ${signedFid} but the host says fid ${contextFid}`,
+      host,
     };
   }
 
   const fid = signedFid ?? contextFid;
   const onboardingState = buildLocalOnboardingState({
     fid,
-    username: context.user.username,
-    displayName: context.user.displayName,
-    pfpUrl: context.user.pfpUrl,
+    username: host.username,
+    displayName: host.displayName,
+    pfpUrl: host.pfpUrl,
   });
 
   return {
     status: 'signed-in',
     fid,
-    username: context.user.username,
-    displayName: context.user.displayName,
-    pfpUrl: context.user.pfpUrl,
+    username: host.username,
+    displayName: host.displayName,
+    pfpUrl: host.pfpUrl,
     authToken: buildLocalAuthToken({ fid, now }),
     onboardingState,
     fidBoundToSignature: signedFid !== undefined,
@@ -352,13 +302,21 @@ const signInInsideMiniApp = async ({
   };
 };
 
+/**
+ * The SDK seam moved to `~/lib/miniAppHostSdk` so the identity read can use it
+ * without importing the sign-in path. Re-exported here because this module is
+ * where every existing caller looks for it.
+ */
 export {
   announceMiniAppReady,
-  createMiniAppNonce,
-  fidFromSignedMessage,
   isInsideMiniAppHost,
   loadMiniAppHostSdk,
   MINI_APP_HOST_TIMEOUT_MS,
+} from '~/lib/miniAppHostSdk';
+
+export {
+  createMiniAppNonce,
+  fidFromSignedMessage,
   MINI_APP_SIGN_IN_TIMEOUT_MS,
   signInInsideMiniApp,
 };

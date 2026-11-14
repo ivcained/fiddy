@@ -274,6 +274,44 @@ describe('signInInsideMiniApp', () => {
     );
   });
 
+  it('keeps whom the host named when it refuses, for the read-only path', async () => {
+    // The middle state (quilcast #660, MIT): a refusal that has a NAME in hand
+    // is not a dead end — the person can read their own Following feed, so the
+    // outcome carries the account the host named rather than dropping it.
+    const { sdk } = host({
+      username: 'dwr',
+      displayName: 'Dan',
+      pfpUrl: 'https://example.com/dwr.png',
+      signIn: async () => {
+        throw new Error('SignIn.RejectedByUser');
+      },
+    });
+
+    const outcome = await signInInsideMiniApp({ sdk, domain: DOMAIN });
+
+    expect(outcome.status).toBe('refused');
+    expect(outcome.status === 'refused' && outcome.host).toEqual({
+      fid: CONTEXT_FID,
+      username: 'dwr',
+      displayName: 'Dan',
+      pfpUrl: 'https://example.com/dwr.png',
+    });
+  });
+
+  it('carries no name when the refusal happened before the host said one', async () => {
+    const { sdk } = host({ inHost: true });
+    (sdk as { context: Promise<unknown> }).context = Promise.reject(
+      new Error('no context'),
+    );
+    // The read is reached a tick later; give the rejection an owner.
+    (sdk as { context: Promise<unknown> }).context.catch(() => undefined);
+
+    const outcome = await signInInsideMiniApp({ sdk, domain: DOMAIN });
+
+    expect(outcome.status).toBe('refused');
+    expect(outcome.status === 'refused' && outcome.host).toBeNull();
+  });
+
   it('gives up on a host that never answers, rather than waiting forever', async () => {
     const { sdk } = host({
       signIn: () => new Promise<never>(() => undefined),

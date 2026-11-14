@@ -281,6 +281,15 @@ echo "  media    ok"
 echo "  node     ok ($NODE_URL)"
 echo "  network  ok (${NETWORK:-not recorded} — the client's Network card says it)"
 echo "  together ok (route literal; no laptop fallback in the chunks, api = '${TOGETHER_URL}' same origin)"
+# The Mini App SDK is ~650 kB that only does anything inside a Farcaster client.
+# It is imported inside a function so an ordinary visitor never downloads it, and
+# a single eager `import` of it would look like every other line in a diff. The
+# checker reads the source maps the build already wrote, because nothing in the
+# minified output names the package. Refuses when the SDK is in index.html's
+# upfront graph, when it is split across chunks, or when the maps are gone.
+node "$STAGE/base/apps/farcaster-web/scripts/check-miniapp-sdk-is-lazy.mjs" "$APP" || {
+  echo "REFUSING to ship: the Mini App SDK is not a lazy chunk in this build" >&2
+  exit 1; }
 # The shell the host serves runs under script-src 'self'. An inline <script> in
 # index.html (the theme bootstrap used to be one) or an inline on*= handler (the
 # font sheet used to have one) is inline script, and that CSP refuses it — in
@@ -366,7 +375,7 @@ say "5/8 upload"
 tar -czf "$STAGE/fiddy-client-$SHORT.tar.gz" -C "$STAGE/release" .
 ssh_ "install -d -m 0755 $RELEASES/$SHA"
 ssh_ "tar -xzf - -C $RELEASES/$SHA" < "$STAGE/fiddy-client-$SHORT.tar.gz"
-scp -q "$STAGE/fiddy-client-$SHORT.tar.gz" "$HOST:/var/www/fiddy.fun/" 
+scp -q "$STAGE/fiddy-client-$SHORT.tar.gz" "$HOST:/var/www/fiddy.fun/"
 
 say "6/8 disk gate on the VPS (the extracted web root, and the vhost it needs)"
 ssh_ "set -e

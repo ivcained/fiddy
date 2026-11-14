@@ -4,6 +4,9 @@ import React, {
   type ButtonHTMLAttributes,
   type PropsWithChildren,
 } from 'react';
+// The page reads `?as=` through the app's own search-param hook, which needs a
+// router around it — the real one is mounted in the shell.
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('farcaster-client-hooks', () => ({
@@ -37,6 +40,13 @@ vi.mock('~/components/page/PageTitle', () => ({
   PageTitle: ({ children }: PropsWithChildren) => <h1>{children}</h1>,
 }));
 vi.mock('~/hooks/data/useIsSignedIn', () => ({ useIsSignedIn: () => false }));
+// Outside a Farcaster client: no host names anybody, which is the case these
+// copy checks are about. (The continue-as surface has its own probe.)
+vi.mock('~/lib/miniAppHost', () => ({
+  hostAt: (host: { username?: string }) => `@${host.username ?? ''}`,
+  retryHostSignIn: vi.fn(),
+  useHost: () => null,
+}));
 vi.mock('~/hooks/data/usePublicWindow', () => ({ usePublicWindow: vi.fn() }));
 
 import {
@@ -46,6 +56,13 @@ import {
 // The unit test measures the surface itself, not the production lazy wrapper.
 // eslint-disable-next-line no-restricted-imports
 import { PublicFeedPage } from '~/pages/publicBrowse/PublicBrowsePage';
+
+const renderPage = () =>
+  render(
+    <MemoryRouter initialEntries={['/feed']}>
+      <PublicFeedPage />
+    </MemoryRouter>,
+  );
 
 const windowState = (overrides: Partial<PublicWindow> = {}): PublicWindow => ({
   kind: 'recent',
@@ -78,7 +95,7 @@ describe('public browse voice', () => {
     vi.mocked(usePublicWindow).mockReturnValue(
       windowState({ isLoading: true }),
     );
-    render(<PublicFeedPage />);
+    renderPage();
 
     expect(screen.getByRole('status').textContent).toContain(
       'Fiddy is looking for fresh casts…',
@@ -86,7 +103,7 @@ describe('public browse voice', () => {
   });
 
   it('gives a signed-out reader a friendly way into the conversation', () => {
-    render(<PublicFeedPage />);
+    renderPage();
 
     expect(
       screen.getByText('Take a look around. No account needed.'),
@@ -100,7 +117,7 @@ describe('public browse voice', () => {
     vi.mocked(usePublicWindow).mockReturnValue(
       windowState({ isEmpty: true, retry }),
     );
-    render(<PublicFeedPage />);
+    renderPage();
 
     expect(
       screen.getByRole('heading', {
