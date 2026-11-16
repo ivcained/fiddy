@@ -47,6 +47,7 @@ import { ApiCastWithContext } from '~/types';
 import { useHorizontalDragScroll } from '~/utils/castUtils';
 
 import { ShareCast } from './actions/ShareCast';
+import { Train } from './actions/Train';
 
 type UnfocusedCastProps = Omit<CastProps, 'isFocused'> & {
   CastTopHatForNotificationsComponent?: ReactNode;
@@ -515,10 +516,11 @@ function UnfocusedCastActions({
 
   if (!isSignedIn) {
     return (
-      <div className="grid w-full grid-cols-4 items-center">
+      <div className="grid w-full grid-cols-5 items-center">
         <Replies cast={cast} isFocused={context.isFocused} />
         <Recasts cast={cast} isFocused={context.isFocused} />
         <Reactions cast={cast} isFocused={context.isFocused} />
+        <Train cast={cast} isFocused={context.isFocused} />
         <ShareCast cast={cast} isFocused={context.isFocused} />
       </div>
     );
@@ -538,6 +540,11 @@ function UnfocusedCastActions({
           includeReason={context.includeReason?.type}
         />
         <Reactions
+          cast={cast}
+          isFocused={context.isFocused}
+          includeReason={context.includeReason?.type}
+        />
+        <Train
           cast={cast}
           isFocused={context.isFocused}
           includeReason={context.includeReason?.type}
