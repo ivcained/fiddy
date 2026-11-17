@@ -34,6 +34,7 @@ import {
   type ManagedWrite,
   NO_APP_KEY,
   UNKNOWN_CAST_AUTHOR,
+  UNKNOWN_FID_MESSAGE,
   type WriteApprovalRequest,
   writeIntentFor,
 } from '~/snapchain/nodeApi/nodeWrites';
@@ -62,6 +63,12 @@ interface FakeNodeState {
   accepts: boolean;
   /** Whether an accepted message becomes visible in the state. */
   merges: boolean;
+  /**
+   * What a refused message was refused for, verbatim — a test that wants a
+   * refusal other than the measured "invalid signer" (e.g. "unknown fid")
+   * sets this.
+   */
+  refusalDetail?: string;
 }
 
 const messageJson = ({
@@ -143,6 +150,7 @@ const createFakeNode = (state: Partial<FakeNodeState> = {}) => {
           {
             error: 'Failed to submit message',
             error_detail:
+              node.refusalDetail ??
               'status: InvalidArgument, message: "bad_request.validation_failure/invalid signer"',
           },
           400,
@@ -446,6 +454,36 @@ describe('a like, through the node-backed writer', () => {
     expect(message).toContain('invalid signer');
     expect(message).toContain('not one this account has authorised');
     expect(handle.log.at(-1)?.write).toMatchObject({ accepted: false });
+  });
+
+  it('explains “unknown fid” instead of relaying the node’s raw words', async () => {
+    // The refusal Quilcast measured on its own node, and any provider's node
+    // can give Fiddy: a 400 whose detail names an FID the node has no
+    // registration for at all. The raw string becomes the sentence that says
+    // what it means; the node's own words stay on the evidence log for support.
+    const { handle, submitted } = harness({
+      accepts: false,
+      refusalDetail:
+        'status: InvalidArgument, message: "bad_request.validation_failure/unknown fid", details: []',
+    });
+
+    const response = await handle.fetch(
+      'https://farcaster.xyz/~api/v2/cast-likes',
+      { method: 'PUT', body: JSON.stringify({ castHash: TARGET.hash }) },
+    );
+
+    expect(submitted.length).toBe(1);
+    expect(response.status).toBe(501);
+    const message = await messageOf(response);
+    expect(message).toBe(UNKNOWN_FID_MESSAGE);
+    // The raw node string is not what the reader gets.
+    expect(message).not.toContain('unknown fid');
+    expect(message).not.toContain('validation_failure');
+    // ...but it is not lost: the evidence log carries it for support.
+    expect(handle.log.at(-1)?.write).toMatchObject({
+      accepted: false,
+      refusal: expect.stringContaining('unknown fid'),
+    });
   });
 });
 

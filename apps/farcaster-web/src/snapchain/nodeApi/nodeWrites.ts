@@ -415,6 +415,22 @@ export const UNKNOWN_CAST_AUTHOR =
   'A node addresses a cast by its author and its hash, and this client has not read who wrote this one. Open the cast from your feed or a profile first, then try again.';
 
 /**
+ * The sentence for a write the node refused because the account is not one it
+ * knows at all — its registration is not in the node's state, for causes that
+ * differ per provider (an account registered on a chain that node does not
+ * read, a registration that has not reached it yet, an account that was
+ * deleted). The node's own refusal (`bad_request.validation_failure/unknown
+ * fid`) says nothing a reader can act on, so it is swapped for this sentence;
+ * the raw string is kept in the evidence log (`refusal`) for support.
+ */
+export const UNKNOWN_FID_MESSAGE =
+  'This account is unknown to the Farcaster node this device writes through, so the node refused this write — it only accepts messages from accounts whose registration it has seen. Sign in with an account the network has known for a while, or try again later if this account was just created.';
+
+/** True when a provider's refusal is the "unknown fid" one. */
+const isUnknownFidRefusal = (message: string): boolean =>
+  /unknown fid/i.test(message);
+
+/**
  * What the person was doing, in their own words — from the intent the writer
  * already classified.
  *
@@ -695,7 +711,12 @@ export class NodeBackedWrites {
         landed: null,
         refusal: answer.message,
       });
-      return errorResponse(answer.status, answer.message);
+      return errorResponse(
+        answer.status,
+        isUnknownFidRefusal(answer.message)
+          ? UNKNOWN_FID_MESSAGE
+          : answer.message,
+      );
     }
 
     const readbackPath = '/v1/reactionsByCast';
@@ -768,7 +789,12 @@ export class NodeBackedWrites {
         landed: null,
         refusal: answer.message,
       });
-      return errorResponse(answer.status, answer.message);
+      return errorResponse(
+        answer.status,
+        isUnknownFidRefusal(answer.message)
+          ? UNKNOWN_FID_MESSAGE
+          : answer.message,
+      );
     }
 
     const readbackPath = '/v1/linkById';
@@ -852,7 +878,12 @@ export class NodeBackedWrites {
         landed: null,
         refusal: answer.message,
       });
-      return errorResponse(answer.status, answer.message);
+      return errorResponse(
+        answer.status,
+        isUnknownFidRefusal(answer.message)
+          ? UNKNOWN_FID_MESSAGE
+          : answer.message,
+      );
     }
 
     if (answer.hash === null) {
@@ -1246,14 +1277,21 @@ export class NodeBackedWrites {
       if (isNodeApiError(error)) {
         // A refused message is this client's problem, not the server's: the
         // node answered, and what it said is what the reader gets, followed by
-        // what it usually means when it is a signer problem.
-        const meaning = /invalid signer|signer/i.test(`${error.message}`)
+        // what it usually means when it is a signer problem. The one exception
+        // is "unknown fid": the raw string says nothing a reader can act on, so
+        // it is swapped for the sentence that says what it means — the node's
+        // own words still ride in the evidence log (`refusal`).
+        const refused = `${error.message}`;
+        if (isUnknownFidRefusal(refused)) {
+          return { response: errorResponse(501, UNKNOWN_FID_MESSAGE) };
+        }
+        const meaning = /invalid signer|signer/i.test(refused)
           ? ' — the key this device signs with is not one this account has authorised (issue one in Advanced → your setup).'
           : '';
         return {
           response: errorResponse(
             501,
-            `${this.nodeLabel} would not accept this write: ${error.message}${meaning}`,
+            `${this.nodeLabel} would not accept this write: ${refused}${meaning}`,
           ),
         };
       }
