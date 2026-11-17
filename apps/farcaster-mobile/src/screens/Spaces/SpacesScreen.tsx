@@ -34,7 +34,7 @@ import { Text } from '~/components/Text';
 import { useSpace } from '~/contexts/SpaceContext';
 import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import { usePush } from '~/hooks/navigation/usePush';
-import { CreateSpaceBottomSheet } from '~/screens/Spaces/CreateSpaceBottomSheet';
+import { AudioRoomsUnavailableSheet } from '~/screens/Spaces/AudioRoomsUnavailableSheet';
 import { CommonStackParamList } from '~/types/navigation';
 import { trackMobileAudioSpaceEvent } from '~/utils/AudioSpaceInstrumentation';
 import { prioritizeFollowedHostsAndFilterBlockedHosts } from '~/utils/audioSpaceRoomOrdering';
@@ -124,8 +124,8 @@ function SpacesScreenInner() {
   const isLoading = tab === 'Live now' ? isLoadingLive : isLoadingScheduled;
   const emptyMsg =
     tab === 'Live now'
-      ? 'No live Spaces right now. Start one or check back later.'
-      : 'No upcoming Spaces scheduled. Check back later.';
+      ? 'No live audio rooms right now.'
+      : 'No upcoming audio rooms scheduled. Check back later.';
 
   return (
     <View style={[styles.container, { backgroundColor: c.bg }]}>
@@ -150,7 +150,9 @@ function SpacesScreenInner() {
         ))}
       </View>
 
-      {/* Start CTA */}
+      {/* Start CTA: opens the honest audio-rooms sheet. Nothing here fires a
+          create request (the fork's POST /v1/audio-rooms is a 501 a node-backed
+          client cannot carry), so there is no schedule variant to pretend. */}
       <View style={[styles.startRow, { borderColor: c.border }]}>
         <Pressable
           onPress={() => {
@@ -163,7 +165,7 @@ function SpacesScreenInner() {
                 entrySource: 'spaces_list',
               },
               properties: {
-                source: tab === 'Upcoming' ? 'schedule_cta' : 'start_cta',
+                source: 'start_cta',
               },
               dedupeMap: telemetryDedupeRef.current,
               dedupeKey: `mobile-open-source-create-${tab}`,
@@ -174,9 +176,7 @@ function SpacesScreenInner() {
           style={[styles.startButton, { backgroundColor: c.actionPrimary }]}
         >
           <Octicons name="unmute" size={14} color="white" />
-          <Text style={styles.startButtonText}>
-            {tab === 'Upcoming' ? 'Schedule a Space' : 'Start a Space'}
-          </Text>
+          <Text style={styles.startButtonText}>Start a Space</Text>
         </Pressable>
       </View>
 
@@ -216,10 +216,9 @@ function SpacesScreenInner() {
         )}
       </ScrollView>
 
-      <CreateSpaceBottomSheet
+      <AudioRoomsUnavailableSheet
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        initialMode={tab === 'Upcoming' ? 'schedule' : 'now'}
       />
     </View>
   );
