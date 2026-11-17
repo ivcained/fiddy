@@ -1255,13 +1255,20 @@ function InnerMiniAppContent({
   const sdk = useMemo<Omit<MiniAppHost, 'ethProviderRequestV2' | 'addFrame'>>(
     () => ({
       context: {
-        user: {
-          fid: currentUser.fid,
-          username: currentUser.username,
-          displayName: currentUser.displayName,
-          pfpUrl: currentUser.pfp?.url,
-          location: currentUser.profile.location,
-        },
+        // A reader who is not signed in (the public shell's mini app window,
+        // card t_5dfc9e8b) hosts the app anonymous: `UserContext` is typed
+        // required by the host SDK, but on the wire `context.user` is simply
+        // absent — the same shape every client sends for an anonymous host —
+        // and apps read `context.user?.fid`. Nothing is invented here.
+        user: currentUser
+          ? {
+              fid: currentUser.fid,
+              username: currentUser.username,
+              displayName: currentUser.displayName,
+              pfpUrl: currentUser.pfp?.url,
+              location: currentUser.profile.location,
+            }
+          : (undefined as unknown as MiniAppHost['context']['user']),
         location: locationContext,
         client: {
           platformType: 'web',
@@ -1466,11 +1473,7 @@ function InnerMiniAppContent({
       analyticsContext,
       author?.fid,
       close,
-      currentUser.displayName,
-      currentUser.fid,
-      currentUser.pfp?.url,
-      currentUser.profile.location,
-      currentUser.username,
+      currentUser,
       domain,
       emit,
       frame?.viewerContext?.favorited,
