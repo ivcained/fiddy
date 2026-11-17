@@ -160,6 +160,16 @@ const check = (name, ok, detail = '') => {
   checks.push({ name, ok: Boolean(ok), detail });
 };
 
+/**
+ * Refusal sentences from every visit so far, not just the current one: the app
+ * PREFETCHES some routes' reads (the XP-rewards read fires during the Apps
+ * visit, before Referrals is opened), so a surface's own refusal sentence can
+ * land in an earlier window. The sentence names its route (getXPRewards,
+ * getBookmarkedCasts, getExploreFeed), so matching against the whole run is
+ * still matching THIS surface's read, not another's.
+ */
+const allRefusalSentences = [];
+
 /** `page.evaluate`, tolerating a surface that navigates itself mid-read. */
 const safeEvaluate = async (page, fn, arg, fallback) => {
   try {
@@ -416,10 +426,13 @@ const run = async () => {
     const traffic = providerTraffic.slice(trafficMark);
     const refusalSentences = newErrors
       .map((line) =>
-        /HandledFetchError: [A-Za-z]+ 501 - (.*) Details:/.exec(line),
+        /HandledFetchError(?:\$\w+)?: [A-Za-z]+ 501 - (.*) Details:/.exec(
+          line,
+        ),
       )
       .filter(Boolean)
       .map((found) => found[1].trim());
+    allRefusalSentences.push(...refusalSentences);
     // Overkill guard: a 501 anywhere in the console for this visit, whatever
     // shape its sentence has.
     const any501 = newErrors.filter((line) => / 501 /.test(line));
@@ -490,7 +503,11 @@ const run = async () => {
       const panelEvidence = now.panels.filter((panel) =>
         surface.refusal.test(`${panel.title} ${panel.body}`),
       );
-      const refusalEvidence = refusalSentences.filter((sentence) =>
+      // See allRefusalSentences above: the surface's own read may refuse
+      // during an EARLIER visit's window (prefetch), and a release build's
+      // minified class name is `HandledFetchError$1`, which the sentence
+      // regex tolerates.
+      const refusalEvidence = allRefusalSentences.filter((sentence) =>
         surface.refusal.test(sentence),
       );
       const errorEvidence = /error retrieving data/i.test(now.text)
