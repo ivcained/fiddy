@@ -219,6 +219,11 @@ ssh_() { ssh -o BatchMode=yes "$HOST" "$@"; }
 # sha256 prefix) so two attempts can be compared without leaking the key.
 neynar_key_value() {
   local file="" key="" value=""
+  # Prints TWO lines and nothing else: the source file's path, then the value
+  # (or nothing at all when no candidate holds a key). The caller splits them
+  # in the parent shell — a plain `$(...)` assignment would otherwise run this
+  # function in a subshell and lose NEYNAR_KEY_SOURCE (measured 2026-11-17: the
+  # release printed "from " with an empty label for exactly that reason).
   for file in "$NEYNAR_KEY_FILE" \
               "$HOME/.fiddy/neynar-api-key" \
               "$REPO/apps/farcaster-web/.env.local" \
@@ -230,25 +235,47 @@ neynar_key_value() {
       value=$(sed -n 's/^FIDDY_FARCASTER_NEYNAR_API_KEY=//p' "$file" | head -1 | tr -d '"' | tr -d "'" | tr -d ' \r')
     fi
     if [ -n "$value" ]; then
-      NEYNAR_KEY_SOURCE=$file
-      printf '%s' "$value"
+      printf '%s\n%s' "$file" "$value"
       return 0
     fi
   done
   if [ -r "$NEYNAR_SECRET_ENV" ]; then
     value=$(sed -n "s/^${NEYNAR_SECRET_NAME}=//p" "$NEYNAR_SECRET_ENV" | head -1 | tr -d '"' | tr -d "'" | tr -d ' \r')
     if [ -n "$value" ]; then
-      NEYNAR_KEY_SOURCE=$NEYNAR_SECRET_ENV
-      printf '%s' "$value"
+      printf '%s\n%s' "$NEYNAR_SECRET_ENV" "$value"
       return 0
     fi
   fi
-  NEYNAR_KEY_SOURCE=""
   printf ''
 }
-NEYNAR_KEY_SOURCE=""
-NEYNAR_KEY=$(neynar_key_value)
+NEYNAR_KEY_RESOLVED=$(neynar_key_value)
+NEYNAR_KEY_SOURCE=${NEYNAR_KEY_RESOLVED%%$'\n'*}
+NEYNAR_KEY=${NEYNAR_KEY_RESOLVED#*$'\n'}
+[ -n "$NEYNAR_KEY_RESOLVED" ] || NEYNAR_KEY=""
 neynar_fingerprint() { printf '%s' "$NEYNAR_KEY" | shasum -a 256 | cut -c1-12; }
+
+# ── the card renderer's python ──────────────────────────────────────────────
+#
+# The unfurl self-check draws its cards with render-card.py, which needs Pillow.
+# `python3` on PATH is not always the interpreter that has it: a background
+# shell can resolve homebrew's python3 while Pillow lives in /usr/bin/python3
+# (measured 2026-11-17: two release cuts refused at the unfurl gate with
+# `ModuleNotFoundError: No module named 'PIL'` for exactly this, while the same
+# self-check passed by hand from a foreground shell). Pick the first candidate
+# that can actually import PIL — $PYTHON first, then python3, then the system
+# interpreter — and export PYTHON so the self-check's spawn uses it.
+renderer_python() {
+  local cand
+  for cand in "${PYTHON:-}" python3 /usr/bin/python3; do
+    [ -n "$cand" ] || continue
+    if "$cand" -c 'import PIL.Image' >/dev/null 2>&1; then
+      printf '%s' "$cand"
+      return 0
+    fi
+  done
+  printf 'python3'
+}
+export PYTHON="$(renderer_python)"
 
 if [ "${1:-}" = "--rollback" ]; then
   PREV=$(ssh_ "readlink -f $CURRENT")
