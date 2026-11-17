@@ -58,16 +58,15 @@ const CONTENT_TIMEOUT = Number(process.env.CONTENT_TIMEOUT ?? 90000);
 const SETTLE_MS = Number(process.env.SETTLE_MS ?? 20000);
 const QUIET_MS = Number(process.env.QUIET_MS ?? 2500);
 const ONLY = process.env.ONLY ?? '';
-// Which profile the probe opens. The default is a PUBLIC profile: the reads are
-// the same ones the key carries (user/bulk and the user's casts feed through
-// Neynar), and a public profile is the shape a signed-in reader meets on every
-// profile but their own. The OWN-profile view (nav → Profile, viewer fid ==
-// profile fid) currently renders only its connected-accounts refusal panel and
-// never paints the profile header on main — a separate defect, not something
-// the key carries, tracked on its own card — so PROFILE_FID=3 is not the
-// default; pass PROFILE_FID=<your fid> to watch the own-profile view while that
-// card is open.
-const PROFILE_FID = process.env.PROFILE_FID ?? '194';
+// Which profile the probe opens. The default is the SESSION'S OWN profile (the
+// shape nav → Profile opens, viewer fid == profile fid), because it is the
+// one profile whose connected-accounts section must refuse (linked accounts
+// are Warpcast account state, not protocol messages) — and that refusal is
+// contained to its own section, so the profile header must still paint. This
+// used to default to a public profile while the own-profile view rendered only
+// its refusal panel (defect t_c64a428d); with the section contained, the own
+// profile is the stricter check. Pass PROFILE_FID=<fid> to watch another one.
+const PROFILE_FID = process.env.PROFILE_FID ?? '3';
 
 /**
  * The six surfaces, in the order the nav puts them. Each pattern is drawn from
