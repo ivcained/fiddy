@@ -2,16 +2,54 @@ import { AnalyticsEvent } from 'farcaster-analytics';
 import { ApiUser } from 'farcaster-client-data';
 import { useConnectedAccounts, useGetXAuthLink } from 'farcaster-client-hooks';
 import React from 'react';
+import { ErrorBoundary } from 'react-error-boundary';
 
 import { ExternalLink } from '~/components/links/ExternalLink';
 import { ProfileManageConnectedAccountsModal } from '~/components/profiles/ProfileManageConnectedAccountsModal';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import { useExternalNavigate } from '~/hooks/navigation/useExternalNavigate';
+import { nodeCannotAnswer } from '~/snapchain/nodeApi/nodeCannotAnswer';
 
 type ProfileConnectedAccountsSectionProps = {
   user: ApiUser;
 };
+
+/**
+ * A section that can only refuse, kept from taking the page down with it.
+ *
+ * The own-profile branch reads the viewer's linked accounts with a suspense
+ * query (`useConnectedAccounts` → GET /v2/connected-accounts), and this
+ * client's provider seam classifies that endpoint as hosted — linked accounts
+ * are Warpcast account state, not protocol messages — so the query ALWAYS
+ * answers 501, whatever key the build carries. A suspense query's thrown
+ * error is NOT held by the section's own `<Suspense>` (a suspense boundary
+ * only catches suspended promises): it unwinds to the page column's
+ * `ShellSectionErrorBoundary` ("This page"), which replaces the WHOLE profile
+ * — header, tabs, casts — with the refusal panel. MEASURED on t_c64a428d: a
+ * signed-in user's own profile rendered only that panel and the header never
+ * painted.
+ *
+ * The refusal is not retryable and this client cannot serve the section at
+ * all, so on a refusal it degrades to nothing — the same shape the section
+ * renders on any profile that holds no linked account. Any error that is NOT
+ * the adapter's refusal is rethrown, so the page boundary still handles
+ * unexpected failures loudly.
+ */
+const RefusalContained: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => (
+  <ErrorBoundary
+    fallbackRender={({ error }) => {
+      if (nodeCannotAnswer(error) === undefined) {
+        throw error;
+      }
+      return null;
+    }}
+  >
+    {children}
+  </ErrorBoundary>
+);
 
 const ProfileConnectedAccountsSection: React.FC<
   ProfileConnectedAccountsSectionProps
@@ -19,13 +57,15 @@ const ProfileConnectedAccountsSection: React.FC<
   const { fid: currentUserFid } = useCurrentUser();
 
   return (
-    <React.Suspense fallback={<div className="h-[28px]" />}>
-      {currentUserFid === user.fid ? (
-        <ConnectedAccountsSelf user={user} />
-      ) : (
-        <ConnectedAccounts user={user} />
-      )}
-    </React.Suspense>
+    <RefusalContained>
+      <React.Suspense fallback={<div className="h-[28px]" />}>
+        {currentUserFid === user.fid ? (
+          <ConnectedAccountsSelf user={user} />
+        ) : (
+          <ConnectedAccounts user={user} />
+        )}
+      </React.Suspense>
+    </RefusalContained>
   );
 };
 
