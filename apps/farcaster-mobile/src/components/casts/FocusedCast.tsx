@@ -80,14 +80,19 @@ function FocusedCast(props: FocusedCastProps) {
     hash,
     threadHash,
     author: { fid },
-    replies: { count: replyCount },
-    reactions: { count: reactionCount },
-    recasts: { count: recastCount },
+    replies,
+    reactions,
+    recasts,
     bookmarkCount,
     viewCount,
     quoteCount,
     warpsTipped,
   } = cast;
+
+  // `reactions` and `recasts` are optional on a node-sourced cast.
+  const replyCount = replies.count;
+  const reactionCount = reactions?.count ?? 0;
+  const recastCount = recasts?.count ?? 0;
 
   const styleContainer = React.useMemo(
     () => [

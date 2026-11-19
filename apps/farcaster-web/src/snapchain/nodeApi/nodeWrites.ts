@@ -225,6 +225,16 @@ export interface WriteEvidence {
   landed: boolean | null;
   /** What the read-back looked at, so "landed" is checkable. */
   readbackPath?: string;
+  /**
+   * How many times the same signed bytes were handed to the node. `1` means the
+   * node took it on the first try; more means the submit queue was full and the
+   * write landed — or finally did not — after the retries. This is the evidence
+   * that separates "this server is busy" from a message it refused, which is what
+   * the provider chain needs in order to move rather than only back off.
+   */
+  attempts?: number;
+  /** The node was busy (a full submit queue), not refusing the message. */
+  busy?: boolean;
   /** The node's own words, when it refused or when the read-back disagreed. */
   refusal?: string;
 }
@@ -383,6 +393,48 @@ export const WRITE_TIMEOUT_MS = 20_000;
  */
 const READBACK_ATTEMPTS = 8;
 const READBACK_INTERVAL_MS = 400;
+
+/**
+ * How long to wait before handing the *same* signed bytes to a node that said it
+ * was busy — a full submit queue — before giving up.
+ *
+ * adapted from quilcast (backmeupplz), MIT (`ee50eae`, "a full node queue
+ * retried"): 1 s, 2 s, 4 s. MEASURED there and true of any Snapchain node: a full
+ * queue is transient — the same message, sent a second or two later, is accepted
+ * — and a Farcaster message IS its hash, so resending it cannot double-post.
+ */
+export const BUSY_RETRY_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
+
+/**
+ * The sentence a reader gets when the node was busy through every retry.
+ *
+ * It says what happened ("the network was busy"), that this client already tried
+ * again, and what is left to do — rather than the node's own
+ * `unavailable/mempool channel is full`, which is a fact about the server and not
+ * an instruction for a person.
+ */
+export const NODE_BUSY =
+  "The network was busy. We tried again and it still didn't go through, so try once more.";
+
+/**
+ * Did the node refuse because its submit queue is full, rather than because the
+ * message is wrong?
+ *
+ * MEASURED (a live Snapchain node under load, and the shape quilcast retries): the
+ * answer is a non-ok `submitMessage` whose text says
+ * `status: Unavailable, message: "unavailable/mempool channel is full"`. It comes
+ * back in a different field depending on the node build — `error`,
+ * `error_detail`, or the raw body — so all of them are read. Nothing else is
+ * retried: a bad signer or a malformed message is a refusal, and asking again
+ * would only be a slower way of saying the same thing.
+ */
+export const isNodeBusyError = (error: unknown): boolean => {
+  if (!isNodeApiError(error)) {
+    return false;
+  }
+  const said = `${error.nodeError} ${error.nodeErrorDetail ?? ''} ${error.body ?? ''} ${error.message}`;
+  return /unavailable|mempool/i.test(said);
+};
 
 /**
  * How far a reaction read-back will walk.
@@ -971,6 +1023,7 @@ export class NodeBackedWrites {
       accepted: true,
       landed,
       readbackPath,
+      attempts: accepted.attempts,
     });
 
     if (!landed) {
@@ -1048,6 +1101,7 @@ export class NodeBackedWrites {
       accepted: true,
       landed,
       readbackPath,
+      attempts: accepted.attempts,
     });
 
     if (!landed) {
@@ -1132,6 +1186,7 @@ export class NodeBackedWrites {
       accepted: true,
       landed,
       readbackPath,
+      attempts: accepted.attempts,
     });
 
     if (!landed) {
@@ -1215,56 +1270,90 @@ export class NodeBackedWrites {
   }
 
   /**
-   * Hand the signed bytes to the node. A refusal here is the node's own — the
-   * caller turns it into a sentence that keeps the node's words.
+   * Hand the signed bytes to the node — and keep handing the *same* bytes to it
+   * while it says it is busy.
+   *
+   * A full submit queue used to be the end of a write: the answer was a terminal
+   * 501 "would not accept this write", so a cast that would have landed two
+   * seconds later was reported to the reader as refused. A busy node is not a
+   * refusal. adapted from quilcast (backmeupplz), MIT (`ee50eae`): the same bytes,
+   * resent after 1 s, 2 s and 4 s, and only then a failure. Nothing is ever
+   * re-signed here: a Farcaster message is its hash, so a retry cannot double-post,
+   * while a fresh signature would be a different message that could.
+   *
+   * `attempts` goes back with an accepted message so the caller's evidence says
+   * whether the node took it first try or the queue cleared under the retry.
    */
   private async submit(
     bytes: Uint8Array,
     hash: string,
-  ): Promise<{ message: NodeMessage } | { response: Response }> {
-    try {
-      const message = await this.node.submitMessage(bytes);
-      return { message };
-    } catch (error) {
-      this.evidence({
-        node: this.nodeLabel,
-        nodeBaseUrl: this.nodeBaseUrl,
-        messageHash: hash,
-        accepted: false,
-        landed: null,
-        refusal: error instanceof Error ? error.message : String(error),
-      });
+  ): Promise<
+    { message: NodeMessage; attempts: number } | { response: Response }
+  > {
+    const delays = BUSY_RETRY_DELAYS_MS;
+    let attempts = 0;
 
-      if (isNodeUnreachableError(error)) {
+    for (;;) {
+      attempts += 1;
+      try {
+        const message = await this.node.submitMessage(bytes);
+        return { message, attempts };
+      } catch (error) {
+        const busy = isNodeBusyError(error);
+
+        // A busy node gets the same bytes again after a wait. The last attempt
+        // falls through to the refusal handling below, which is where the reader
+        // learns that it was tried more than once.
+        if (busy && attempts <= delays.length) {
+          await this.sleep(delays[attempts - 1]!);
+          continue;
+        }
+
+        this.evidence({
+          node: this.nodeLabel,
+          nodeBaseUrl: this.nodeBaseUrl,
+          messageHash: hash,
+          accepted: false,
+          landed: null,
+          attempts,
+          ...(busy ? { busy } : {}),
+          refusal: error instanceof Error ? error.message : String(error),
+        });
+
+        if (busy) {
+          return { response: errorResponse(503, NODE_BUSY) };
+        }
+        if (isNodeUnreachableError(error)) {
+          return {
+            response: errorResponse(
+              502,
+              `${this.nodeLabel} did not answer: ${error.message}`,
+            ),
+          };
+        }
+        if (isNodeApiError(error)) {
+          // A refused message is this client's problem, not the server's: the
+          // node answered, and what it said is what the reader gets, followed by
+          // what it usually means when it is a signer problem.
+          const meaning = /invalid signer|signer/i.test(`${error.message}`)
+            ? ' — the key this device signs with is not one this account has authorised (issue one in Advanced → your setup).'
+            : '';
+          return {
+            response: errorResponse(
+              501,
+              `${this.nodeLabel} would not accept this write: ${error.message}${meaning}`,
+            ),
+          };
+        }
         return {
           response: errorResponse(
             502,
-            `${this.nodeLabel} did not answer: ${error.message}`,
+            `${this.nodeLabel} failed on this write: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
           ),
         };
       }
-      if (isNodeApiError(error)) {
-        // A refused message is this client's problem, not the server's: the
-        // node answered, and what it said is what the reader gets, followed by
-        // what it usually means when it is a signer problem.
-        const meaning = /invalid signer|signer/i.test(`${error.message}`)
-          ? ' — the key this device signs with is not one this account has authorised (issue one in Advanced → your setup).'
-          : '';
-        return {
-          response: errorResponse(
-            501,
-            `${this.nodeLabel} would not accept this write: ${error.message}${meaning}`,
-          ),
-        };
-      }
-      return {
-        response: errorResponse(
-          502,
-          `${this.nodeLabel} failed on this write: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        ),
-      };
     }
   }
 

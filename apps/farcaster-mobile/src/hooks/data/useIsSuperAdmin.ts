@@ -2,7 +2,9 @@ import { useMemo } from 'react';
 
 import { useCurrentUser_UNSAFE } from './useCurrentUser';
 
-const superAdminFids = new Set([]);
+// Typed: `new Set([])` infers `Set<never>`, so `has(fid)` was a type error and
+// the mobile typecheck gate could not pass on a clean checkout.
+const superAdminFids = new Set<number>([]);
 
 const useIsSuperAdmin = () => {
   const { fid } = useCurrentUser_UNSAFE();

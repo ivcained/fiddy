@@ -1,6 +1,5 @@
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import {
-  ApiCast,
   ApiQuoteCastEmbed,
   CastHashPrefix,
   getCastHashPrefix,
@@ -8,6 +7,13 @@ import {
 import { useMemo } from 'react';
 
 import { useFarcasterApiClient } from '../../../../providers/FarcasterApiClientProvider';
+import {
+  carriesEmbeds,
+  getSpaceUrlEmbeds,
+  mergeHydratedEmbeds,
+  mergeSpaceUrlEmbeds,
+  quoteCastHasContent,
+} from '../../../../utils/quotedCastHydration';
 import {
   useGloballyCachedCastWithoutFallback,
   useMergeIntoGloballyCachedCast,
@@ -61,61 +67,6 @@ const useNonSuspenseUserCast = ({
   });
 };
 
-type HydratedQuoteCast = ApiCast | ApiQuoteCastEmbed;
-
-const SPACE_URL_RE =
-  /^https?:\/\/(?:www\.)?(?:warpcast\.com|farcaster\.xyz)\/~\/spaces\/[\w-]+\/?(?:\?[^#\s]*)?(?:#[^\s]*)?$/;
-
-const quoteCastHasContent = (cast: HydratedQuoteCast | undefined) => {
-  if (!cast) {
-    return false;
-  }
-
-  if (cast.text.length > 0) {
-    return true;
-  }
-
-  return Object.values(cast.embeds ?? {}).some(
-    (embedBucket) => Array.isArray(embedBucket) && embedBucket.length > 0,
-  );
-};
-
-const getSpaceUrlEmbeds = (cast: HydratedQuoteCast | undefined) =>
-  cast?.embeds?.urls?.filter(({ openGraph }) =>
-    SPACE_URL_RE.test(openGraph.url),
-  ) ?? [];
-
-const mergeSpaceUrlEmbeds = ({
-  cast,
-  sourceCast,
-}: {
-  cast: ApiQuoteCastEmbed;
-  sourceCast: HydratedQuoteCast | undefined;
-}) => {
-  if (cast.deleted) {
-    return cast;
-  }
-
-  const existingUrls = new Set(
-    cast.embeds?.urls?.map(({ openGraph }) => openGraph.url) ?? [],
-  );
-  const missingSpaceUrlEmbeds = getSpaceUrlEmbeds(sourceCast).filter(
-    ({ openGraph }) => !existingUrls.has(openGraph.url),
-  );
-
-  if (missingSpaceUrlEmbeds.length === 0) {
-    return cast;
-  }
-
-  return {
-    ...cast,
-    embeds: {
-      ...cast.embeds,
-      urls: [...(cast.embeds?.urls ?? []), ...missingSpaceUrlEmbeds],
-    },
-  };
-};
-
 const useHydratedQuoteCast = ({ cast }: { cast: ApiQuoteCastEmbed }) => {
   const cachedCast = useGloballyCachedCastWithoutFallback({
     hash: cast.hash,
@@ -135,17 +86,41 @@ const useHydratedQuoteCast = ({ cast }: { cast: ApiQuoteCastEmbed }) => {
   });
 
   const fetchedCast = data?.result.cast;
-  const sourceCast =
+
+  /**
+   * The full copy of this cast, when one is in hand.
+   *
+   * The fetch above runs only for a cast that arrived thin, and this is what it
+   * replaces. Whichever copy carries something the thin payload does not is the
+   * one to merge from: a space URL (the reason this was first written) or the
+   * cast *it* quotes. Gating on space URLs alone meant a quote of a quote — whose
+   * hydration carries `casts` and no space URL — was fetched and then dropped, so
+   * the card could never name or open the inner cast.
+   *
+   * Cached first: it is a cast the reader already opened, so it costs no request.
+   */
+  const sourceCast = carriesEmbeds(cachedCast)
+    ? cachedCast
+    : carriesEmbeds(fetchedCast)
+      ? fetchedCast
+      : undefined;
+
+  // The space-URL merge reads its own subject, so it keeps seeing the same cast
+  // it always did.
+  const spaceUrlSource =
     getSpaceUrlEmbeds(cachedCast).length > 0
       ? cachedCast
       : getSpaceUrlEmbeds(fetchedCast).length > 0
         ? fetchedCast
         : undefined;
 
-  return useMemo(
-    () => mergeSpaceUrlEmbeds({ cast, sourceCast }),
-    [cast, sourceCast],
-  );
+  return useMemo(() => {
+    const withSpaceUrls = mergeSpaceUrlEmbeds({
+      cast,
+      sourceCast: spaceUrlSource,
+    });
+    return mergeHydratedEmbeds({ cast: withSpaceUrls, sourceCast });
+  }, [cast, sourceCast, spaceUrlSource]);
 };
 
 export { useHydratedQuoteCast, useUserCast };
