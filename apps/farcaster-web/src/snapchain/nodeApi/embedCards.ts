@@ -44,6 +44,14 @@ import type {
   ApiOpenGraphMetadata,
 } from 'farcaster-client-data';
 
+/** The mini app's inline view a page declares (`fc:miniapp:inline`). */
+export interface EmbedMiniAppInline {
+  /** Same-origin with the app's launch URL; the small view to run in the card. */
+  url: string;
+  /** CSS pixels, clamped to 80–480. */
+  height: number;
+}
+
 /** The mini-app card a page declares: art, a button's words, and a target. */
 export interface EmbedMiniAppCard {
   imageUrl: string;
@@ -52,6 +60,8 @@ export interface EmbedMiniAppCard {
   /** The app's own splash, when it named one. */
   splashImageUrl?: string;
   splashBackgroundColor?: string;
+  /** The app's inline view, when it declared one. */
+  inline?: EmbedMiniAppInline;
 }
 
 /** Everything a link embed can honestly say about itself. */
@@ -261,6 +271,55 @@ export const miniAppCardFromMetaTag = (
 };
 
 /**
+ * The mini app's inline view (`fc:miniapp:inline`): a small page to run in the
+ * card, `height` CSS pixels tall, on the SAME origin as the app itself.
+ *
+ * The protocol's rule, applied as written: the tag is JSON, its url is https
+ * and same-origin with the app's launch url, and its height is a positive
+ * number clamped to 80–480. Anything else is not an inline view and is
+ * silently ignored (a malformed tag must never break the card).
+ */
+export const miniAppInlineFromMetaTag = (
+  raw: string | undefined,
+  appUrl: string,
+): EmbedMiniAppInline | undefined => {
+  const text = asString(raw);
+  if (text === undefined) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decodeJsonEntities(text)) as unknown;
+  } catch {
+    return undefined;
+  }
+  const tag = parsed as { url?: unknown; height?: unknown } | null;
+  const url = httpsUrlOf(tag?.url);
+  if (url === undefined) {
+    return undefined;
+  }
+  // same-origin with the app's launch url — a view on another origin is not
+  // this app's view, so it is not run in the card
+  try {
+    const launch = new URL(appUrl);
+    const view = new URL(url);
+    if (launch.origin !== view.origin) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  const rawHeight = tag?.height;
+  if (typeof rawHeight !== 'number' || !Number.isFinite(rawHeight)) {
+    return undefined;
+  }
+  return {
+    url,
+    height: Math.round(Math.min(480, Math.max(80, rawHeight))),
+  };
+};
+
+/**
  * Everything a page's own tags say about it, as a card.
  *
  * `undefined` when the page said nothing usable: a read that answered but
@@ -293,6 +352,15 @@ export const embedCardFromHtml = (
     pageUrl,
   );
   if (miniApp !== undefined) {
+    // an inline view must be same-origin with the app it belongs to; the app
+    // is its launch url, not necessarily the page that declared the tag
+    const inline = miniAppInlineFromMetaTag(
+      tags['fc:miniapp:inline'],
+      miniApp.actionUrl,
+    );
+    if (inline !== undefined) {
+      miniApp.inline = inline;
+    }
     card.miniApp = miniApp;
   }
 
@@ -327,6 +395,11 @@ export const openGraphFromCard = (
   if (card.miniApp !== undefined) {
     const frameEmbedNext: ApiFrameEmbedNextExtended = {
       frameUrl: card.miniApp.actionUrl,
+      // an inline view rides on the same card so the existing renderer draws
+      // the small interactive page in the cast instead of only a poster
+      ...(card.miniApp.inline !== undefined
+        ? { inline: card.miniApp.inline }
+        : {}),
       frameEmbed: {
         version: 'next',
         imageUrl: card.miniApp.imageUrl,

@@ -1454,6 +1454,12 @@ export type ApiFrameEmbedNextExtended = {
   frameEmbed?: ApiFrameEmbedNext;
   author?: ApiUser;
   imageAspectRatio?: '3:2' | '1:1';
+  /**
+   * The mini app's inline view (`fc:miniapp:inline`): a small interactive page
+   * rendered right inside the cast card instead of only a poster and a button.
+   * `url` is same-origin with the app's launch URL; `height` is CSS pixels.
+   */
+  inline?: { url: string; height: number };
 };
 
 export type ApiSnapEmbed = {
