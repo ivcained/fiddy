@@ -15,6 +15,7 @@ import {
   embedCardFromHtml,
   metaTagsFromHtml,
   miniAppCardFromMetaTag,
+  miniAppInlineFromMetaTag,
   openGraphFromCard,
 } from '~/snapchain/nodeApi/embedCards';
 
@@ -219,6 +220,112 @@ describe('a card as the fork’s open graph', () => {
     expect(openGraphFromCard('https://app.example/', undefined)).toEqual({
       url: 'https://app.example/',
     });
+  });
+});
+
+describe('a mini app’s inline view', () => {
+  const INLINE_TAG = JSON.stringify({
+    url: 'https://app.example/poll',
+    height: 220,
+  });
+
+  it('is the view a page declares, when it is on the app’s own origin', () => {
+    expect(
+      miniAppInlineFromMetaTag(INLINE_TAG, 'https://app.example/'),
+    ).toEqual({ url: 'https://app.example/poll', height: 220 });
+  });
+
+  it('clamps the height to the 80–480 window the card can hold', () => {
+    expect(
+      miniAppInlineFromMetaTag(
+        JSON.stringify({ url: 'https://app.example/v', height: 8 }),
+        'https://app.example/',
+      ),
+    ).toEqual({ url: 'https://app.example/v', height: 80 });
+    expect(
+      miniAppInlineFromMetaTag(
+        JSON.stringify({ url: 'https://app.example/v', height: 9999 }),
+        'https://app.example/',
+      ),
+    ).toEqual({ url: 'https://app.example/v', height: 480 });
+    expect(
+      miniAppInlineFromMetaTag(
+        JSON.stringify({ url: 'https://app.example/v', height: 200.6 }),
+        'https://app.example/',
+      ),
+    ).toEqual({ url: 'https://app.example/v', height: 201 });
+  });
+
+  it('refuses a view on another origin — it is not this app’s page', () => {
+    expect(
+      miniAppInlineFromMetaTag(
+        JSON.stringify({
+          url: 'https://evil.example/poll',
+          height: 220,
+        }),
+        'https://app.example/',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('refuses a view that is not https', () => {
+    expect(
+      miniAppInlineFromMetaTag(
+        JSON.stringify({ url: 'http://app.example/poll', height: 220 }),
+        'https://app.example/',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('silently ignores a malformed tag — a bad view never breaks the card', () => {
+    expect(
+      miniAppInlineFromMetaTag('{not json', 'https://app.example/'),
+    ).toBeUndefined();
+    expect(
+      miniAppInlineFromMetaTag(
+        JSON.stringify({ url: 42, height: 'tall' }),
+        'https://app.example/',
+      ),
+    ).toBeUndefined();
+    expect(
+      miniAppInlineFromMetaTag('', 'https://app.example/'),
+    ).toBeUndefined();
+  });
+
+  it('rides the app card onto the open graph the feed already renders', () => {
+    const card = embedCardFromHtml(
+      page(
+        `<meta name="fc:miniapp" content='${MINIAPP_TAG}'>` +
+          `<meta name="fc:miniapp:inline" content='${INLINE_TAG}'>`,
+      ),
+      'https://app.example/',
+    );
+    const openGraph = openGraphFromCard('https://app.example/', card);
+
+    expect(openGraph.frameEmbedNext?.inline).toEqual({
+      url: 'https://app.example/poll',
+      height: 220,
+    });
+    expect(openGraph.frameEmbedNext?.frameEmbed?.imageUrl).toBe(
+      'https://app.example/embed.png',
+    );
+  });
+
+  it('leaves the card alone when the inline view is off-origin', () => {
+    const card = embedCardFromHtml(
+      page(
+        `<meta name="fc:miniapp" content='${MINIAPP_TAG}'>` +
+          `<meta name="fc:miniapp:inline" content='${JSON.stringify({
+            url: 'https://evil.example/poll',
+            height: 220,
+          })}'>`,
+      ),
+      'https://app.example/',
+    );
+    const openGraph = openGraphFromCard('https://app.example/', card);
+
+    expect(openGraph.frameEmbedNext?.inline).toBeUndefined();
+    expect(openGraph.frameEmbedNext?.frameUrl).toBe('https://app.example/');
   });
 });
 

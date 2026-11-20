@@ -14,12 +14,22 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { DefaultButton } from '~/components/forms/buttons/DefaultButton';
 import { FrameImageIcon } from '~/components/icons/FrameImageIcon';
 import { Image } from '~/components/images/Image';
+import { InlineApp } from '~/components/miniApp/InlineApp';
 import { Tooltip } from '~/components/Tooltip';
 import { LaunchContext } from '~/contexts/MiniAppProvider';
 import { useMinimizableWindowContext } from '~/contexts/MinimizableWindowProvider';
 import { useViewToken } from '~/hooks/useViewToken';
 
 const BORDER_RADIUS = 12;
+
+/** The app's readable name for an inline prompt, from its launch url's host. */
+const inlineName = (frameUrl: string): string | undefined => {
+  try {
+    return new URL(frameUrl).hostname;
+  } catch {
+    return undefined;
+  }
+};
 
 type FeedFrameAttachmentProps = {
   frameEmbed: ApiFrameEmbedNextExtended;
@@ -90,6 +100,31 @@ export const FrameEmbedNext: React.FC<FeedFrameAttachmentProps> = React.memo(
     const { launchMiniApp } = useMinimizableWindowContext();
     const viewToken = useViewToken();
     const { frameUrl, frameEmbed } = frameEmbedExtended;
+
+    // an inline view runs in the card when the app declared one, this is a real
+    // cast embed (not a composer preview, which passes a cast-less context and
+    // `disabled`), and the view is not on this client's own origin — Fiddy
+    // itself in the card is a page to trick a tap out of
+    const inline =
+      !disabled &&
+      context?.type === 'cast_embed' &&
+      context.cast &&
+      frameEmbedExtended.inline
+        ? {
+            ...frameEmbedExtended.inline,
+            cast: {
+              hash: context.cast.hash,
+              authorFid: context.cast.author?.fid,
+              text: context.cast.text,
+            },
+            app: {
+              url: frameUrl,
+              name: inlineName(frameUrl),
+              icon: undefined,
+            },
+            image: frameEmbed?.imageUrl,
+          }
+        : null;
 
     const domain = useMemo(() => {
       try {
@@ -186,11 +221,22 @@ export const FrameEmbedNext: React.FC<FeedFrameAttachmentProps> = React.memo(
       >
         <div
           className={cn('relative bg-faint', {
-            'cursor-pointer': !disabled,
+            'cursor-pointer': !disabled && !inline,
           })}
-          onClick={handleClick}
+          onClick={inline ? undefined : handleClick}
         >
-          {frameEmbed?.imageUrl && (
+          {inline && (
+            <InlineApp
+              url={frameUrl}
+              src={inline.url}
+              height={inline.height}
+              app={inline.app}
+              cast={inline.cast}
+              image={inline.image}
+              context={context}
+            />
+          )}
+          {!inline && frameEmbed?.imageUrl && (
             <Image
               src={frameEmbed.imageUrl}
               alt={frameEmbed?.button?.title || 'Frame image'}

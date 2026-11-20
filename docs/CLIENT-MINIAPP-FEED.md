@@ -235,3 +235,50 @@ The policy this client should hold, and the reasons:
   browser; whether the launch itself succeeds end to end (the button that opens a
   miniapp window is not reachable until a card renders, and no card rendered in
   the window this probe had).
+---
+
+## 6. Inline views: a mini app's page, right in the card (adopted from quilcast 0.104.x)
+
+Quilcast's `fc:miniapp:inline` extension is adopted pattern-for-pattern with
+attribution (both MIT). A mini app can serve a second meta tag beside its
+`fc:miniapp` launch tag:
+
+```html
+<meta name="fc:miniapp:inline" content='{"url":"https://app.example/poll","height":220}'>
+```
+
+When present and valid, the client renders that small interactive page inside
+the cast's card instead of only a picture and a button — a poll's votes happen
+in the feed, without opening the app. The pieces and the rules:
+
+- **Server-side validation before any embed is cached.** `miniAppInlineFromMetaTag`
+  (`snapchain/nodeApi/embedCards.ts`) is where an inline view is born: `url`
+  must be https **and same-origin with the app's own launch url**, and `height`
+  is clamped to 80–480 CSS px. A malformed or off-origin tag is silently
+  ignored — a bad view never breaks the card.
+- **A tiny wire, kept apart from the app loader.** `components/miniApp/inline.ts`
+  is the Comlink wire behind the view. It is a separate lazy chunk from
+  `MiniApp.tsx`, so a feed containing an inline poll does **not** load the
+  wallets. It answers only: `ready`, `getCapabilities`, `signIn`, `openUrl`,
+  `openMiniApp`, `viewCast`, `viewProfile`. Everything else is refused in ELI5
+  copy ("`<x>` works inside the app, not in the card — tap Open to finish it
+  there."). The reader's context says `client.inline: true` +
+  `location: cast_embed`.
+- **Fiddy's own sign-in chain, scoped to the card.** The wire's `signIn` is
+  routed through Fiddy's `SignInProvider` (`useSignIn`), the same SIWF chain the
+  full app uses — one prompt at a time, and the prompt's body is plain-language
+  account copy.
+- **Privacy: own host lazy, anyone else on a tap.** On `*.fiddy.fun` the view
+  loads lazily as it scrolls in (the client can read its own host). On **any**
+  other host it loads only when the reader taps **Load \<host\> here** — running
+  the page on scroll would tell the app who is reading via its own origin,
+  which its picture never does. Never on this app's own origin: Fiddy itself in
+  the card is a page to trick a tap out of.
+- **Moving the reader always asks in the card.** `openUrl`, `openMiniApp`,
+  `viewCast` and `viewProfile` each show an in-card prompt ("Open this link?")
+  and are refused while a prompt is already up — a view cannot move the app or
+  open a tab by itself.
+- **Sandbox.** `allow-scripts allow-same-origin allow-forms allow-popups
+  allow-popups-to-escape-sandbox`; `referrerPolicy: no-referrer`; `loading:
+  lazy`. The `allow-same-origin` is safe only because the view is cross-origin
+  (rule 2 of §4) — it must never frame same-origin content.
