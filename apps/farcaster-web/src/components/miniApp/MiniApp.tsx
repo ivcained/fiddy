@@ -35,6 +35,7 @@ import {
   apiChainToChainIdOrThrow,
   ApiFrame,
   ApiUser,
+  checkWallet,
   getMiniAppCanonicalUrl,
   isTunnelDomain,
   parseCAIP19Token,
@@ -1541,6 +1542,22 @@ function InnerMiniAppContent({
       removeListener: provider.removeListener.bind(provider),
       async request(parameters: RpcSchema.ExtractRequest<RpcSchema.Default>) {
         const attempt = async () => {
+          // A mini app may not touch the Farcaster account: sign-in messages,
+          // custody/onboarding typed-data, or transactions to Farcaster's own
+          // contracts would otherwise hand over the person's account.
+          if (
+            parameters.method === 'personal_sign' ||
+            parameters.method === 'eth_signTypedData_v4' ||
+            parameters.method === 'eth_sendTransaction' ||
+            parameters.method === 'wallet_sendCalls'
+          ) {
+            checkWallet(
+              domain,
+              (await getProviderAddress()) ?? '',
+              parameters.method,
+              (parameters.params as unknown[]) ?? [],
+            );
+          }
           switch (parameters.method) {
             case 'wallet_sendCalls': {
               const resultPayload = await provider.request(parameters);
