@@ -7,6 +7,7 @@ export * from './ErrorUtils';
 export * from './EthereumUtils';
 export * from './FiddyUrlUtils';
 export * from './MiniAppUtils';
+export * from './MiniAppWalletGuard';
 export * from './MoneyUtils';
 export * from './ObjectUtils';
 export * from './PaginationUtils';

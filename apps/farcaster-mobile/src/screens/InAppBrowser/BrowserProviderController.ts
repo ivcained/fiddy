@@ -1,3 +1,4 @@
+import { checkWallet } from 'farcaster-client-data';
 import { EmbeddedWalletContextType } from 'farcaster-expo';
 
 import { normalizeOriginFromUrl } from './BrowserOriginController';
@@ -391,6 +392,23 @@ export function createBrowserProviderController({
         case 'eth_signTypedData_v4':
         case 'eth_sendTransaction':
         case 'wallet_sendCalls': {
+          // A hosted page may not touch the Farcaster account: sign-in
+          // messages, custody/onboarding typed-data, or transactions to
+          // Farcaster's own contracts would otherwise hand over the person's
+          // account. Throw before anything reaches the wallet.
+          try {
+            checkWallet(
+              session.origin,
+              embeddedWallet.evmAddress?.toLowerCase() ?? '',
+              request.method,
+              (request.params as unknown[]) ?? [],
+            );
+          } catch (err) {
+            return {
+              id: request.id,
+              error: toRpcError(err, 'Request blocked'),
+            };
+          }
           // The embedded wallet confirm sheet resolves/rejects the underlying
           // preview request. A reject (tap Cancel, swipe-to-dismiss, tap the
           // backdrop) surfaces here as a thrown error; we must translate it

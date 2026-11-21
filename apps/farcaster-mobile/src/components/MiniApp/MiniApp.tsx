@@ -34,6 +34,7 @@ import {
   ApiFrame,
   ApiUser,
   ApiWalletChain,
+  checkWallet,
   getMiniAppCanonicalUrl,
   injectQueryParams,
   isFarcasterApiError,
@@ -1024,6 +1025,22 @@ const MiniAppContentInner = ({
   const handleProviderRequest = useCallback(
     async (parameters: RpcSchema.ExtractRequest<RpcSchema.Default>) => {
       try {
+        // A mini app may not touch the Farcaster account: sign-in messages,
+        // custody/onboarding typed-data, or transactions to Farcaster's own
+        // contracts would otherwise hand over the person's account.
+        if (
+          parameters.method === 'personal_sign' ||
+          parameters.method === 'eth_signTypedData_v4' ||
+          parameters.method === 'eth_sendTransaction' ||
+          parameters.method === 'wallet_sendCalls'
+        ) {
+          checkWallet(
+            domain,
+            providerWallet.address ?? '',
+            parameters.method,
+            (parameters.params as unknown[]) ?? [],
+          );
+        }
         switch (parameters.method) {
           case 'eth_signTransaction':
           case 'eth_sendTransaction': {
@@ -1550,6 +1567,23 @@ const MiniAppContentInner = ({
         }
 
         try {
+          // A mini app may not touch the Farcaster account: sign-in messages,
+          // custody/onboarding typed-data, or transactions to Farcaster's own
+          // contracts would otherwise hand over the person's account. Run the
+          // guard against the connected wallet before anything reaches it.
+          if (
+            parameters.method === 'personal_sign' ||
+            parameters.method === 'eth_signTypedData_v4' ||
+            parameters.method === 'eth_sendTransaction' ||
+            parameters.method === 'wallet_sendCalls'
+          ) {
+            checkWallet(
+              domain,
+              providerWallet.address ?? '',
+              parameters.method,
+              (parameters.params as unknown[]) ?? [],
+            );
+          }
           switch (parameters.method) {
             case 'wallet_sendCalls': {
               const resultPayload = await ethProvider.request(parameters);
