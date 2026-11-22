@@ -76,7 +76,16 @@ describe('an extension names a media type without any network', () => {
   });
 
   it('reads the video containers the renderer can play', () => {
-    for (const url of ['https://a.test/clip.mp4', 'https://a.test/clip.webm']) {
+    for (const url of [
+      'https://a.test/clip.mp4',
+      'https://a.test/clip.webm',
+      // An HLS playlist is a video now that the player has an HLS provider
+      // (`components/attachments/hlsSource.ts`). Farcaster's own video host
+      // serves exactly this shape, so the exclusion used to cost real casts.
+      'https://stream.farcaster.xyz/v1/video/01a02c7e.m3u8',
+      'https://a.test/clip.m3u8?token=1',
+      'https://a.test/clip.M3U8#t=1',
+    ]) {
       expect(embedKindFromExtension(url)).toBe('video');
     }
   });
@@ -84,12 +93,14 @@ describe('an extension names a media type without any network', () => {
   it('answers nothing for a URL that names no media type', () => {
     expect(embedKindFromExtension(CLOUDFLARE_PHOTO)).toBeUndefined();
     expect(embedKindFromExtension('https://a.test/post/1')).toBeUndefined();
-    // HLS is deliberately not a video: this client has no player for it.
+    // Not a playlist: `.m3u8` has to be the extension, not a path segment or a
+    // query value that happens to contain the letters.
     expect(
-      embedKindFromExtension(
-        'https://stream.farcaster.xyz/v1/video/01a02c7e.m3u8',
-      ),
+      embedKindFromExtension('https://a.test/clip.m3u8/notes'),
     ).toBeUndefined();
+    expect(embedKindFromExtension('https://a.test/post/1?next=a.m3u8')).toBe(
+      undefined,
+    );
   });
 });
 
@@ -101,6 +112,20 @@ describe('a content type is an answer when it is one', () => {
       'image',
     );
     expect(embedKindFromContentType('video/mp4')).toBe('video');
+  });
+
+  it('reads a playlist as a video even with no extension in the URL', () => {
+    // A manifest is text, so the `video/` prefix is not there to match; these
+    // are the types a playlist is actually served as.
+    for (const type of [
+      'application/vnd.apple.mpegurl',
+      'application/x-mpegurl',
+      'application/mpegurl',
+      'audio/mpegurl; charset=utf-8',
+      'AUDIO/X-MPEGURL',
+    ]) {
+      expect(embedKindFromContentType(type)).toBe('video');
+    }
   });
 
   it('calls a non-media answer a link, and a missing header no answer', () => {

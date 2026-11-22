@@ -20,7 +20,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { createEmbedKindResolver } from '~/snapchain/nodeApi/embedKinds';
+import {
+  createEmbedKindResolver,
+  embedKindFromExtension,
+} from '~/snapchain/nodeApi/embedKinds';
 import { createNodeBackedFetch } from '~/snapchain/nodeApi/nodeBackedFetch';
 
 import { createFixtureNodeFetch } from './fakeNodeFetch';
@@ -164,9 +167,15 @@ describe('an image embed from the node renders as an image', () => {
     }
 
     // One probe per distinct URL the page carries — not one per cast, not one
-    // per embed, and nothing asked twice.
+    // per embed, and nothing asked twice. A URL whose own path names a media
+    // file is answered without asking the network at all
+    // (`embedKindFromExtension`), which is the whole point of asking the cheap
+    // question first: the page's own video fixture is a `.m3u8`, so it costs none.
     expect(new Set(asked).size).toBe(asked.length);
-    expect([...asked].sort()).toEqual([...carried].sort());
+    const askedWithoutExtension = [...carried].filter(
+      (url) => embedKindFromExtension(url) === undefined,
+    );
+    expect([...asked].sort()).toEqual(askedWithoutExtension.sort());
     expect(harness.probes.every((probe) => probe.method === 'HEAD')).toBe(true);
   });
 

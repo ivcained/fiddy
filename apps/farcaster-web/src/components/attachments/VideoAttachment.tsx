@@ -1,4 +1,5 @@
 import {
+  isHLSProvider,
   MediaPlayer,
   MediaPlayerInstance,
   MediaProvider,
@@ -33,6 +34,7 @@ import { useInView } from 'react-intersection-observer';
 
 import { useVideoPlayStatus } from '~/contexts/VideoPlayStatusProvider';
 
+import { hlsLibrary, playerSourceOf } from './hlsSource';
 import { useResolvedVideoShape } from './useVideoShape';
 import { defaultVideoShapeStore } from './videoShape';
 
@@ -551,6 +553,34 @@ const VidstackVideoPlayer: FC<VideoPlayerProps> = memo(
         )}
         load="visible"
         onMediaExitFullscreenRequest={onExitFullscreen}
+        /*
+          An HLS playlist is handed over as an explicit HLS source, and the
+          provider's library is our own dynamic import of `hls.js`
+          (`./hlsSource`). Both halves matter:
+          - `type` is what selects Vidstack's HLS provider, so a playlist on an
+            extensionless URL is not handed to the plain video provider;
+          - `library` is read by the provider in its own `setup()`, which runs
+            after `provider-change` fires — so replacing the default here (a
+            jsDelivr CDN script, blocked by our `script-src 'self'` CSP and an
+            off-site read besides) is in time, and `hls.js` stays in its own
+            lazy chunk until a playlist is actually played.
+          `hls.js` demuxes nothing without `MediaSource`, so on a browser that
+          lacks it the source is handed over untouched and the element plays
+          natively — see `playerSourceOf`.
+
+          Adapted from backmeupplz/quilcast (MIT) 0.65.1 `ca9aa6d02704`, whose
+          `Video` gates on `typeof MediaSource !== 'undefined'` rather than on
+          `canPlayType` (Chrome answers `"maybe"` to an m3u8 it cannot play).
+          Player teardown — including the HLS instance — is Vidstack's own: it
+          destroys the provider when `src` changes or the player unmounts, which
+          is what this component's near-viewport unload already relies on.
+        */
+        src={playerSourceOf(url)}
+        onProviderChange={(provider) => {
+          if (provider !== null && isHLSProvider(provider)) {
+            provider.library = hlsLibrary;
+          }
+        }}
         muted
         crossOrigin
         playsInline
@@ -621,7 +651,6 @@ const VidstackVideoPlayer: FC<VideoPlayerProps> = memo(
           forcePlayVideo(url, autoplayOwnerId);
           manualAutoplayOverrideRef.current = true;
         }}
-        src={url}
       >
         <MediaProvider>
           {posterIsRenderable(thumbnailUrl) && (
