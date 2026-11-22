@@ -77,7 +77,9 @@ const shouldShowRecastLabel = ({
     return false;
   }
 
-  if (!cast.recasts.recasters || cast.recasts.recasters.length === 0) {
+  const recasters = cast.recasts?.recasters;
+
+  if (!recasters || recasters.length === 0) {
     return false;
   }
 

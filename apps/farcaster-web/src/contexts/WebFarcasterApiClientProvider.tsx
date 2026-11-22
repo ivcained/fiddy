@@ -34,6 +34,7 @@ import {
   createProviderBackedFetch,
   getActiveProvider,
   noteProviderReadResult,
+  noteProviderWriteResult,
   useProviderWatch,
 } from '~/snapchain/providers';
 import { registerSeamFetch } from '~/snapchain/seamFetchRef';
@@ -167,6 +168,15 @@ const WebFarcasterApiClientProvider: FC<WebFarcasterApiClientProviderProps> =
         // `post` ask (`docs/CLIENT-MINIAPP-AGENT-BRIDGE.md` §3.3). Read-only:
         // nothing about a write changes, and nothing is kept here.
         onWriteEvidence: noteWriteEvidence,
+        // The same evidence, to the failover chain: a server whose submit queue
+        // stays full loses its place instead of being retried forever. The write
+        // is never rerouted — see `noteProviderWriteResult`.
+        onWrite: (providerId, evidence) =>
+          noteProviderWriteResult({
+            providerId,
+            ok: evidence.accepted && evidence.landed !== false,
+            busy: evidence.busy === true,
+          }),
         // A feed page is answered without its engagement counts and the counts
         // are read behind the paint, landing on the casts already rendered
         // (see above, and `~/hooks/data/useCountsBehindSink`).

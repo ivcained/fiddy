@@ -91,12 +91,13 @@ function UnfocusedCast(props: UnfocusedCastProps) {
     onMiniAppLaunch,
   } = props;
 
-  const {
-    hash,
-    replies: { count: replyCount },
-    reactions: { count: reactionCount },
-    recasts: { count: recastCount },
-  } = cast;
+  const { hash, replies, reactions, recasts } = cast;
+  // `reactions` and `recasts` are optional on a node-sourced cast: the counts
+  // are filled in behind the paint, so a cast that arrived without them shows
+  // zero rather than crashing the card.
+  const replyCount = replies.count;
+  const reactionCount = reactions?.count ?? 0;
+  const recastCount = recasts?.count ?? 0;
 
   const shouldRenderThreadLineStart = React.useMemo(() => {
     return (

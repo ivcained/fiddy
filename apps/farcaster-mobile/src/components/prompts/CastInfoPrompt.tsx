@@ -110,7 +110,7 @@ const CastInfoPromptContent: React.FC<CastInfoPromptContentProps> = ({
         Component: (
           <RecastLabel
             recast={cast.recast}
-            recasters={cast.recasts.recasters}
+            recasters={cast.recasts?.recasters}
             isFocusedCast={false}
           />
         ),

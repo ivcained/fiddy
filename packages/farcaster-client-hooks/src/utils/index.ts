@@ -28,6 +28,8 @@ export * from './ProfileUtils';
 export * from './PromiseUtils';
 export * from './QueryUtils';
 export * from './quoteCastUrls';
+export * from './quotedCastHydration';
+export * from './quotedCastPeek';
 export * from './resolveCastEmbedUrls';
 export * from './SignInWithEthereum';
 export * from './snapFetch';

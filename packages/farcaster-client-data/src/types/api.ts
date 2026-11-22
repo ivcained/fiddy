@@ -1916,6 +1916,32 @@ export type ApiOnchainTransactionSwapEmbed = {
 
 export type ApiOnchainTransactionEmbed = ApiOnchainTransactionSwapEmbed;
 
+/**
+ * The cast a quoted cast quotes — one level of nesting, which is the level this
+ * client renders.
+ *
+ * A cast read on its own arrives with its real buckets; a cast handed back
+ * *inside* another cast's quote embed carries `embeds: {}` (MEASURED on the
+ * hosted API, 2026-11-14), so the inner cast's own media is the most there is to
+ * describe here.
+ *
+ * Deliberately NOT `ApiQuoteCastEmbed` again: a type that refers to itself makes
+ * the `DirectCast` union stop narrowing elsewhere in the client (`never`, in
+ * `DirectCastUtils`), so the one level that is rendered is the one that is typed.
+ */
+export type ApiQuotedCastEmbed = {
+  hash: ApiCastHash;
+  threadHash: ApiCastHash;
+  author: ApiUser;
+  text: ApiCastText;
+  timestamp: ApiTimestampMillis;
+  embeds?: {
+    images?: ApiCastImageEmbed[];
+    urls?: ApiCastUrlEmbed[];
+    videos?: ApiCastVideoEmbed[];
+  };
+};
+
 export type ApiQuoteCastEmbed = {
   hash: ApiCastHash;
   threadHash: ApiCastHash;
@@ -1933,6 +1959,12 @@ export type ApiQuoteCastEmbed = {
     images?: ApiCastImageEmbed[];
     urls?: ApiCastUrlEmbed[];
     videos?: ApiCastVideoEmbed[];
+    /**
+     * A quote of a quote: the cast this one quotes. Read from a fully hydrated
+     * cast — the hosted API strips a quoted cast's own embeds when it is handed
+     * back to its quoter, so a thin payload has no `casts` here.
+     */
+    casts?: ApiQuotedCastEmbed[];
     unknowns?: ApiCastUnknownEmbed[];
     groupInvites?: ApiGroupInviteEmbed[];
     transactions?: ApiOnchainTransactionEmbed[];
