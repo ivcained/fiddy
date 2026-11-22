@@ -86,6 +86,10 @@ li { margin: 6px 0; }
 h1 { font-size: clamp(48px, 5.2vw, 76px); line-height: 0.99; letter-spacing: -0.055em; font-weight: 780; text-wrap: balance; }
 h1 span { display: block; }
 .lede { color: var(--dim); font-size: 18px; line-height: 1.55; max-width: 35rem; margin-top: 24px; }
+/* Answer-first lead: the one paragraph an answer engine can lift, above the long copy.
+   Typography only: the hero is otherwise plain type, and a second filled pane next to
+   the hand-off card read as a bolted-on component. */
+.answer-lead { color: var(--ink); font-size: 18px; line-height: 1.5; max-width: 35rem; margin-top: 18px; }
 .handoff { padding: 26px; border-radius: 24px; }
 .handoff .label { color: var(--lime-text); font-size: 15px; font-weight: 700; margin-bottom: 7px; }
 .handoff h2 { font-size: 27px; line-height: 1.12; letter-spacing: -0.03em; }
@@ -223,6 +227,7 @@ details summary::marker { color: var(--lime-text); }
   .hero-grid { padding: 24px 0 32px; gap: 28px; }
   h1 { font-size: clamp(40px, 11vw, 58px); line-height: 1.01; }
   .lede { font-size: 16px; margin-top: 18px; }
+  .answer-lead { font-size: 16px; margin-top: 14px; }
   .handoff { padding: 20px; border-radius: 20px; }
   .handoff h2 { font-size: 24px; }
   .handoff .agent-help { font-size: 15px; }
@@ -274,6 +279,7 @@ details summary::marker { color: var(--lime-text); }
   <div class="hero-grid">
     <div>
       <h1><span>Your own node.</span><span>Your own client.</span><span>Three commands.</span></h1>
+      <p class="answer-lead"><strong>In short:</strong> Fiddy is a Farcaster client you run yourself. Create a server, sync your own Snapchain node, then open the client in your browser at fiddy.fun. It is for people who want their own node and their own agent, with no API keys to sign up for. Hosted Farcaster apps are free; Fiddy asks for about 2&nbsp;TB of disk and hours of sync first.</p>
       <p class="lede">No API keys from anyone. Run a Snapchain read node, open Fiddy through it, and add your own Hermes agent. <strong>You furnish the compute. You own the stack.</strong></p>
       <img class="agent-hero-art" src="/client/assets/fiddy-agent-hero.webp" width="1024" height="1024" alt="Baby Fiddy, our little green robot, holding up a glowing terminal card" loading="eager" fetchpriority="high">
     </div>
@@ -281,7 +287,7 @@ details summary::marker { color: var(--lime-text); }
       <p class="label">PASTE THIS INTO YOUR AGENT</p>
       <h2 id="handoff-title">Give it to your agent.</h2>
       <p class="agent-help">[CC], Codex, Hermes… it runs the commands with you. The linked guide has the steps, prices, and mistakes to avoid.</p>
-      <div class="prompt"><code id="agent-prompt">I want my own copy of Farcaster. Before you start, ask me where I want to run my node: (a) my own computer, (b) a server I already have, or (c) a new cloud server you provision for me. Prices I was shown for a new cloud server (confirm the current price with the provider first, cloud prices change): about $285/month on AWS, about $350/month on GCP, about \u20ac120/month on Hetzner, about $190/month on OVH. For each option, tell me its cost and the disk it needs (about 2 TB while it downloads), then wait for my choice and my written approval before spending anything. Then follow https://fiddy.fun/client/skill.md. The first download is about 468 GB and takes many hours, so the machine must stay on. If anything else costs money, give me the monthly price and ask me first. Never ask for my seed phrase.</code></div>
+      <div class="prompt"><code id="agent-prompt">I want my own copy of Farcaster. Before you start, ask me where I want to run my node: (a) my own computer, (b) a server I already have, or (c) a new cloud server you provision for me. Prices I was shown for a new cloud server (confirm the current price with the provider first, cloud prices change): about $285/month on AWS, about $350/month on GCP, about €120/month on Hetzner, about $190/month on OVH. For each option, tell me its cost and the disk it needs (about 2 TB while it downloads), then wait for my choice and my written approval before spending anything. Then follow https://fiddy.fun/client/skill.md. The first download is about 468 GB and takes many hours, so the machine must stay on. If anything else costs money, give me the monthly price and ask me first. Never ask for my seed phrase.</code></div>
       <button class="primary-action copy-prompt" type="button" data-copy-target="agent-prompt">Copy prompt</button>
       <a class="manual-link" href="#step0">or do it by hand: see the 3 commands ↓</a>
     </section>
