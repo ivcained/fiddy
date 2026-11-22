@@ -7,15 +7,34 @@ A Snapchain read node, packaged as a container deployment: `fiddy-node` image +
 
 **Use `ghcr.io/ivcained/fiddy-node:latest` when deploying** — every redeploy
 or pod restart then pulls the newest image, and the chain data persists.
-Pin a version tag (e.g. `0.1.2`) only if you want a frozen setup. Built from
-`farcasterxyz/snapchain:latest` with the read-node config baked in
-(`read_node = true`, mainnet, upstream validator sets and snapshot endpoint),
-so no host files are needed. Built and smoke-tested on 2026-10-27: the
-container boots and starts downloading the snapshot.
+Pin a version tag (e.g. `0.1.4`) only if you want a frozen setup.
+
+The image is built from a **pinned** upstream Snapchain release
+(`farcasterxyz/snapchain:0.16.0@sha256:f3e58101…`), with the read-node config
+baked in (`read_node = true`, mainnet, upstream validator sets and snapshot
+endpoint), so no host files are needed. Upstream ships that release distroless
+(no shell), so the node binary is copied out of that image into a slim Debian
+runtime that has the shell and tools `entrypoint.sh` and `fiddy-status` use;
+nothing in the build needs the base image to have a shell. Never build on
+`farcasterxyz/snapchain:latest`: that tag became distroless on 2026-10-28 and
+broke this build.
 
 Rebuilds publish automatically via `.github/workflows/akash-image.yml`
 (on every change to `deploy/akash/`, or manual dispatch). The package is public,
-so any provider can pull it.
+so any provider can pull it. Each publish ends with a smoke test of the image
+it just pushed.
+
+Build and test locally (the build context is `deploy/akash`, not the repo root,
+because `config.toml`, `entrypoint.sh` and `fiddy-status` live there):
+
+```bash
+docker build -t fiddy-node:test deploy/akash
+./deploy/akash/smoke-test.sh fiddy-node:test
+```
+
+The smoke test fails if the image lost its shell or tools, if the node binary
+cannot run or its shared libraries do not resolve, or if the baked config does
+not parse (`snapchain --check-config`, no network needed).
 
 ## Deploy, step by step
 

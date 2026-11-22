@@ -26,5 +26,10 @@ jobs:
           context: deploy/akash
           push: true
           tags: |
-            ghcr.io/ivcained/fiddy-node:0.1.3
+            ghcr.io/ivcained/fiddy-node:0.1.4
             ghcr.io/ivcained/fiddy-node:latest
+      # The build succeeding only means the Dockerfile ran. This proves the
+      # image that providers will pull actually works: shell + tools present,
+      # node binary runs, shared libraries resolve, baked config parses.
+      - name: Smoke-test the published image
+        run: bash deploy/akash/smoke-test.sh ghcr.io/ivcained/fiddy-node:0.1.4
