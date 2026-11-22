@@ -74,7 +74,7 @@ const Shell = () => {
           </View>
           <TabBar active={tab} onChange={setTab} />
           <View style={styles.body}>
-            {tab === 'feed' ? <FeedScreen /> : <AgentScreen />}
+            {tab === 'feed' ? <FeedScreen focused /> : <AgentScreen />}
           </View>
         </SafeAreaView>
       </View>

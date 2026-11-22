@@ -206,3 +206,99 @@ export const fetchReplies = async ({
     .sort((a, b) => a.timestamp - b.timestamp)
     .slice(0, limit);
 };
+
+export interface FeedHeadOptions {
+  node: SnapchainNodeClient;
+  /**
+   * Every FID to read a head for. The caller passes the follow graph it already
+   * has (plus itself, when the feed shows its own casts) rather than making this
+   * read 100 link pages again.
+   */
+  fids: number[];
+  /** Newest casts to keep per author; a remove can swallow the first one. */
+  perAuthor?: number;
+  /** Parallel `castsByFid` reads. */
+  concurrency?: number;
+  /** Stop starting reads once this turns true (the feed lost focus). */
+  isCancelled?: () => boolean;
+}
+
+export interface FeedHead {
+  /** Newest first, at most `perAuthor` per author, one entry per author+hash. */
+  casts: NodeMessage[];
+  /**
+   * Authors whose head could not be read. A count that silently leaves these out
+   * is not a count: callers must mark their number unverified.
+   */
+  unread: number[];
+  /** `castsByFid` requests this read made: the poll's cost, per poll. */
+  requests: number;
+  /** True when `isCancelled` stopped the read part way. */
+  cancelled: boolean;
+}
+
+/**
+ * The newest cast or two from each author, for "what is new above the feed".
+ *
+ * A full `fetchFollowingFeed` is the wrong shape for a poll: it re-reads the
+ * follow graph and pulls `castsPerAccount` casts per follow, and a feed open in
+ * a tab would pay that every minute. This reads one small page per author
+ * (`pageSize = perAuthor + 1`, so a `CAST_REMOVE` at the top does not hide the
+ * cast under it), one request each, with a bounded number in flight.
+ */
+export const fetchFeedHead = async ({
+  node,
+  fids,
+  perAuthor = 2,
+  concurrency = 6,
+  isCancelled,
+}: FeedHeadOptions): Promise<FeedHead> => {
+  const unique = [
+    ...new Set(fids.filter((fid) => Number.isFinite(fid) && fid > 0)),
+  ];
+  const unread: number[] = [];
+  let requests = 0;
+  let cancelled = false;
+
+  const perAccount = await mapWithConcurrency(
+    unique,
+    concurrency,
+    async (fid) => {
+      if (isCancelled?.()) {
+        cancelled = true;
+        return [] as NodeMessage[];
+      }
+      requests += 1;
+      try {
+        const page = await node.castsByFid({
+          fid,
+          // Without `reverse` a node serves the oldest page first (measured
+          // against a live read node), which for a head read is the whole feed.
+          pageSize: Math.max(2, perAuthor + 1),
+          reverse: true,
+        });
+        return page.messages
+          .filter((message) => message.castAdd)
+          .sort((a, b) => b.timestampMs - a.timestampMs)
+          .slice(0, perAuthor);
+      } catch {
+        // One unreachable author must not fail the poll; it makes the number
+        // unverified instead, which the caller says out loud.
+        unread.push(fid);
+        return [] as NodeMessage[];
+      }
+    },
+  );
+
+  const byEntry = new Map<string, NodeMessage>();
+  for (const cast of perAccount.flat()) {
+    byEntry.set(`${cast.fid}:${cast.hash}`, cast);
+  }
+
+  return {
+    casts: [...byEntry.values()].sort((a, b) => b.timestampMs - a.timestampMs),
+    unread,
+    requests,
+    cancelled,
+  };
+};

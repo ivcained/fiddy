@@ -11,7 +11,14 @@ import {
   type NodeHealth,
   type NodeMessage,
 } from 'farcaster-node-client';
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   hostOf,
@@ -170,6 +177,9 @@ export const useHomeFeed = (
       return;
     }
     let cancelled = false;
+    // The graph read is kept in the state, not just reported: the "new posts"
+    // poll reuses it instead of reading a hundred link pages every minute.
+    let graph: number[] = [];
     setState((current) => ({ ...current, status: 'loading', error: null }));
     void (async () => {
       try {
@@ -182,13 +192,14 @@ export const useHomeFeed = (
           concurrency: 6,
           includeSelf: true,
           onFollowing: (following) => {
+            graph = following;
             if (!cancelled) {
               setState((current) => ({ ...current, following }));
             }
           },
         });
         if (!cancelled) {
-          setState({ status: 'ready', casts, following: [], error: null });
+          setState({ status: 'ready', casts, following: graph, error: null });
         }
       } catch (error) {
         if (!cancelled) {

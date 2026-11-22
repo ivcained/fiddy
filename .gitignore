@@ -7,6 +7,7 @@ node_modules
 
 # testing
 coverage
+apps/fiddy-mobile/test/.build
 
 # next.js
 .next/
