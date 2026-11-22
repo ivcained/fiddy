@@ -170,6 +170,56 @@ describe('the node-backed fetch', () => {
     });
   });
 
+  describe('the profile cast search', () => {
+    it('answers GET /v2/user-cast-search with the matched casts, read in full', async () => {
+      const { fetch: nodeBackedFetch, log } = buildHarness();
+
+      const response = await nodeBackedFetch(
+        'https://farcaster.xyz/~api/v2/user-cast-search?fid=3&q=neat',
+      );
+
+      expect(response.status).toBe(200);
+      const body = await json(response);
+      const casts = (body.result as { casts: Json[] }).casts;
+      expect(casts).toHaveLength(1);
+      expect((casts[0] as { text: string }).text).toBe('Neat');
+      expect((casts[0] as { author: { fid: number } }).author.fid).toBe(3);
+      expect((body.next as { cursor: string | null }).cursor).toBeNull();
+      expect(body.capped).toBeUndefined();
+
+      // The page read went to the account's casts and the hit was then read
+      // in full, the way a feed's casts are.
+      expect(
+        log.some((entry) => entry.startsWith('/v1/castsByFid?fid=3')),
+      ).toBe(true);
+      expect(log.some((entry) => entry.startsWith('/v1/castById?fid=3'))).toBe(
+        true,
+      );
+    });
+
+    it('answers a word that is nowhere with an honest empty page', async () => {
+      const { fetch: nodeBackedFetch } = buildHarness();
+      const body = await json(
+        await nodeBackedFetch(
+          'https://farcaster.xyz/~api/v2/user-cast-search?fid=3&q=nowhereword',
+        ),
+      );
+      expect((body.result as { casts: unknown[] }).casts).toEqual([]);
+      expect((body.next as { cursor: string | null }).cursor).toBeNull();
+      // The fixture account's whole log was read, so the answer is "no
+      // matches", not "the bound stopped the search".
+      expect(body.capped).toBeUndefined();
+    });
+
+    it('refuses a search with no words instead of reading an account for nothing', async () => {
+      const { fetch: nodeBackedFetch } = buildHarness();
+      const response = await nodeBackedFetch(
+        'https://farcaster.xyz/~api/v2/user-cast-search?fid=3&q=%20%20',
+      );
+      expect(response.status).toBe(400);
+    });
+  });
+
   describe('verified addresses', () => {
     it('maps the node’s verification messages to the API’s shape', async () => {
       const { fetch: nodeBackedFetch } = buildHarness();
