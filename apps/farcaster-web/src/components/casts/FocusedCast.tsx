@@ -42,6 +42,7 @@ import { ApiCastWithContext } from '~/types';
 import { useHorizontalDragScroll } from '~/utils/castUtils';
 
 import { ShareCast } from './actions/ShareCast';
+import { Train } from './actions/Train';
 
 type FocusedCastProps = Omit<CastProps, 'isFocused'>;
 
@@ -299,6 +300,11 @@ function FocusedCastActions({
             includeReason={context.includeReason?.type}
           />
           <Reactions
+            cast={cast}
+            isFocused
+            includeReason={context.includeReason?.type}
+          />
+          <Train
             cast={cast}
             isFocused
             includeReason={context.includeReason?.type}

@@ -32,6 +32,7 @@ import {
   BuildCastWithContextOptions,
   ThreadPosition,
 } from '~/types';
+import { TRAIN_URL } from '~/utils/cast/TrainCasts';
 
 const getThreadPosition = ({
   hasReplies,
@@ -639,7 +640,9 @@ function getRenderableEmbeds({
         url: url.openGraph.url,
         sourceUrl: url.openGraph.sourceUrl,
         quoteCastUrls,
-      }),
+      }) &&
+      url.openGraph.url !== TRAIN_URL &&
+      url.openGraph.sourceUrl !== TRAIN_URL,
   );
 
   // --- OG embeds (skip quotes and deprecated)
@@ -668,9 +671,12 @@ function getRenderableEmbeds({
     result.push({ type: 'og', data: urlEmbedFromHoistedSnap(hoisted) });
   }
 
-  // --- Unknowns that are missing from text (as fallbacks)
+  // --- Unknowns that are missing from text (as fallbacks, skip the train sentinel)
   for (const unknown of embeds.unknowns ?? []) {
     const source = unknown.source;
+    if (source === TRAIN_URL) {
+      continue;
+    }
     const textMissing =
       !castText.includes(source) &&
       !(source.startsWith('https://') && castText.includes(source.slice(8))) &&
