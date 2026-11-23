@@ -37,6 +37,13 @@ import { toast } from '~/utils/toast';
  * refused by a node-backed build in its own words — "muted words are kept in
  * your Farcaster account on Warpcast's servers" — and nothing in the feed path
  * ever consulted it, so a word added there never hid anything here.
+ *
+ * A muted word can also name a site (`site.com`, matched against a cast's link
+ * hostnames, media CDNs excluded) and reaches the casts a post quotes, both
+ * borrowed from quilcast 0.107.5 (`mutePreferences`, MIT). The whole matcher
+ * stays dependency-free on purpose, so this page — and the read seam that
+ * consults the same list — never pay a bundle or a network probe for the
+ * feature.
  */
 const SettingsMutedKeywordsPage = memo(() => {
   const { trackEvent } = useAnalytics();
@@ -120,9 +127,17 @@ const SettingsMutedKeywordsPage = memo(() => {
                   in your notifications. Whole words only, so muting $based
                   leaves $basedgod alone.
                 </p>
+                <p className="">
+                  Mute a site by its address — enter{' '}
+                  <span className="font-mono">site.com</span> and every post
+                  that links that site is hidden too, without you naming the
+                  words people use there. A post quoting another that carries a
+                  word you muted is hidden as well; a quote of your own post
+                  never is.
+                </p>
                 <TextInput
                   value={draft}
-                  placeholder="Enter word or phrase..."
+                  placeholder="Enter word, phrase or site.com..."
                   maxLength={MUTE_WORD_MAX_LENGTH}
                   onChange={(e) => setDraft(e.target.value)}
                 />
