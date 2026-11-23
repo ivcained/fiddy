@@ -61,7 +61,7 @@ import {
   SnapchainNodeClient,
 } from 'farcaster-node-client';
 
-import type { MuteQuery } from '~/snapchain/mutePreferences';
+import { mutedMatchText, type MuteQuery } from '~/snapchain/mutePreferences';
 import {
   attachParentAuthors,
   readParentAuthors,
@@ -395,24 +395,6 @@ const heldHash = (hashes: Set<string>, hash: string): string | undefined => {
     }
   }
   return undefined;
-};
-
-/**
- * Whether one of the node's messages is hidden by the reader's own list: its
- * author is muted or blocked, or the cast carries a word the reader does not
- * want to see.
- *
- * The reader's OWN messages are never hidden (`hidesAuthor` refuses their own
- * FID), which is what makes this safe to run over notifications: every one of
- * them is about the reader, and a mute must never hide the reader's own work
- * from themselves.
- */
-const hiddenByMutes = (message: NodeMessage, mutes: MuteQuery): boolean => {
-  if (mutes.hidesAuthor(message.fid)) {
-    return true;
-  }
-  const text = message.castAdd?.text;
-  return text !== undefined && text.length > 0 && mutes.hidesText(text);
 };
 
 /**
@@ -1169,12 +1151,109 @@ export class NodeBackedReads {
    * somebody deliberately opened is the one surface a MUTE does not hide (a
    * block does — see `~/snapchain/mutePreferences`).
    */
+  /**
+   * Whether one of the node's messages is hidden by the reader's own list: its
+   * author is muted or blocked, or the cast carries a word the reader does not
+   * want to see — in its text, in the hostname of a site it links, or in a cast
+   * it quotes (`mutedMatchText`).
+   *
+   * The reader's OWN messages are never hidden (`hidesAuthor` refuses their own
+   * FID), which is what makes this safe to run over notifications: every one of
+   * them is about the reader, and a mute must never hide the reader's own work
+   * from themselves. The same rule reaches the transitive side: a quote of the
+   * reader's own cast is never matched (`quotedCastMatchBodiesOf` drops it), so
+   * a muted word in their own post cannot hide the news that quoted it.
+   */
+  private hiddenByMutes(message: NodeMessage, mutes: MuteQuery): boolean {
+    if (mutes.hidesAuthor(message.fid)) {
+      return true;
+    }
+    const body = message.castAdd;
+    if (!body) {
+      return false;
+    }
+    const quoted = this.quotedCastMatchBodiesOf(message).map((cast) => ({
+      text: cast.text ?? '',
+      linkUrls: embedUrlsOf(cast),
+    }));
+    return mutes.hidesText(
+      mutedMatchText(body.text ?? '', embedUrlsOf(body), quoted),
+    );
+  }
+
+  /**
+   * The quoted casts of `message` that a muted word may look at, read from the
+   * cast cache (so a synchronous filter never waits on the node). A quote of the
+   * reader's OWN cast is dropped here: a muted word in their own post must not
+   * hide the news that quoted it.
+   */
+  private quotedCastMatchBodiesOf(message: NodeMessage): NodeCastAddBody[] {
+    const readerFid = this.getSignedInFid();
+    const bodies: NodeCastAddBody[] = [];
+    for (const embed of message.castAdd?.embeds ?? []) {
+      if (!('castId' in embed) || !embed.castId) {
+        continue;
+      }
+      if (embed.castId.fid === readerFid) {
+        continue;
+      }
+      const quoted = this.castCache.get(
+        `${embed.castId.fid}:${embed.castId.hash}`,
+      )?.value;
+      if (quoted?.castAdd) {
+        bodies.push(quoted.castAdd);
+      }
+    }
+    return bodies;
+  }
+
+  /**
+   * Make the quoted casts of a page's messages known to the mute filter before
+   * it runs, so a cast that quotes another carrying a muted word is hidden
+   * (and its own quote's embeds never pay for a build). One read per quote the
+   * page has not served yet, at the same concurrency the page's own reads use;
+   * a quote already in the cache is free, and `castById` reads the cache first,
+   * so a visible cast's quote is not read twice. Only runs when the reader has
+   * an active list — with nothing muted there is nothing to look for.
+   */
+  private async prewarmQuotedCasts(messages: NodeMessage[]): Promise<void> {
+    if (!this.mutes?.()) {
+      return;
+    }
+    const readerFid = this.getSignedInFid();
+    const targets: { fid: number; hash: string }[] = [];
+    for (const message of messages) {
+      if (!message.castAdd) {
+        continue;
+      }
+      for (const embed of message.castAdd.embeds ?? []) {
+        if (!('castId' in embed) || !embed.castId) {
+          continue;
+        }
+        if (
+          embed.castId.fid === readerFid ||
+          this.castCache.has(`${embed.castId.fid}:${embed.castId.hash}`)
+        ) {
+          continue;
+        }
+        targets.push({ fid: embed.castId.fid, hash: embed.castId.hash });
+      }
+    }
+    await mapWithConcurrency(
+      targets,
+      RESOLVE_CONCURRENCY,
+      async (target: { fid: number; hash: string }) => {
+        await this.castById(target.fid, target.hash);
+      },
+    );
+  }
+
   private filterMutedMessages(messages: NodeMessage[]): NodeMessage[] {
     const mutes = this.mutes?.();
     if (!mutes) {
       return messages;
     }
-    return messages.filter((message) => !hiddenByMutes(message, mutes));
+    return messages.filter((message) => !this.hiddenByMutes(message, mutes));
   }
 
   /**
@@ -1191,7 +1270,7 @@ export class NodeBackedReads {
     if (!mutes) {
       return messages;
     }
-    return messages.filter((message) => !hiddenByMutes(message, mutes));
+    return messages.filter((message) => !this.hiddenByMutes(message, mutes));
   }
 
   private rememberCasts(messages: NodeMessage[]): void {
@@ -1923,7 +2002,11 @@ export class NodeBackedReads {
     // counts, its embeds or its mentions. This is the ONE place a feed is
     // narrowed — a conversation and a profile stay whole on purpose.
     // The reader's mutes run FIRST, before the client filter's signer lookups:
-    // a cast that is not going to be shown should not pay for anything.
+    // a cast that is not going to be shown should not pay for anything. A cast
+    // that quotes another carrying a muted word is hidden too, so the page's
+    // quoted casts are made known before the filter asks (`prewarmQuotedCasts`);
+    // with no active list it does nothing.
+    await this.prewarmQuotedCasts(readMessages);
     const visible = this.filterMutedMessages(readMessages);
     const messages = this.filterFeedMessages(
       visible,
@@ -3153,6 +3236,14 @@ export class NodeBackedReads {
           })
           .catch(() => ({ messages: [] as NodeMessage[] })),
       ]);
+
+    // A notification's cast can quote another carrying a muted word; make those
+    // quotes known before the filter asks, so the transitive rule applies here
+    // too (`prewarmQuotedCasts` does nothing with no active list).
+    await this.prewarmQuotedCasts([
+      ...mentions.messages,
+      ...repliesByCast.flat(),
+    ]);
 
     const groups: ApiNotificationGroup[] = [];
 

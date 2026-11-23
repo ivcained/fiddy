@@ -203,6 +203,75 @@ export function wordsRe(words: string[]): RegExp | null {
   return parts.length > 0 ? new RegExp(parts.join('|'), 'iu') : null;
 }
 
+// ------------------------------------------------------------------- sites
+//
+// A muted word can also be a site, `site.com`, matched against the HOSTNAME of
+// a cast's link embeds rather than its text. Borrowed from quilcast 0.107.5
+// (`src/mutes.ts` `mutedText`, `src/shared.ts` `hostOf`, MIT,
+// backmeupplz/quilcast@816c19cbbf79): a cast that links a site carries the
+// site's own address, which a muted word that names the site should hide even
+// though the cast's words never say it.
+
+/** The hostname of a URL, lower-cased, or `''` when it cannot be parsed. */
+export const hostOf = (url: string): string => {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+};
+
+/** A host whose address is a media CDN's, not the site the media is about. */
+const MEDIA_CDN_HOSTS = /(^|\.)(imagedelivery\.net|i\.imgur\.com)$/i;
+
+/** Image and video file names, which name the CDN the bytes come from. */
+const MEDIA_EXTENSIONS =
+  /\.(png|jpe?g|gif|webp|avif|bmp|svg|mp4|m4v|mov|webm|ogv|m3u8)(?:[?#]|$)/i;
+
+/**
+ * Whether a URL is an image or a video, so a muted `site.com` is not matched
+ * against the CDN a cast links the bytes from. Decided by the URL itself,
+ * without a network probe: the file name names the media, or a known image CDN
+ * is refused by host. Everything else — a page, a bare link — is a real site
+ * the word may name.
+ */
+export const isMediaUrl = (url: string): boolean =>
+  MEDIA_EXTENSIONS.test(url) || MEDIA_CDN_HOSTS.test(hostOf(url));
+
+/**
+ * The distinct hostnames a muted `site.com` matches against, for a cast's link
+ * embeds: every URL's host, media CDNs excluded, in the order first seen.
+ */
+export const hostnamesOf = (urls: string[]): string[] => [
+  ...new Set(
+    urls
+      .filter((url) => !isMediaUrl(url))
+      .map(hostOf)
+      .filter((host) => host.length > 0),
+  ),
+];
+
+/**
+ * The string muted words look at: a cast's text, the hosts its link embeds
+ * point at (not a picture's or video's, whose address is a CDN's), and the same
+ * for each quoted cast given. A muted word that names a site therefore hides a
+ * cast that links it, and a cast that quotes another carrying the word hides
+ * too — but a quote of the reader's OWN cast is never given here, so a muted
+ * word in their own post cannot hide the news that quoted it.
+ */
+export const mutedMatchText = (
+  text: string,
+  linkUrls: string[],
+  quoted: { text: string; linkUrls: string[] }[],
+): string =>
+  [
+    text,
+    ...hostnamesOf(linkUrls),
+    ...quoted.flatMap((cast) => [cast.text, ...hostnamesOf(cast.linkUrls)]),
+  ]
+    .filter((part) => part.length > 0)
+    .join('\n');
+
 /**
  * When a timed hide ends, as a settings row says it: "until 3 Sep, 14:20".
  *

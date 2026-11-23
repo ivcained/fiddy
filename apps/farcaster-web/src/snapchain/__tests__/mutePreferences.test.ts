@@ -34,6 +34,9 @@ vi.mock('~/utils/storageUtils', () => ({
 import {
   cleanMutes,
   getActiveMutes,
+  hostnamesOf,
+  hostOf,
+  isMediaUrl,
   liftMute,
   liveEntry,
   loadActiveMutes,
@@ -41,6 +44,7 @@ import {
   MUTE_FID_LIMIT,
   MUTE_WORD_LIMIT,
   mutedAuthorInUse,
+  mutedMatchText,
   mutedWordInUse,
   mutesInUse,
   resetActiveMutes,
@@ -301,5 +305,69 @@ describe('the store the read seam reads', () => {
 
     await liftMute({ fid: FID, kind: 'users', value: OTHER });
     expect(mutedAuthorInUse(OTHER)).toBe(false);
+  });
+});
+
+describe('a muted word matches a cast’s linked sites', () => {
+  it('reads a hostname out of a URL, lower-cased, or nothing for a bad one', () => {
+    expect(hostOf('https://Site.com/foo?x=1')).toBe('site.com');
+    expect(hostOf('https://www.site.com/path')).toBe('www.site.com');
+    expect(hostOf('not a url')).toBe('');
+  });
+
+  it('leaves image and video CDN hosts out of the sites a word can name', () => {
+    // The CDN, not the site the bytes came from: a muted `imagedelivery.net` or
+    // `imgur.com` must never hide a cast that merely shows a picture.
+    expect(isMediaUrl('https://imagedelivery.net/abc/def/original')).toBe(true);
+    expect(isMediaUrl('https://i.imgur.com/AbC.gif')).toBe(true);
+    expect(isMediaUrl('https://cdn.example.com/video.mp4')).toBe(true);
+    expect(isMediaUrl('https://example.com/hls.m3u8')).toBe(true);
+    // A page, a bare link, a shortener: a real site the word may name.
+    expect(isMediaUrl('https://site.com/article')).toBe(false);
+    expect(isMediaUrl('https://t.co/xyz')).toBe(false);
+  });
+
+  it('keeps only the distinct, non-media hostnames, in order', () => {
+    expect(
+      hostnamesOf([
+        'https://a.com/x',
+        'https://b.org/y',
+        'https://a.com/z',
+        'https://imagedelivery.net/p/q/original',
+        'https://c.net',
+      ]),
+    ).toEqual(['a.com', 'b.org', 'c.net']);
+  });
+
+  it('hides a cast that links a muted site, whole host, without its words saying it', () => {
+    const match = mutedMatchText(
+      'look at this',
+      ['https://sub.site.com/story', 'https://imagedelivery.net/p/q/original'],
+      [],
+    );
+    // `site.com` matches the hostname even though the cast's words never say it;
+    // the image CDN contributes nothing to hide by.
+    expect(wordsRe(['site.com'])!.test(match)).toBe(true);
+  });
+
+  it('carries a muted word in a quoted cast into the quoting cast’s match', () => {
+    const match = mutedMatchText(
+      'reposting',
+      [],
+      [{ text: 'full of spoilers here', linkUrls: [] }],
+    );
+    expect(wordsRe(['spoilers'])!.test(match)).toBe(true);
+  });
+
+  it('never lets a site the quoted cast merely links be the quoted cast', () => {
+    // A quoted cast's own link hosts join the match, so muting a site hides a
+    // quote of a post that links it as well as a quote that says the word.
+    const match = mutedMatchText(
+      'quoting',
+      [],
+      [{ text: 'see this', linkUrls: ['https://banned.example/p'] }],
+    );
+    expect(wordsRe(['banned.example'])!.test(match)).toBe(true);
+    expect(wordsRe(['unrelated'])!.test(match)).toBe(false);
   });
 });

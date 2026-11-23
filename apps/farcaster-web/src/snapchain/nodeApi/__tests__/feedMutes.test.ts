@@ -52,7 +52,14 @@ import {
 import type { EmbedKindResolver } from '~/snapchain/nodeApi/embedKinds';
 
 import { offlineEmbedKinds } from './fakeEmbedKinds';
-import { createFixtureNodeFetch } from './fakeNodeFetch';
+import {
+  createFixtureNodeFetch,
+  type FakeNodeRequest,
+  TERMINAL_PAGE_TOKEN,
+} from './fakeNodeFetch';
+
+/** A page a test states for the fixture node, in place of a recording. */
+type StatedPage = Record<string, unknown>;
 
 const NODE = 'http://node.test';
 /** The account the recording belongs to, and the reader in these tests. */
@@ -81,8 +88,9 @@ const offlineEmbedCards = (): EmbedCardResolver =>
  */
 const readerFor = (
   mutes: () => MuteQuery | undefined = mutesInUse,
+  fallback?: (request: FakeNodeRequest) => StatedPage | undefined,
 ): NodeBackedReads => {
-  const fetchImpl = createFixtureNodeFetch();
+  const fetchImpl = createFixtureNodeFetch({ fallback });
   return new NodeBackedReads({
     node: new SnapchainNodeClient({
       baseUrl: NODE,
@@ -243,5 +251,149 @@ describe('the same list filters the notifications a node derives', () => {
     ).find((group) => group.type === 'follow');
 
     expect(after?.totalItemCount ?? 0).toBe(before!.totalItemCount - 1);
+  });
+});
+
+describe('a muted word also matches a cast’s linked sites and quoted casts', () => {
+  /** A node message the fixture states, shaped like the recording's own. */
+  const castMessage = ({
+    fid,
+    hash,
+    text,
+    embeds = [],
+  }: {
+    fid: number;
+    hash: string;
+    text: string;
+    embeds?: { url?: string; castId?: { fid: number; hash: string } }[];
+  }): StatedPage => ({
+    data: {
+      type: 'MESSAGE_TYPE_CAST_ADD',
+      fid,
+      timestamp: 171124288,
+      network: 'FARCASTER_NETWORK_MAINNET',
+      castAddBody: {
+        embedsDeprecated: [],
+        mentions: [],
+        parentCastId: null,
+        parentUrl: null,
+        text,
+        embeds,
+        mentionsPositions: [],
+        type: 'CAST',
+      },
+    },
+    hash,
+    hashScheme: 'HASH_SCHEME_BLAKE3',
+    signature:
+      'S5E2Ixa8C0nyHN9/ioBeY5UlFRBUFrHMy0YMhbHfP9x9+o9508GcTv9q1jnejmFLCRyFaYh10KlJxJHrjN13Dg==',
+    signatureScheme: 'SIGNATURE_SCHEME_ED25519',
+    signer:
+      '0xc887f5bf385a4718eaee166481f1832198938cf33e98a82dc81a0b4b81ffe33d',
+  });
+
+  /** A channel feed whose casts are the given messages, and nothing else. */
+  const devFeed = (casts: StatedPage[]): StatedPage => ({
+    messages: casts,
+    nextPageToken: TERMINAL_PAGE_TOKEN,
+  });
+
+  const muteWord = async (word: string): Promise<void> => {
+    await loadActiveMutes(READER_FID);
+    await setMute({ fid: READER_FID, kind: 'words', value: word });
+  };
+
+  it('hides a cast that links a muted site, without its words naming it', async () => {
+    const siteHash = `0x${'a1'.repeat(20)}`;
+    const plainHash = `0x${'a2'.repeat(20)}`;
+    const feeds = (): StatedPage =>
+      devFeed([
+        castMessage({
+          fid: 15211,
+          hash: siteHash,
+          text: 'see this',
+          embeds: [{ url: 'https://news.site.com/story' }],
+        }),
+        castMessage({ fid: 16969, hash: plainHash, text: 'unrelated' }),
+      ]);
+
+    await muteWord('site.com');
+    const page = await readChannel(
+      readerFor(mutesInUse, (request) =>
+        request.path === '/v1/castsByParent' ? feeds() : undefined,
+      ),
+    );
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.cast.hash).toBe(plainHash);
+  });
+
+  it('hides a cast that quotes another carrying a muted word', async () => {
+    const quoteHash = `0x${'b1'.repeat(20)}`;
+    const quotingHash = `0x${'b2'.repeat(20)}`;
+    const plainHash = `0x${'b3'.repeat(20)}`;
+    const quotedBy = 16969;
+
+    await muteWord('spoilers');
+    const page = await readChannel(
+      readerFor(mutesInUse, (request) => {
+        if (request.path === '/v1/castsByParent') {
+          return devFeed([
+            castMessage({
+              fid: quotedBy,
+              hash: quotingHash,
+              text: 'check this out',
+              embeds: [{ castId: { fid: 15211, hash: quoteHash } }],
+            }),
+            castMessage({ fid: 15211, hash: plainHash, text: 'fine' }),
+          ]);
+        }
+        if (request.path === '/v1/castById') {
+          return castMessage({
+            fid: 15211,
+            hash: quoteHash,
+            text: 'full of spoilers here',
+          });
+        }
+        return undefined;
+      }),
+    );
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.cast.hash).toBe(plainHash);
+  });
+
+  it('never hides a quote of the reader’s own cast, whatever it says', async () => {
+    const myHash = `0x${'c1'.repeat(20)}`;
+    const quotingHash = `0x${'c2'.repeat(20)}`;
+
+    await muteWord('news');
+    const page = await readChannel(
+      readerFor(mutesInUse, (request) => {
+        if (request.path === '/v1/castsByParent') {
+          return devFeed([
+            castMessage({
+              fid: 15211,
+              hash: quotingHash,
+              text: 'quoting me',
+              embeds: [{ castId: { fid: READER_FID, hash: myHash } }],
+            }),
+          ]);
+        }
+        if (request.path === '/v1/castById') {
+          // The reader's own cast carries the muted word — but a quote of the
+          // reader's own post is not news to hide.
+          return castMessage({
+            fid: READER_FID,
+            hash: myHash,
+            text: 'my news',
+          });
+        }
+        return undefined;
+      }),
+    );
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.cast.hash).toBe(quotingHash);
   });
 });
