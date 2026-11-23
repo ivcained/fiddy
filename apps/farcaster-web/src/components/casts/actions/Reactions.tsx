@@ -6,7 +6,7 @@ import {
   useDeleteCastLike,
   useTrackCastReaction,
 } from 'farcaster-client-hooks';
-import { FC, memo, useMemo, useState } from 'react';
+import { FC, memo, useMemo, useRef, useState } from 'react';
 
 import {
   CastReactionAction,
@@ -15,7 +15,11 @@ import {
 import { ThemedReactionIcon } from '~/components/casts/actions/icons/ThemedReactionIcon';
 import { CastActionProps } from '~/components/casts/actions/types';
 import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
+import { holdTip, tipOk, tipTold } from '~/lib/tipask';
 import { trackError } from '~/utils/errorUtils';
+
+// How long (ms) to hold Like before the tip gesture fires.
+const HOLD_MS = 600;
 
 type HeartIconProps = {
   active: boolean;
@@ -55,6 +59,10 @@ const Reactions: FC<ReactionsProps> = memo(
 
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Hold-to-tip gesture: timer and whether the hold fired.
+    const timerRef = useRef(0);
+    const firedRef = useRef(false);
+
     const active = !!cast.viewerContext?.reacted;
     const iconType = useMemo<LikeIconType>(
       () => getLikeIconType(cast.text),
@@ -69,55 +77,124 @@ const Reactions: FC<ReactionsProps> = memo(
         <ThemedReactionIcon active={active} iconType={iconType} />
       );
 
-    return (
-      <CastReactionAction
-        activeColor={activeColor}
-        icon={icon}
-        // Absent means not read yet (a feed paints before its counts are), and
-        // an unread count draws no number at all — never a made-up zero.
-        count={cast.reactions?.count}
-        countMarker="likes"
-        isFocused={!!isFocused}
-        isActive={!!cast.viewerContext?.reacted}
-        variant={variant}
-        disabled={!isSignedIn || disabled}
-        onClick={async () => {
-          if (isSubmitting) {
-            return;
+    const toggleLike = async (action: 'like' | 'unlike') => {
+      if (isSubmitting) {
+        return;
+      }
+      try {
+        setIsSubmitting(true);
+        if (action === 'unlike') {
+          await deleteCastLike({ cast });
+        } else {
+          await createCastLike({ cast });
+        }
+      } catch (error) {
+        trackError(error);
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    const onPointerDown = (e: React.PointerEvent) => {
+      // Only the primary button, only for signed-in users on someone else's
+      // cast.
+      if (e.button !== 0 || !isSignedIn || disabled || !holdTip()) {
+        return;
+      }
+
+      firedRef.current = false;
+
+      timerRef.current = window.setTimeout(() => {
+        firedRef.current = true;
+
+        const name = cast.author.username || String(cast.author.fid);
+
+        if (tipTold() && holdTip()) {
+          // Already told — like and attempt tip.
+          if (!active) {
+            toggleLike('like');
           }
+          // TODO: wire real tip via baseWalletTransfer when author addresses
+          // are available on feed casts.
+          return;
+        }
 
-          try {
-            setIsSubmitting(true);
-            trackCastReaction({
-              castHash: cast.hash,
-              type: CastReactionType.Like,
-              undo: !!cast.viewerContext?.reacted,
-              castFid: cast.author.fid,
-              ...(includeReason ? { includeReason } : {}),
-            });
-
-            if (cast.viewerContext?.reacted) {
-              try {
-                await deleteCastLike({ cast });
-              } catch (error) {
-                // TODO: Add proper UI for error
-                trackError(error);
-                alert(error);
-              }
-            } else {
-              try {
-                await createCastLike({ cast });
-              } catch (error) {
-                // TODO: Add proper UI for error
-                trackError(error);
-                alert(error);
-              }
+        // First hold: show explainer.
+        tipOk({ from: 'Your wallet', to: name }).then((ok) => {
+          if (ok) {
+            if (!active) {
+              toggleLike('like');
             }
-          } finally {
-            setIsSubmitting(false);
+            // TODO: wire real tip
           }
-        }}
-      />
+        });
+      }, HOLD_MS);
+    };
+
+    const clearHold = () => {
+      clearTimeout(timerRef.current);
+      // If the hold fired, the click handler must not also fire a tap action.
+      // The click handler checks firedRef.
+    };
+
+    return (
+      <div
+        onPointerDown={onPointerDown}
+        onPointerUp={clearHold}
+        onPointerLeave={clearHold}
+        onPointerCancel={clearHold}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <CastReactionAction
+          activeColor={activeColor}
+          icon={icon}
+          // Absent means not read yet (a feed paints before its counts are),
+          // and an unread count draws no number at all — never a made-up zero.
+          count={cast.reactions?.count}
+          countMarker="likes"
+          isFocused={!!isFocused}
+          isActive={!!cast.viewerContext?.reacted}
+          variant={variant}
+          disabled={!isSignedIn || disabled}
+          onClick={async () => {
+            if (firedRef.current) {
+              firedRef.current = false;
+              return;
+            }
+
+            if (isSubmitting) {
+              return;
+            }
+
+            try {
+              setIsSubmitting(true);
+              trackCastReaction({
+                castHash: cast.hash,
+                type: CastReactionType.Like,
+                undo: !!cast.viewerContext?.reacted,
+                castFid: cast.author.fid,
+                ...(includeReason ? { includeReason } : {}),
+              });
+
+              if (cast.viewerContext?.reacted) {
+                try {
+                  await deleteCastLike({ cast });
+                } catch (error) {
+                  trackError(error);
+                }
+              } else {
+                try {
+                  await createCastLike({ cast });
+                } catch (error) {
+                  trackError(error);
+                }
+              }
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+        />
+      </div>
     );
   },
 );
