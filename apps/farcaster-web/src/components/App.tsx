@@ -7,6 +7,7 @@ import { WagmiProvider } from 'wagmi';
 
 import { ShellSkeleton } from '~/components/fiddy/ShellSkeleton';
 import { Router } from '~/components/routing/Router';
+import { TipSheet } from '~/components/TipSheet';
 import { AnalyticsProvider } from '~/contexts/AnalyticsProvider';
 import { AuthProvider, useAuth } from '~/contexts/AuthProvider';
 import { DirectCastToTakeActionProvider } from '~/contexts/DirectCastToTakeActionProvider';
@@ -190,6 +191,7 @@ const App: FC = () => {
                                                   <DirectCastToTakeActionProvider>
                                                     <MiniAppProvider>
                                                       <MinimizableWindowProvider>
+                                                        <TipSheet />
                                                         <BrowserRouter>
                                                           <UnifiedMetaMaskProvider>
                                                             <SolanaWalletProvider>

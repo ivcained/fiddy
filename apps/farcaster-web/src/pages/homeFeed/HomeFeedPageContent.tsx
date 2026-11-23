@@ -1,4 +1,3 @@
-import { ArrowUpIcon } from '@primer/octicons-react';
 import { AnalyticsEvent } from 'farcaster-analytics';
 import {
   useChannelFeedUnseenStatus,
@@ -7,14 +6,13 @@ import {
   useSetFeedItemsAsSeenIfPrefetched,
   useTrackEvent,
 } from 'farcaster-client-hooks';
-import { FC, memo, useCallback, useEffect, useMemo } from 'react';
-import toast from 'react-hot-toast';
+import { FC, memo, useCallback, useMemo } from 'react';
 
 import { Cast } from '~/components/casts/Cast';
 import { DefaultEmptyListView } from '~/components/lists/DefaultEmptyListView';
 import { FlatList } from '~/components/lists/FlatList';
+import { NewPostsPill } from '~/components/pill/NewPostsPill';
 import { HomeFeaturePromotion } from '~/components/promotions/HomeFeaturePromotion';
-import { ToastButton } from '~/components/toastButton/ToastButton';
 import { useCameFromPopped } from '~/contexts/PopStateProvider';
 import { useIsSignedIn } from '~/hooks/data/useIsSignedIn';
 import { useSetOnCurrentNavLinkClicked } from '~/hooks/data/useSetOnCurrentNavLinkClicked';
@@ -22,7 +20,6 @@ import { useScrollToTopOfRoot } from '~/hooks/useScrollToTopOfRoot';
 import { buildCastsWithContext } from '~/utils/castUtils';
 import { castWithContextKeyExtractor } from '~/utils/keyExtractorUtils';
 
-const HOME_FEED_UPDATE_TOAST_ID = 'home-feed-update';
 // Reserved for admin-only feed experiments; do not remove when empty.
 const adminGatedFeedCastIncludeReasonTypes = new Set<string>();
 
@@ -69,29 +66,12 @@ const HomeFeedPageContent: FC = memo(() => {
   const hasNewItems = useChannelFeedUnseenStatus('home', true);
 
   const scrollToTopAndReloadFeed = useCallback(async () => {
-    toast.dismiss(HOME_FEED_UPDATE_TOAST_ID);
-
     scrollToTopOfRoot(true);
 
     trackEvent(AnalyticsEvent.ClickNewCastsToast, {});
 
     refreshFirstPage();
   }, [refreshFirstPage, scrollToTopOfRoot, trackEvent]);
-
-  useEffect(() => {
-    // Dismiss the toast on unmount (since the config is global)
-    return () => {
-      toast.dismiss(HOME_FEED_UPDATE_TOAST_ID);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (hasNewItems) {
-      toast('New casts', { id: HOME_FEED_UPDATE_TOAST_ID });
-    } else if (!hasNewItems) {
-      toast.dismiss(HOME_FEED_UPDATE_TOAST_ID);
-    }
-  }, [hasNewItems]);
 
   const renderHomeFeedItem = useCallback(
     ({ item }: { item: (typeof castsWithContext)[number] }) => {
@@ -113,11 +93,9 @@ const HomeFeedPageContent: FC = memo(() => {
   return (
     <>
       {isSignedIn && (
-        <ToastButton
-          IconComponent={ArrowUpIcon}
-          duration={1 * 60 * 60 * 1000} // 1 hour because user may not be on the tab
+        <NewPostsPill
+          hasNewItems={hasNewItems}
           onClick={scrollToTopAndReloadFeed}
-          topDistance={124}
         />
       )}
       {isSignedIn && <HomeFeaturePromotion />}
