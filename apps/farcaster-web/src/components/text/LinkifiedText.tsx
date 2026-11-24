@@ -16,6 +16,7 @@ import { Link } from '~/components/links/Link';
 import { LinkToChannelWithSummaryTooltip } from '~/components/links/LinkToChannelWithSummaryTooltip';
 import { LinkToProfileCastsWithUsername } from '~/components/links/LinkToProfileCastsWithUsername';
 import { LinkToProfileWithSummaryTooltip } from '~/components/links/LinkToProfileWithSummaryTooltip';
+import { InlineEmojis } from '~/components/text/InlineEmojis';
 import { routes } from '~/constants/routes';
 import { useAnalytics } from '~/contexts/AnalyticsProvider';
 import { useLinkify } from '~/contexts/LinkifyProvider';
@@ -47,6 +48,13 @@ interface LinkifiedTextProps {
   skipURLTruncates?: boolean;
   ignoreMentionsArray?: boolean;
   castAuthorFid?: number;
+  /**
+   * Inline custom emojis per the FIP draft, label → picture url: each
+   * `:label:` in the plain (non-link) text is drawn as an inline <img>, at the
+   * text's height. A `:label:` inside a link's own text stays text. Omit to
+   * render text exactly as written.
+   */
+  emojis?: Map<string, string>;
 }
 
 const LinkifiedText: FC<LinkifiedTextProps> = ({
@@ -59,6 +67,7 @@ const LinkifiedText: FC<LinkifiedTextProps> = ({
   skipURLTruncates = false,
   ignoreMentionsArray = false,
   castAuthorFid,
+  emojis,
 }) => {
   const { trackEvent } = useAnalytics();
 
@@ -79,6 +88,21 @@ const LinkifiedText: FC<LinkifiedTextProps> = ({
   const sanitizedBodyText = useCallback((text: string) => {
     return removeCustomRuleTokens(text);
   }, []);
+
+  // Draw a plain-text segment's inline custom emojis: each `:label:` that names
+  // an entry in `emojis` becomes an inline <img> at the text's height (the FIP
+  // draft "Inline Custom Emoji"); any other `:label:` stays text (the FIP
+  // fallback). Called on the non-link gaps only, so a `:label:` inside a link's
+  // own text is never turned into an emoji.
+  const emojiize = useCallback(
+    (text: string): ReactNode[] => {
+      if (!emojis || emojis.size === 0) {
+        return [text];
+      }
+      return [<InlineEmojis key="md-emoji-gap" text={text} emojis={emojis} />];
+    },
+    [emojis],
+  );
 
   const bodyWithLinks = useMemo(() => {
     const nodes = [] as ReactNode[];
@@ -107,7 +131,7 @@ const LinkifiedText: FC<LinkifiedTextProps> = ({
           const text = sanitizedBodyText(
             preparedBody.substring(cursor, match.index),
           );
-          nodes.push(text);
+          nodes.push(...emojiize(text));
         }
 
         let resolvedTokenLinkFromMatchedUrl: PathMatch<'ticker'> | null = null;
@@ -383,7 +407,7 @@ const LinkifiedText: FC<LinkifiedTextProps> = ({
 
     if (cursor <= preparedBody.length - 1) {
       const text = sanitizedBodyText(preparedBody.substring(cursor));
-      nodes.push(text);
+      nodes.push(...emojiize(text));
     }
 
     return <>{nodes}</>;
@@ -392,6 +416,7 @@ const LinkifiedText: FC<LinkifiedTextProps> = ({
     channelMentions,
     content,
     defaultLinkifyInstance,
+    emojiize,
     fetchContractAddress,
     linkClassNameOverrides,
     mentions,

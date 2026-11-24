@@ -1859,6 +1859,11 @@ export type ApiCastUrlEmbed = {
   tweet?: ApiTweetEmbed;
   token?: ApiTokenEmbed;
   tokenV2?: ApiTokenLinkCore;
+  /** FIP draft "Inline Custom Emoji": a url embed carrying a label is drawn in
+   *  the cast's text wherever it says :label:, at the text's height, and not
+   *  shown again beneath the cast. `:label:` with no matching labelled embed
+   *  stays text (the FIP fallback). */
+  emojiLabel?: string;
 };
 
 export type ApiCastImageEmbed = {
@@ -1867,6 +1872,8 @@ export type ApiCastImageEmbed = {
   sourceUrl: string;
   media?: ApiMedia;
   alt: string;
+  /** FIP draft "Inline Custom Emoji": see `ApiCastUrlEmbed.emojiLabel`. */
+  emojiLabel?: string;
 };
 
 export type ApiCastVideoEmbed = {

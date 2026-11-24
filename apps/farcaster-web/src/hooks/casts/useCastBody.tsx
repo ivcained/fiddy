@@ -33,12 +33,19 @@ import { VideoAttachment } from '~/components/attachments/VideoAttachment';
 import { ImageLightboxModal } from '~/components/modals/ImageLightboxModal';
 import { LinkifiedText } from '~/components/text/LinkifiedText';
 import { useUserAppContext } from '~/contexts/UserAppContextProvider';
-import { getRenderableEmbeds } from '~/utils/castUtils';
+import { getRenderableEmbeds, RenderableEmbed } from '~/utils/castUtils';
+import {
+  castLabelledEmbeds,
+  emojisOf,
+  isDrawnEmojiLabel,
+} from '~/utils/inlineCustomEmojis';
 
 type CastBody = {
   nonLinkfiedText: string;
   text: ReactNode;
   isTruncatedCastText: boolean;
+  /** The inline custom emojis to draw in the text, label → picture url. */
+  emojis: Map<string, string>;
 
   hasAttachments: boolean;
   hasNonCarouselAttachments: boolean;
@@ -86,11 +93,31 @@ const useCastAttachment = ({
     embeds,
   });
 
+  // Inline custom emojis per the FIP draft: the labelled embeds whose :label:
+  // the *shown* text (a translation if one is shown) really says. Drawn inline
+  // in the text at the text's height, and removed from the media shown beneath.
+  // A labelled embed whose label the shown text lost stays an ordinary picture
+  // under the cast (the 0.110.1 translation fix); a labelled embed that isn't a
+  // picture keeps its card and its :label: stays text.
+  const emojis = emojisOf(castLabelledEmbeds(embeds), text);
+
+  const isDrawnEmoji = React.useCallback(
+    (o: RenderableEmbed): boolean =>
+      (o.type === 'image' ||
+        o.type === 'og' ||
+        o.type === 'non-carousel-bunched-og') &&
+      isDrawnEmojiLabel(o.data.emojiLabel, emojis),
+    [emojis],
+  );
+
+  /** The embeds to draw under the text: everything but the emojis drawn inline. */
+  const attachmentEmbeds = renderableEmbeds.filter((o) => !isDrawnEmoji(o));
+
   const carouselEligibleEmbeds = React.useMemo(() => {
-    return renderableEmbeds.filter(
+    return attachmentEmbeds.filter(
       (o) => o.type === 'image' || o.type === 'video' || o.type === 'og',
     );
-  }, [renderableEmbeds]);
+  }, [attachmentEmbeds]);
 
   const needsCarousel = React.useMemo(() => {
     if (!embeds) {
@@ -113,7 +140,7 @@ const useCastAttachment = ({
       return false;
     }
 
-    const carouselIneligibleEmbeds = renderableEmbeds.filter(
+    const carouselIneligibleEmbeds = attachmentEmbeds.filter(
       (o) =>
         o.type === 'quote' ||
         o.type === 'non-carousel-bunched-og' ||
@@ -122,7 +149,7 @@ const useCastAttachment = ({
     );
 
     return carouselIneligibleEmbeds.length > 0;
-  }, [embeds, renderableEmbeds]);
+  }, [embeds, attachmentEmbeds]);
 
   const renderUrlEmbedNonSnap = useCallback(
     ({
@@ -276,6 +303,7 @@ const useCastAttachment = ({
         nonCarouselAttachments,
         needsCarousel: false,
         carouselMaxHeight: undefined,
+        emojis,
       };
     }
 
@@ -336,7 +364,7 @@ const useCastAttachment = ({
       }
     }
 
-    const mediaImageEmbeds = renderableEmbeds
+    const mediaImageEmbeds = attachmentEmbeds
       .filter((o) => o.type === 'image')
       .map(({ data: image }) => {
         if (typeof image.media !== 'undefined') {
@@ -398,7 +426,7 @@ const useCastAttachment = ({
               draggingRef={draggingRef}
               imagesToRender={imagesToRender}
             >
-              {renderableEmbeds
+              {attachmentEmbeds
                 .filter((o) => o.type === 'image')
                 .map(({ data: image }, imageIndex) => {
                   return (
@@ -427,7 +455,7 @@ const useCastAttachment = ({
                   );
                 })}
             </FullScreenImagesProvider>
-            {renderableEmbeds
+            {attachmentEmbeds
               .filter((o) => o.type === 'og')
               .map(({ data: embed }) =>
                 renderUrlEmbedNonSnap({
@@ -441,7 +469,7 @@ const useCastAttachment = ({
           </>
         ) : (
           <>
-            {renderableEmbeds
+            {attachmentEmbeds
               .filter((o) => o.type === 'og')
               .filter((o) => isSnapEmbed(o.data))
               .map(({ data: embed }) =>
@@ -483,7 +511,7 @@ const useCastAttachment = ({
               draggingRef={draggingRef}
               imagesToRender={imagesToRender}
             >
-              {renderableEmbeds
+              {attachmentEmbeds
                 .filter((o) => o.type === 'image')
                 .map(({ data: image }, imageIndex) => {
                   return (
@@ -515,7 +543,7 @@ const useCastAttachment = ({
                   );
                 })}
             </FullScreenImagesProvider>
-            {renderableEmbeds
+            {attachmentEmbeds
               .filter((o) => o.type === 'og')
               .filter((o) => !isSnapEmbed(o.data))
               .map(({ data: embed }) =>
@@ -577,12 +605,15 @@ const useCastAttachment = ({
       nonCarouselAttachments,
       needsCarousel,
       carouselMaxHeight,
+      emojis,
     };
   }, [
+    attachmentEmbeds,
     carouselEligibleEmbeds,
     cast,
     draggingRef,
     embeds,
+    emojis,
     hasAttachments,
     hasNonCarouselAttachments,
     isFocusedCast,
@@ -630,6 +661,7 @@ const useCastBody = ({
     hasAttachments,
     needsCarousel,
     carouselMaxHeight,
+    emojis,
   } = useCastAttachment({
     cast,
     text: castText,
@@ -702,6 +734,7 @@ const useCastBody = ({
       tokenMentions={tokenMentions}
       tokenMentionsV2={tokenMentionsV2}
       castAuthorFid={cast.author.fid}
+      emojis={emojis}
     />
   );
 
@@ -709,6 +742,7 @@ const useCastBody = ({
     nonLinkfiedText: bodyTextOverride,
     text: linkifiedCastBodyText,
     isTruncatedCastText: shouldTruncate,
+    emojis,
     castAttachment: castAttachment,
     nonCarouselAttachments: nonCarouselAttachments,
     hasNonCarouselAttachments: hasNonCarouselAttachments,

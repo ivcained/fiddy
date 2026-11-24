@@ -153,7 +153,12 @@ export interface NodeCastId {
   hash: string;
 }
 
-export type NodeEmbed = { url: string } | { castId: NodeCastId };
+/** A cast embed on the wire. `emoji_label` is the FIP draft "Inline Custom
+ *  Emoji" field (farcasterorg/hypersnap#101): a url embed carrying it is drawn
+ *  inline in the text wherever the text says :label:. */
+export type NodeEmbed =
+  | { url: string; emoji_label?: string }
+  | { castId: NodeCastId };
 
 export interface NodeCastAddBody {
   text: string;

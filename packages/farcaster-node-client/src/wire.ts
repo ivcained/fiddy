@@ -261,7 +261,15 @@ const decodeEmbeds = (value: unknown): NodeEmbed[] =>
   asArray(value).flatMap((entry): NodeEmbed[] => {
     const json = asJson(entry);
     if (typeof json.url === 'string') {
-      return [{ url: json.url }];
+      const emojiLabel = json.emoji_label;
+      return [
+        {
+          url: json.url,
+          ...(typeof emojiLabel === 'string' && emojiLabel !== ''
+            ? { emoji_label: emojiLabel }
+            : {}),
+        },
+      ];
     }
     const castId = decodeCastId(json.castId);
     return castId ? [{ castId }] : [];
@@ -516,7 +524,14 @@ export const encodeNodeMessageJson = (message: NodeMessage): Json => ({
             parentUrl: message.castAdd.parentUrl ?? null,
             text: message.castAdd.text,
             embeds: message.castAdd.embeds.map((embed) =>
-              'url' in embed ? { url: embed.url } : { castId: embed.castId },
+              'url' in embed
+                ? {
+                    url: embed.url,
+                    ...(embed.emoji_label
+                      ? { emoji_label: embed.emoji_label }
+                      : {}),
+                  }
+                : { castId: embed.castId },
             ),
             mentionsPositions: message.castAdd.mentionsPositions,
             type: message.castAdd.castType,

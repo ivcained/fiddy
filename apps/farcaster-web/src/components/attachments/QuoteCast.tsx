@@ -27,7 +27,9 @@ import { Avatar } from '~/components/avatar/Avatar';
 import { CastAuthorLine } from '~/components/casts/CastAuthorLine';
 import { Image } from '~/components/images/Image';
 import { LinkToConversationWithUsername } from '~/components/links/LinkToConversationWithUsername';
+import { InlineEmojis } from '~/components/text/InlineEmojis';
 import { useUserAppContext } from '~/contexts/UserAppContextProvider';
+import { castLabelledEmbeds, emojisOf } from '~/utils/inlineCustomEmojis';
 
 import { SnapEmbedAttachment } from './SnapEmbedAttachment';
 
@@ -67,9 +69,23 @@ const QuoteCast: FC<QuoteCastProps> = memo(
       };
     }, [cast.author.username, cast.hash]);
 
+    // The quoted cast's inline custom emojis, label → picture url, drawn in its
+    // text (InlineEmojis below) rather than as a thumbnail beneath it.
+    const quoteEmojis = useMemo(
+      () =>
+        emojisOf(castLabelledEmbeds(hydratedCast.embeds), hydratedCast.text),
+      [hydratedCast.embeds, hydratedCast.text],
+    );
+
     const quotedCastImageEmbeds = useMemo(() => {
-      return hydratedCast.embeds?.images || [];
-    }, [hydratedCast.embeds?.images]);
+      const raw = hydratedCast.embeds?.images || [];
+      // A drawn emoji's picture is in the quoted text already; not shown again
+      // as a thumbnail. A labelled embed whose :label: the text lost stays a
+      // thumbnail (the 0.110.1 translation fix).
+      return raw.filter(
+        (img) => !(img.emojiLabel && quoteEmojis.has(img.emojiLabel)),
+      );
+    }, [hydratedCast.embeds?.images, quoteEmojis]);
 
     const quotedCastVideoEmbeds = useMemo(() => {
       return hydratedCast.embeds?.videos || [];
@@ -212,9 +228,14 @@ const QuoteCast: FC<QuoteCastProps> = memo(
           )}
         >
           <div className="line-clamp-5">
-            {shouldShowShowMoreIndicator
-              ? 'Show more...'
-              : truncatedQuotedCastText}
+            {shouldShowShowMoreIndicator ? (
+              'Show more...'
+            ) : (
+              <InlineEmojis
+                text={truncatedQuotedCastText}
+                emojis={quoteEmojis}
+              />
+            )}
           </div>
         </div>
         {(quotedCastImageEmbeds.length !== 0 ||

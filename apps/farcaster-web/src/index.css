@@ -701,3 +701,15 @@ em-emoji-picker {
     color: #7cb518;
     fill: #7cb518;
   }
+
+/* Inline custom emoji (FIP draft "Inline Custom Emoji"): a url embed carrying
+   emoji_label is drawn in the cast's text wherever the text says :label:, at
+   the text's height. Adapted from backmeupplz/quilcast's .md-emoji (MIT). */
+.md-emoji {
+  display: inline-block;
+  height: 1.2em;
+  width: auto;
+  max-width: 4em;
+  vertical-align: -0.25em;
+  object-fit: contain;
+}

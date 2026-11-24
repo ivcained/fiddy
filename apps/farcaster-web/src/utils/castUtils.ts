@@ -542,7 +542,7 @@ function buildRepliesWithConversationContext({
   return castsWithContext;
 }
 
-type RenderableEmbed =
+export type RenderableEmbed =
   | { type: 'image'; data: ApiCastImageEmbed }
   | { type: 'video'; data: ApiCastVideoEmbed }
   | { type: 'non-carousel-bunched-og'; data: ApiCastUrlEmbed }

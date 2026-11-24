@@ -236,15 +236,25 @@ export const castEmbedsFromNode = ({
   );
 
   for (const embed of body.embeds) {
+    // The FIP draft "Inline Custom Emoji" label, when the node serves it: a url
+    // embed carrying one is drawn in the text wherever it says :label: (and not
+    // shown again beneath). Carried on both buckets a picture can land in.
+    const emojiLabel = 'emoji_label' in embed ? embed.emoji_label : undefined;
+    const labelled = <T extends object>(o: T): T & { emojiLabel?: string } =>
+      typeof emojiLabel === 'string' && emojiLabel !== ''
+        ? { ...o, emojiLabel }
+        : o;
     if ('url' in embed && typeof embed.url === 'string' && embed.url !== '') {
       const kind = embedKind?.(embed.url) ?? embedKindFromExtension(embed.url);
       if (kind === 'image') {
-        images.push({
-          type: 'image',
-          url: embed.url,
-          sourceUrl: embed.url,
-          alt: '',
-        });
+        images.push(
+          labelled({
+            type: 'image',
+            url: embed.url,
+            sourceUrl: embed.url,
+            alt: '',
+          }),
+        );
       } else if (kind === 'video') {
         videos.push({
           type: 'video',
@@ -254,10 +264,12 @@ export const castEmbedsFromNode = ({
       } else {
         // A link embed carries what its own page said about it — and, when that
         // page is a mini app, the card whose button opens it.
-        urls.push({
-          type: 'url',
-          openGraph: openGraphFromCard(embed.url, cardOf?.(embed.url)),
-        });
+        urls.push(
+          labelled({
+            type: 'url',
+            openGraph: openGraphFromCard(embed.url, cardOf?.(embed.url)),
+          }),
+        );
       }
       continue;
     }
