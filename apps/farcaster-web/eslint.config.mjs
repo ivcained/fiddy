@@ -68,6 +68,9 @@ export default [
         MutationObserver: 'readonly',
         // DOM node-position flags used when checking root → parent → reply order.
         Node: 'readonly',
+        // A probe that needs a click no browser input synthesizer can make (a
+        // double tap on a guarded confirm) dispatches a MouseEvent itself.
+        MouseEvent: 'readonly',
         PerformanceObserver: 'readonly',
         performance: 'readonly',
         process: 'readonly',

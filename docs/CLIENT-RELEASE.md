@@ -682,3 +682,61 @@ does not consider a node configured (`isNodeConfigured()` reads
 and the run measures an empty feed — 0 casts read, 2/9 — which looks exactly like
 the bug you are trying to fix. Point `EMBED_SERVER` at `https://fiddy.fun` to run
 the same nine checks against the release.
+## A cast too long to send offers what Fiddy can do about it (quilcast 0.115.0, MIT)
+
+Interaction ported from `backmeupplz/quilcast` 0.115.0 ("a cast too long to
+send offers to become an article"), with the agent twist this client can make
+and no other can: where quilcast offers one escape, Fiddy offers what the
+owner's agent can actually do.
+
+- The composer's dead end — a red negative byte counter and a Cast button
+  that will not press — becomes a row: "This is too long for one cast. Fiddy
+  can tighten it, or split it into a thread." Top-level casts only: never a
+  reply, a scheduled post, a stored-draft edit, or a miniapp compose action.
+- The row exists only when an agent can really answer: the composer resolves
+  the paired agent session and a chat-able instance once per minute
+  (`~/lib/composerAgentAssist.ts`). No session, an unreachable service, or a
+  stopped agent: the plain length counter stays the whole answer — never a
+  dead button with a spinner.
+- **Tighten it** is one agent chat whose reply is *validated* before anything
+  is applied: non-empty and within the byte limit, or it is refused with a
+  sentence that says the text is unchanged. **Split it into a thread** must
+  return 2..N usable parts (each within the limit, N the queue's remaining
+  room); the parts load into the existing queued-cast composer, spliced after
+  the focused cast, for review before anything posts.
+- Both confirm in the row itself — never a native `confirm()`, which shows
+  nothing in the app shell — with a 500ms guard on the destructive button so
+  the click that opened the question cannot answer it (the same
+  double-click/tap guard quilcast ships). Cancel keeps the person's text
+  untouched; Replace is applied through a Draft.js `push`, so one Cmd+Z
+  brings the original back.
+- Bundle: the offer row, the state machine and the assist seam landed in the
+  lazy `Composer-*.js` chunk (**+2,237 B gzip**, measured against an
+  `origin/main` build of the same tree) — zero bytes in the eager entry
+  chunk, no new dependency (`pnpm-lock.yaml` untouched). A phase-2 long-form
+  editor must stay behind a lazy `import()` at handoff time, as quilcast
+  keeps its editor out of the composer bundle.
+
+Acceptance probe (the e2e shape ported from quilcast's WebKit suite):
+
+```bash
+cd apps/farcaster-web
+PROBE_VITE_CACHE_DIR=/tmp/length-offer-vite \
+VITE_SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com \
+SNAPCHAIN_HTTP_URL=https://haatz.quilibrium.com HTTPS=true \
+  npx vite --config scripts/probe.vite.config.mjs --port 5216 --strictPort
+# then, from another shell:
+LENGTH_OFFER_SERVER=https://localhost:5216 node scripts/verify-length-offer.mjs
+```
+
+It signs in through the stubbed SIWF relay (real SIWE message), pairs an
+agent through the real `/~/agent` autopair (owner-session + agent API
+stubbed at `https://fiddy.fun/api/**`, the address the default build uses),
+and walks both worlds: with an agent, 23 checks — over the limit the row
+appears with both verbs, back under the limit it leaves, a double click on
+Tighten still makes exactly one call, the ask lives in the row with a
+fresh-guarded confirm, a raw dispatched click inside the window does not
+answer it, Cancel keeps the text, Replace swaps in the shorter text and
+wakes the Cast button, Split loads three reviewable queued casts with "Cast
+all", zero native dialogs, no uncaught page error; without an agent, no row
+at all and the agent service is never asked. **Measured 23/23 on `9deee89e`.**
