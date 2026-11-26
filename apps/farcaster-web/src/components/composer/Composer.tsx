@@ -41,6 +41,10 @@ import React, { useCallback, useRef, useState } from 'react';
 import { ScheduledCastComposerBanner } from '~/components/banners/ScheduledCastBanner';
 import { CastLengthCounter } from '~/components/composer/components/CastLengthCounter';
 import { ComposerChannelSelector } from '~/components/composer/components/ComposerChannelSelector';
+import {
+  ComposerLengthOffer,
+  type ComposerLengthOfferPhase,
+} from '~/components/composer/components/ComposerLengthOffer';
 import { ComposerParentCast } from '~/components/composer/components/ComposerParentCast';
 import {
   buildGifPreviewCacheEmbeds,
@@ -62,6 +66,13 @@ import { useUserAppContext } from '~/contexts/UserAppContextProvider';
 import { useCurrentUser } from '~/hooks/data/useCurrentUser';
 import { useOptimisticUploadCloudflareImage } from '~/hooks/data/useOptimisticUploadCloudflareImage';
 import { useNavigateToConversation } from '~/hooks/navigation/useNavigateToConversation';
+import {
+  ComposerAssist,
+  ComposerAssistError,
+  resolveComposerAgent,
+  splitCastText,
+  tightenCastText,
+} from '~/lib/composerAgentAssist';
 import {
   asSentence,
   nodeCannotAnswer,
@@ -1872,6 +1883,268 @@ const ComposerInner = React.forwardRef<
     );
 
     const shouldShowQueueCastButton = !wrappedMode && !isReply;
+
+    // -------------------------------------------------------------------------
+    // The over-limit offer (interaction ported from quilcast 0.115.0, MIT).
+    //
+    // A top-level cast past the byte limit stops being a dead end: Fiddy offers
+    // to tighten it into one cast or split it into a thread. The offer only
+    // exists when an agent can actually answer — resolved once, remembered for
+    // a minute — so a reader without one sees the plain length counter, never
+    // a dead button. Replies are validated before anything is applied, and the
+    // text is only replaced after the person answers the ask in the row itself
+    // (never a native `confirm()`, which shows nothing in the app shell).
+    const lengthOfferEligible = React.useMemo(
+      () =>
+        castTextByteLength > maxCastLength &&
+        !isReply &&
+        !wrappedMode &&
+        typeof intent?.activeDraftId === 'undefined' &&
+        typeof scheduledAt === 'undefined',
+      [
+        castTextByteLength,
+        intent?.activeDraftId,
+        isReply,
+        maxCastLength,
+        scheduledAt,
+        wrappedMode,
+      ],
+    );
+
+    const [assistState, setAssistState] = React.useState<
+      'checking' | 'ready' | 'unavailable'
+    >('checking');
+    const assistRef = React.useRef<ComposerAssist | null>(null);
+    React.useEffect(() => {
+      if (!lengthOfferEligible || assistState !== 'checking') {
+        return;
+      }
+      let cancelled = false;
+      resolveComposerAgent().then((assist) => {
+        if (cancelled) {
+          return;
+        }
+        assistRef.current = assist;
+        setAssistState(assist ? 'ready' : 'unavailable');
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [lengthOfferEligible, assistState]);
+
+    const [lengthOfferPhase, setLengthOfferPhase] =
+      React.useState<ComposerLengthOfferPhase>({ kind: 'offer' });
+    const [lengthOfferFresh, setLengthOfferFresh] = React.useState(false);
+    const askFreshTimerRef = React.useRef<number | undefined>(undefined);
+    React.useEffect(
+      () => () => window.clearTimeout(askFreshTimerRef.current),
+      [],
+    );
+    // The confirm sits where the offer's button was, so it waits a beat: the
+    // click that opened the question (a double click, a quick second tap)
+    // must not also answer it.
+    const enterLengthOfferAsk = React.useCallback(
+      (phase: Extract<ComposerLengthOfferPhase, { kind: 'ask' }>) => {
+        setLengthOfferPhase(phase);
+        setLengthOfferFresh(true);
+        window.clearTimeout(askFreshTimerRef.current);
+        askFreshTimerRef.current = window.setTimeout(
+          () => setLengthOfferFresh(false),
+          500,
+        );
+      },
+      [],
+    );
+
+    // The answers, held until the person confirms. Refs, not state: they are
+    // not rendered, and the ask row does not re-run for them.
+    const pendingTightenedTextRef = React.useRef<string | undefined>(undefined);
+    const pendingSplitPartsRef = React.useRef<string[] | undefined>(undefined);
+    // One request at a time, even for a double click on the offer's button.
+    const assistBusyRef = React.useRef(false);
+    // The text the call was made for, so a reply that lands after the person
+    // kept typing is not applied over their edits.
+    const lengthOfferTextRef = React.useRef<string>('');
+    lengthOfferTextRef.current = focusedCastText;
+
+    // Under the limit again (or a shape the offer cannot help): the row is
+    // gone and any pending answer is dropped.
+    React.useEffect(() => {
+      if (!lengthOfferEligible) {
+        setLengthOfferPhase({ kind: 'offer' });
+        pendingTightenedTextRef.current = undefined;
+        pendingSplitPartsRef.current = undefined;
+      }
+    }, [lengthOfferEligible]);
+
+    const replaceFocusedCastText = React.useCallback(
+      (nextText: string) => {
+        setQueuedCasts((oldQueuedCasts) =>
+          oldQueuedCasts.map((queuedCast) =>
+            queuedCast.localKey === focusedCastLocalKey
+              ? {
+                  ...queuedCast,
+                  // A push (not createWithContent) keeps the undo stack, so
+                  // the original text is one Cmd+Z away after a Replace.
+                  editorState: EditorState.push(
+                    queuedCast.editorState,
+                    ContentState.createFromText(nextText),
+                    'insert-fragment',
+                  ),
+                }
+              : queuedCast,
+          ),
+        );
+      },
+      [focusedCastLocalKey],
+    );
+
+    const loadSplitPartsIntoQueue = React.useCallback(
+      (parts: string[]) => {
+        setQueuedCasts((oldQueuedCasts) => {
+          const at = oldQueuedCasts.findIndex(
+            (queuedCast) => queuedCast.localKey === focusedCastLocalKey,
+          );
+          if (at < 0) {
+            return oldQueuedCasts;
+          }
+          const next = oldQueuedCasts.slice();
+          next[at] = {
+            ...next[at],
+            editorState: EditorState.push(
+              next[at].editorState,
+              ContentState.createFromText(parts[0] ?? ''),
+              'insert-fragment',
+            ),
+          };
+          next.splice(
+            at + 1,
+            0,
+            ...parts.slice(1).map((text) => ({
+              localKey: nextCastLocalKeyRef.current++,
+              ...emptyQueuedCast,
+              editorState: EditorState.createWithContent(
+                ContentState.createFromText(text),
+              ),
+            })),
+          );
+          return next;
+        });
+      },
+      [focusedCastLocalKey],
+    );
+
+    const runLengthOfferAction = React.useCallback(
+      async (action: 'tighten' | 'split') => {
+        const assist = assistRef.current;
+        // A double click (or a quick second tap) on the offer's button is one
+        // request, not two: the busy row takes the buttons away on the next
+        // paint, and this ref holds the line until that paint happens.
+        if (!assist || isSubmitting || assistBusyRef.current) {
+          return;
+        }
+        assistBusyRef.current = true;
+        setLengthOfferPhase({ kind: 'busy', action });
+        pendingTightenedTextRef.current = undefined;
+        pendingSplitPartsRef.current = undefined;
+        const textAtCall = focusedCastText;
+        try {
+          if (action === 'tighten') {
+            const nextText = await tightenCastText({
+              assist,
+              text: textAtCall,
+              byteLimit: maxCastLength,
+            });
+            if (lengthOfferTextRef.current !== textAtCall) {
+              // The person kept typing while Fiddy worked: the answer was for
+              // different text, so it is not applied.
+              setLengthOfferPhase({ kind: 'offer' });
+              return;
+            }
+            pendingTightenedTextRef.current = nextText;
+            enterLengthOfferAsk({
+              kind: 'ask',
+              action,
+              detail:
+                'Fiddy made it fit one cast. Replace your text with the shorter version?',
+              confirmLabel: 'Replace',
+            });
+          } else {
+            const maxParts = MAX_QUEUED_CASTS - queuedCasts.length + 1;
+            const parts = await splitCastText({
+              assist,
+              text: textAtCall,
+              byteLimit: maxCastLength,
+              maxParts,
+            });
+            if (lengthOfferTextRef.current !== textAtCall) {
+              setLengthOfferPhase({ kind: 'offer' });
+              return;
+            }
+            pendingSplitPartsRef.current = parts;
+            enterLengthOfferAsk({
+              kind: 'ask',
+              action,
+              detail: `Fiddy split your cast into ${parts.length} — check the breaks before posting.`,
+              confirmLabel: 'Add to thread',
+            });
+          }
+        } catch (e) {
+          setLengthOfferPhase({
+            kind: 'error',
+            sentence:
+              e instanceof ComposerAssistError
+                ? e.ownerSentence
+                : 'Fiddy could not do that just now. Your text is unchanged.',
+          });
+        } finally {
+          assistBusyRef.current = false;
+        }
+      },
+      [
+        enterLengthOfferAsk,
+        focusedCastText,
+        isSubmitting,
+        maxCastLength,
+        queuedCasts.length,
+      ],
+    );
+
+    const confirmLengthOffer = React.useCallback(() => {
+      if (lengthOfferFresh || lengthOfferPhase.kind !== 'ask') {
+        return;
+      }
+      const { action } = lengthOfferPhase;
+      if (action === 'tighten') {
+        const nextText = pendingTightenedTextRef.current;
+        if (nextText === undefined) {
+          setLengthOfferPhase({ kind: 'offer' });
+          return;
+        }
+        replaceFocusedCastText(nextText);
+      } else {
+        const parts = pendingSplitPartsRef.current;
+        if (parts === undefined) {
+          setLengthOfferPhase({ kind: 'offer' });
+          return;
+        }
+        loadSplitPartsIntoQueue(parts);
+      }
+      pendingTightenedTextRef.current = undefined;
+      pendingSplitPartsRef.current = undefined;
+      // The replaced text fits (or the queue holds the parts), so eligibility
+      // flips and the row leaves on its own; resetting here keeps the ask from
+      // flashing once more on a slow paint.
+      setLengthOfferPhase({ kind: 'offer' });
+    }, [
+      lengthOfferFresh,
+      lengthOfferPhase,
+      loadSplitPartsIntoQueue,
+      replaceFocusedCastText,
+    ]);
+
+    const showLengthOffer = lengthOfferEligible && assistState === 'ready';
+
     const canQueueCast =
       (focusedCastText.length > 0 ||
         (focusedCastEmbedUrls && focusedCastEmbedUrls.length > 0)) &&
@@ -2027,6 +2300,21 @@ const ComposerInner = React.forwardRef<
           <div className="flex flex-col">
             {typeof scheduledAt !== 'undefined' && (
               <ScheduledCastComposerBanner scheduledAtDate={scheduledAt} />
+            )}
+            {showLengthOffer && (
+              <ComposerLengthOffer
+                phase={lengthOfferPhase}
+                fresh={lengthOfferFresh}
+                onTighten={() => {
+                  void runLengthOfferAction('tighten');
+                }}
+                onSplit={() => {
+                  void runLengthOfferAction('split');
+                }}
+                onConfirm={confirmLengthOffer}
+                onCancel={() => setLengthOfferPhase({ kind: 'offer' })}
+                onRetry={() => setLengthOfferPhase({ kind: 'offer' })}
+              />
             )}
             <div className="flex flex-row justify-between border-t px-4 pt-2 border-default">
               <div className="flex flex-row items-center gap-x-2">
